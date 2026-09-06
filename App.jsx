@@ -162,8 +162,17 @@ function seedAblage() {
 }
 
 const VERSORGER = [
-  "E.ON Energie", "EnBW", "Vattenfall", "RWE", "Stadtwerke Saarbrücken", "SWT Trier",
-  "Pfalzwerke", "Rheinenergie", "MVV Energie", "Entega", "Lichtblick", "Anderer Versorger",
+  { id: "v-eon", name: "E.ON Energie", notiz: "Rahmenvertrag, Abrechnung monatlich" },
+  { id: "v-enbw", name: "EnBW", notiz: "" },
+  { id: "v-vattenfall", name: "Vattenfall", notiz: "" },
+  { id: "v-rwe", name: "RWE", notiz: "" },
+  { id: "v-swsb", name: "Stadtwerke Saarbrücken", notiz: "regionaler Schwerpunkt Saarland" },
+  { id: "v-swt", name: "SWT Trier", notiz: "" },
+  { id: "v-pfalz", name: "Pfalzwerke", notiz: "gute Konditionen bei RLM" },
+  { id: "v-rhein", name: "Rheinenergie", notiz: "" },
+  { id: "v-mvv", name: "MVV Energie", notiz: "" },
+  { id: "v-entega", name: "Entega", notiz: "" },
+  { id: "v-lichtblick", name: "Lichtblick", notiz: "Ökostromprodukte" },
 ];
 
 const FEHLGRUENDE = [
@@ -209,7 +218,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v1.7 · 06.09.2026 · Dateien auf iPhone";
+const VERSION = "v2.0 · 06.09.2026 · Zielpreis und Protokoll";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -284,6 +293,74 @@ const fruehesterBeginn = () => {
 const datum = (s) => (s ? s.split("-").reverse().join(".") : "–");
 const uid = () => Math.random().toString(36).slice(2, 9);
 
+/* Erzeugt ein mehrseitiges PDF aus Textzeilen */
+function erzeugePdf(dateiname, titel, zeilen) {
+  const sauber = (t) =>
+    String(t).replace(/[\\()]/g, "").split("").filter((z) => z.charCodeAt(0) < 256).join("");
+  const umbrechen = (t, breite) => {
+    const worte = sauber(t).split(" ");
+    const raus = [];
+    let zeile = "";
+    worte.forEach((w) => {
+      if ((zeile + " " + w).trim().length > breite) { raus.push(zeile); zeile = w; }
+      else zeile = (zeile + " " + w).trim();
+    });
+    raus.push(zeile);
+    return raus;
+  };
+
+  const alle = [];
+  zeilen.forEach((z) => {
+    const text = typeof z === "string" ? z : z.text;
+    const gross = typeof z === "object" && z.gross;
+    umbrechen(text, gross ? 60 : 92).forEach((t, i) => alle.push({ text: t, gross: gross && i === 0 }));
+  });
+
+  const proSeite = 46;
+  const seiten = [];
+  for (let i = 0; i < alle.length; i += proSeite) seiten.push(alle.slice(i, i + proSeite));
+  if (!seiten.length) seiten.push([]);
+
+  const inhalte = seiten.map((zs, nr) => {
+    let y = 790;
+    let str = "BT /F1 16 Tf 55 812 Td (" + sauber(titel) + ") Tj ET\n";
+    zs.forEach((z) => {
+      y -= z.gross ? 22 : 15;
+      str += "BT /F1 " + (z.gross ? 12 : 9.5) + " Tf 55 " + y + " Td (" + z.text + ") Tj ET\n";
+    });
+    str += "BT /F1 8 Tf 55 40 Td (Seite " + (nr + 1) + " von " + seiten.length + ") Tj ET\n";
+    return str;
+  });
+
+  const kids = seiten.map((_, i) => 4 + i * 2 + " 0 R").join(" ");
+  const objekte = [
+    "<</Type/Catalog/Pages 2 0 R>>",
+    "<</Type/Pages/Kids[" + kids + "]/Count " + seiten.length + ">>",
+    "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>",
+  ];
+  inhalte.forEach((c, i) => {
+    objekte.push("<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents " +
+      (5 + i * 2) + " 0 R/Resources<</Font<</F1 3 0 R>>>>>>");
+    objekte.push("<</Length " + c.length + ">>\nstream\n" + c + "\nendstream");
+  });
+
+  let pdf = "%PDF-1.4\n";
+  const stellen = [];
+  objekte.forEach((o, i) => {
+    stellen.push(pdf.length);
+    pdf += i + 1 + " 0 obj\n" + o + "\nendobj\n";
+  });
+  const xref = pdf.length;
+  pdf += "xref\n0 " + (objekte.length + 1) + "\n0000000000 65535 f \n";
+  stellen.forEach((st) => { pdf += String(st).padStart(10, "0") + " 00000 n \n"; });
+  pdf += "trailer\n<</Size " + (objekte.length + 1) + "/Root 1 0 R>>\nstartxref\n" + xref + "\n%%EOF";
+
+  let b64 = "";
+  try { b64 = btoa(pdf); } catch (e) { return null; }
+  return { name: dateiname, typ: "application/pdf", groesse: pdf.length,
+           url: "data:application/pdf;base64," + b64 };
+}
+
 /* Erzeugt ein kleines, gültiges PDF als Datenlink – nur für die Demodateien */
 function demoPdf(name, zeilen) {
   const text = (zeilen || ["EGC-Energie", name])
@@ -348,6 +425,8 @@ const leereAnfrage = (user) => ({
     ansprechpartner: "", email: "", telefon: "",
   },
   bemerkungVertrieb: "",
+  zielpreis: "",
+  zielpreisNotiz: "",
   lieferstellen: [leereLieferstelle("strom")],
   laufzeit: 24,
   laufzeitArt: "monate",
@@ -1523,7 +1602,7 @@ function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrec
 /* ------------------------------------------------------------------ */
 /*  Anfrage-Detail                                                     */
 /* ------------------------------------------------------------------ */
-function Detail({ a, user, mitarbeiter, onZurueck, onUpdate, onBearbeiten }) {
+function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbeiten }) {
   const [vars, setVars] = useState(
     a.kalkulation && a.kalkulation.varianten && a.kalkulation.varianten.length
       ? a.kalkulation.varianten
@@ -1610,6 +1689,56 @@ function Detail({ a, user, mitarbeiter, onZurueck, onUpdate, onBearbeiten }) {
       verlauf: [...a.verlauf, { d: heute(), t: "Geschäftsführung hat geantwortet, zurück an Kalkulation", w: user.name }],
     });
     onZurueck();
+  };
+
+  /* Zielpreis bei Spotmarkt */
+  const [zielpreis, setZielpreis] = useState(a.zielpreis || "");
+  const [zielNotiz, setZielNotiz] = useState(a.zielpreisNotiz || "");
+  const istSpot =
+    a.produkt === "Spotmarkt" || a.produktGas === "Spotmarkt" ||
+    varianten(a).some((v) => v.produkt === "Spotmarkt");
+  const darfZielpreis = istPartner || ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
+
+  /* Verlauf als PDF */
+  const darfProtokoll = ["Kalkulation", "Vertragsmanagement", "Geschäftsführung"].includes(user.rolle);
+  const protokollLaden = () => {
+    const z = [];
+    z.push({ text: a.kunde.firma || "Vorgang", gross: true });
+    z.push(a.id + "  ·  angelegt " + datum(a.angelegt) + "  ·  " + STATUS[a.status].label);
+    z.push("Vertriebspartner: " + a.partnerName + " (Team " + a.team + ")");
+    if (a.kunde.branche) z.push("Branche: " + a.kunde.branche);
+    z.push("Anschrift: " + [a.kunde.strasse, a.kunde.plz + " " + a.kunde.ort].filter(Boolean).join(", "));
+    z.push("Ansprechpartner: " + [a.kunde.ansprechpartner, a.kunde.telefon, a.kunde.email].filter(Boolean).join("  ·  "));
+    z.push("Gesamtmenge: " + num(verbrauchGesamt(a)) + " kWh");
+    if (a.zielpreis) z.push("Zielpreis Spotmarkt: " + a.zielpreis + " ct/kWh"
+      + (a.zielpreisNotiz ? "  ·  " + a.zielpreisNotiz : ""));
+    if (a.bestaetigung) {
+      z.push({ text: "Versorgerbestätigung", gross: true });
+      z.push("Versorger: " + a.bestaetigung.versorger);
+      z.push("Bestätigte Menge: " + num(bestaetigteMenge(a)) + " kWh");
+      z.push("Gesamtaufschlag: " + num(a.bestaetigung.aufschlag, 3) + " ct/kWh");
+      if (parseFloat(a.bestaetigung.bonus) > 0)
+        z.push("Bonus: " + eur(parseFloat(a.bestaetigung.bonus)) + " ("
+          + (a.bestaetigung.bonusArt === "jaehrlich" ? "pro Lieferjahr" : "einmalig") + ")");
+    }
+
+    z.push({ text: "Verlauf", gross: true });
+    if (!a.verlauf.length) z.push("keine Einträge");
+    a.verlauf.forEach((v) => z.push(datum(v.d) + "   " + v.t + "   (" + v.w + ")"));
+
+    z.push({ text: "Nachrichten", gross: true });
+    if (!(a.nachrichten || []).length) z.push("keine Nachrichten");
+    (a.nachrichten || []).forEach((n) => {
+      z.push(datum(n.datum) + ", " + n.zeit + " Uhr   " + n.von + " (" + n.rolle + ")");
+      z.push("     " + n.text);
+    });
+
+    z.push({ text: " ", gross: false });
+    z.push("Erstellt am " + datum(heute()) + " um " + jetzt() + " Uhr von " + user.name + ", EGC-Energie Vertriebsportal");
+
+    const pdf = erzeugePdf("verlauf_" + a.id + ".pdf",
+      "Vorgangsprotokoll " + a.id, z);
+    if (pdf) dateiLaden(pdf);
   };
 
   /* Nachrichtenverlauf am Vorgang */
@@ -1822,6 +1951,45 @@ function Detail({ a, user, mitarbeiter, onZurueck, onUpdate, onBearbeiten }) {
               </div>
             </div>
           </div>
+          {/* Zielpreis bei Spotmarkt */}
+          {istSpot && (
+            <div className="rounded p-4"
+                 style={{ background: C.card, border: "1px solid " + (a.zielpreis ? C.gruen : C.line) }}>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-sm">Zielpreis Spotmarkt</span>
+                {a.zielpreis && (
+                  <span className="text-lg" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {a.zielpreis} ct/kWh
+                  </span>
+                )}
+              </div>
+              <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "60ch" }}>
+                Preis, zu dem für den Kunden fixiert werden soll. Wird in der Kundeninfo angezeigt.
+              </p>
+
+              {darfZielpreis ? (
+                <>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <Feld label="Zielpreis in ct/kWh" value={zielpreis} onChange={setZielpreis}
+                      placeholder="z. B. 9,80" />
+                    <Feld label="Notiz" value={zielNotiz} onChange={setZielNotiz}
+                      placeholder="Tranche, Zeitfenster, Absprache mit dem Kunden" />
+                  </div>
+                  <div className="mt-3">
+                    <Btn variante="hell" icon={Check}
+                      onClick={() => onUpdate({ ...a, zielpreis, zielpreisNotiz: zielNotiz })}>
+                      Zielpreis speichern
+                    </Btn>
+                  </div>
+                </>
+              ) : a.zielpreis ? (
+                a.zielpreisNotiz && <p className="text-sm">{a.zielpreisNotiz}</p>
+              ) : (
+                <p className="text-sm" style={{ color: C.muted }}>Noch kein Zielpreis hinterlegt.</p>
+              )}
+            </div>
+          )}
+
           {/* Lieferstellen */}
           <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="px-4 py-3 text-sm" style={{ borderBottom: "1px solid " + C.line }}>
@@ -2188,7 +2356,9 @@ function Detail({ a, user, mitarbeiter, onZurueck, onUpdate, onBearbeiten }) {
                   <Select label="Versorger" value={best.versorger}
                     onChange={(v) => setBest({ ...best, versorger: v })}
                     options={[{ value: "", label: "Bitte wählen" },
-                      ...VERSORGER.map((x) => ({ value: x, label: x }))]} />
+                      ...(versorger || []).map((x) => ({ value: x.name, label: x.name })),
+                      ...((versorger || []).some((x) => x.name === best.versorger) || !best.versorger
+                        ? [] : [{ value: best.versorger, label: best.versorger }])]} />
 
                   <div className="space-y-3">
                     {a.lieferstellen.map((l) => (
@@ -2599,6 +2769,9 @@ function Detail({ a, user, mitarbeiter, onZurueck, onUpdate, onBearbeiten }) {
             <Zeile k="Telefon" v={a.kunde.telefon} />
             <Zeile k="E-Mail" v={a.kunde.email} />
             <Zeile k="Branche" v={a.kunde.branche} />
+            {istSpot && (
+              <Zeile k="Zielpreis Spotmarkt" v={a.zielpreis ? a.zielpreis + " ct/kWh" : "offen"} />
+            )}
             <Zeile k="Anschrift" v={a.kunde.plz + " " + a.kunde.ort} />
           </div>
 
@@ -2619,7 +2792,15 @@ function Detail({ a, user, mitarbeiter, onZurueck, onUpdate, onBearbeiten }) {
           </div>
 
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
-            <div className="text-sm mb-3">Verlauf</div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm">Verlauf</span>
+              {darfProtokoll && (
+                <button onClick={protokollLaden} className="text-xs px-2 py-1 rounded"
+                        style={{ border: "1px solid " + C.line, color: C.strom }}>
+                  als PDF
+                </button>
+              )}
+            </div>
             {a.verlauf.length === 0 && <p className="text-sm" style={{ color: C.muted }}>Noch keine Einträge.</p>}
             {a.verlauf.map((v, i) => (
               <div key={i} className="flex gap-3 py-2 text-sm" style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
@@ -3406,15 +3587,23 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
   const [tag, setTag] = useState(heute());
   const [quelle, setQuelle] = useState("alle");
 
-  const darfAnlegen = ["Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
+  /* Sehen alle Leads: Leitung und Geschäftsführung.
+     Anlegen darf jeder im Vertrieb, zuweisen an andere nur ab Teamleiter aufwärts. */
+  const sichtAlle = ["Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
+  const darfAnlegen = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb", "Geschäftsführung"]
+    .includes(user.rolle);
+  const darfZuweisen = ["Teamleiter", "Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
   const meineIds = user.rolle === "Teamleiter"
     ? [user.id, ...strukturUnter(user.id, mitarbeiter).map((m) => m.id)]
     : [user.id];
-  const eigene = darfAnlegen ? leads : leads.filter((l) => meineIds.includes(l.zugewiesen));
+  const eigene = sichtAlle ? leads : leads.filter((l) => meineIds.includes(l.zugewiesen));
   const sichtbar = eigene.filter((l) =>
     imZeitraum(l.angelegt, zeitraum, tag) && (quelle === "alle" || l.quelle === quelle));
-  const empfaenger = mitarbeiter.filter((m) =>
-    ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle) && m.status === "aktiv");
+  const empfaenger = (sichtAlle
+    ? mitarbeiter.filter((m) =>
+        ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle))
+    : [user, ...strukturUnter(user.id, mitarbeiter)]
+  ).filter((m) => m.status === "aktiv");
   const lead = leads.find((l) => l.id === auswahl);
 
   const setz = (id, aend) => setLeads(leads.map((l) => {
@@ -3432,6 +3621,14 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
   const speichern = () => {
     const vorhanden = leads.some((l) => l.id === entwurf.id);
     const fertig = { ...entwurf };
+    /* Wer nicht zuweisen darf, legt Leads für sich selbst an */
+    if (!darfZuweisen && !fertig.zugewiesen) {
+      fertig.zugewiesen = user.id;
+      fertig.zugewiesenVon = user.name;
+      fertig.zugewiesenAm = heute();
+      fertig.gelesen = true;
+    }
+    if (fertig.zugewiesen === user.id) fertig.gelesen = true;
     if (fertig.zugewiesen && !fertig.zugewiesenAm) {
       fertig.zugewiesenVon = user.name;
       fertig.zugewiesenAm = heute();
@@ -3544,13 +3741,25 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
 
           <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="text-sm mb-4">Zuweisung</div>
+            {!darfZuweisen ? (
+              <p className="text-sm" style={{ color: C.muted }}>
+                Der Lead läuft auf dich. Teamleiter und Vertriebsleitung sehen ihn in ihren Übersichten mit.
+              </p>
+            ) : (
             <Select label="Lead zuweisen an" value={entwurf.zugewiesen || ""}
               onChange={(v) => setF("zugewiesen", v || null)}
               options={[{ value: "", label: "Noch nicht zuweisen" },
-                        ...empfaenger.map((m) => ({ value: m.id, label: m.name + " · " + m.rolle + " · Team " + m.team }))]} />
-            <p className="text-xs mt-2" style={{ color: C.muted }}>
-              Der Empfänger sieht den Lead sofort in seiner Übersicht, markiert als neu.
-            </p>
+                        ...empfaenger.map((m) => ({
+                          value: m.id,
+                          label: (m.id === user.id ? m.name + " (ich)" : m.name) + " · " + m.rolle + " · Team " + m.team,
+                        }))]} />
+            )}
+            {darfZuweisen && (
+              <p className="text-xs mt-2" style={{ color: C.muted }}>
+                Der Empfänger sieht den Lead sofort in seiner Übersicht, markiert als neu.
+                {!sichtAlle ? " Du kannst innerhalb deiner Struktur zuweisen." : ""}
+              </p>
+            )}
           </div>
 
           <div className="flex gap-2">
@@ -3637,7 +3846,9 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
                 <Btn icon={Plus} onClick={() => { setz(lead.id, { status: "angebot" }); onUebernehmen(lead); }}>
                   Angebotsanfrage aus Lead erstellen
                 </Btn>
-                {darfAnlegen && <Btn variante="hell" onClick={() => setEntwurf(lead)}>Lead bearbeiten</Btn>}
+                {(sichtAlle || lead.zugewiesen === user.id) && (
+                  <Btn variante="hell" onClick={() => setEntwurf(lead)}>Lead bearbeiten</Btn>
+                )}
               </div>
             </div>
           </div>
@@ -3703,7 +3914,7 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
             <span style={{ fontVariantNumeric: "tabular-nums" }}>{num(menge)} kWh</span>
             {l.terminDatum && <span>{datum(l.terminDatum)}</span>}
           </div>
-          {inhaber && darfAnlegen && (
+          {inhaber && (sichtAlle || inhaber.id !== user.id) && (
             <div className="flex items-center gap-2 mt-2 pt-2" style={{ borderTop: "1px solid " + C.line }}>
               <Avatar m={inhaber} size={20} />
               <span className="text-xs truncate" style={{ color: C.muted }}>{inhaber.name}</span>
@@ -3741,7 +3952,11 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
           ))}
         </div>
         {darfAnlegen && (
-          <Btn icon={Plus} onClick={() => setEntwurf(leererLead())}>Lead einspielen</Btn>
+          <Btn icon={Plus} onClick={() => setEntwurf({
+            ...leererLead(),
+            quelle: darfZuweisen ? "Kaltakquise" : "Eigenakquise",
+            zugewiesen: darfZuweisen ? null : user.id,
+          })}>Lead anlegen</Btn>
         )}
       </div>
 
@@ -3758,7 +3973,7 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
       </div>
 
       {modus === "auswertung" ? (
-        <LeadAuswertung leads={sichtbar} mitarbeiter={mitarbeiter} user={user} darfAlles={darfAnlegen} />
+        <LeadAuswertung leads={sichtbar} mitarbeiter={mitarbeiter} user={user} darfAlles={sichtAlle} />
       ) : sichtbar.length === 0 ? (
         <div className="rounded p-8 text-center text-sm"
              style={{ border: "1px dashed " + C.line, color: C.muted }}>
@@ -3782,7 +3997,7 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
                   </div>
                   <div className="text-xs" style={{ color: C.muted }}>
                     {l.ort} · {l.quelle} · eingespielt {datum(l.angelegt)}
-                    {darfAnlegen && inhaber ? " · " + inhaber.name : ""}
+                    {inhaber && inhaber.id !== user.id ? " · " + inhaber.name : ""}
                   </div>
                 </div>
                 <div className="text-sm text-right w-28" style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -3957,6 +4172,74 @@ function LeadAuswertung({ leads, mitarbeiter, user, darfAlles }) {
         Abschlüsse ins Verhältnis zu wahrgenommenen Terminen. Die Dauer misst die Tage vom Einspielen
         des Leads bis zum Verschieben in die Spalte Auftrag.
       </p>
+    </div>
+  );
+}
+
+/* Versorger, mit denen zusammengearbeitet wird */
+function Versorgerliste({ versorger, setVersorger, user }) {
+  const [name, setName] = useState("");
+  const [notiz, setNotiz] = useState("");
+  const darfAendern = user.rolle === "Geschäftsführung";
+
+  const anlegen = () => {
+    const sauber = name.trim();
+    if (!sauber) return;
+    if (versorger.some((v) => v.name.toLowerCase() === sauber.toLowerCase())) return;
+    setVersorger([...versorger, { id: "v-" + uid(), name: sauber, notiz: notiz.trim() }]);
+    setName(""); setNotiz("");
+  };
+
+  return (
+    <div>
+      <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "60ch" }}>
+        Diese Liste erscheint beim Kalkulationsteam im Auswahlfeld, wenn ein Auftrag bestätigt wird.
+        {darfAendern ? "" : " Ändern darf sie nur die Geschäftsführung."}
+      </p>
+
+      {darfAendern && (
+        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Feld label="Versorger" value={name} onChange={setName} placeholder="Name des Versorgers" />
+            <Feld label="Notiz" value={notiz} onChange={setNotiz}
+              placeholder="Konditionen, Ansprechpartner, Besonderheiten" />
+          </div>
+          <div className="mt-4">
+            <Btn icon={Plus} onClick={anlegen} disabled={!name.trim()}>Versorger anlegen</Btn>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <div className="px-4 py-3 text-sm" style={{ borderBottom: "1px solid " + C.line }}>
+          {versorger.length} Versorger
+        </div>
+        {versorger.length === 0 && (
+          <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>Noch kein Versorger angelegt.</div>
+        )}
+        {versorger.map((v, i) => (
+          <div key={v.id} className="flex items-center gap-4 px-4 py-3"
+               style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm">{v.name}</div>
+              {v.notiz && <div className="text-xs" style={{ color: C.muted }}>{v.notiz}</div>}
+            </div>
+            {darfAendern && (
+              <button onClick={() => setVersorger(versorger.filter((x) => x.id !== v.id))}
+                style={{ color: C.muted }} title="Entfernen">
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {darfAendern && (
+        <p className="text-xs mt-4" style={{ color: C.muted, maxWidth: "60ch" }}>
+          Ein entfernter Versorger verschwindet nur aus der Auswahl. Bereits bestätigte Aufträge
+          behalten ihren Eintrag, damit die Historie stimmt.
+        </p>
+      )}
     </div>
   );
 }
@@ -4490,6 +4773,7 @@ export default function App() {
   const [mitarbeiter, setMitarbeiter] = useState(USERS);
   const [leads, setLeads] = useState(seedLeads());
   const [ablage, setAblage] = useState(seedAblage());
+  const [versorger, setVersorger] = useState(VERSORGER);
   const [userId, setUserId] = useState(null);
   const [registriert, setRegistriert] = useState(null);
   const [ansicht, setAnsicht] = useState("anfragen");
@@ -4518,6 +4802,10 @@ export default function App() {
           const d = await window.storage.get("egc-crm:ablage");
           if (d && d.value) setAblage(JSON.parse(d.value));
         } catch (e4) { /* Standardunterlagen */ }
+        try {
+          const vs = await window.storage.get("egc-crm:versorger");
+          if (vs && vs.value) setVersorger(JSON.parse(vs.value));
+        } catch (e5) { /* Standardversorger */ }
       } catch (e) { /* erster Start: Demodaten */ }
       setGeladen(true);
     })();
@@ -4531,9 +4819,10 @@ export default function App() {
         await window.storage.set("egc-crm:mitarbeiter", JSON.stringify(mitarbeiter));
         await window.storage.set("egc-crm:leads", JSON.stringify(leads));
         await window.storage.set("egc-crm:ablage", JSON.stringify(ablage));
+        await window.storage.set("egc-crm:versorger", JSON.stringify(versorger));
       } catch (e) { /* Speichern nicht verfügbar */ }
     })();
-  }, [anfragen, mitarbeiter, leads, ablage, geladen]);
+  }, [anfragen, mitarbeiter, leads, ablage, versorger, geladen]);
 
   const speichern = (a) =>
     setAnfragen((prev) => (prev.some((x) => x.id === a.id)
@@ -4592,6 +4881,7 @@ export default function App() {
       { id: "eingang", label: "Eingang", icon: Calculator },
       { id: "versorger", label: "Versorgerbestätigung ausstehend", icon: FileSignature },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
     Teamleiter: [
@@ -4614,6 +4904,7 @@ export default function App() {
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
       { id: "provisionen", label: "Provisionen", icon: Wallet },
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
+      { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
       { id: "meine-daten", label: "Meine Stammdaten", icon: FileSignature },
     ],
@@ -4631,6 +4922,7 @@ export default function App() {
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
+      { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
   }[rolle];
@@ -4687,7 +4979,7 @@ export default function App() {
     inhalt = <MeineStammdaten user={user} mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} />;
   } else if (aktuell) {
     inhalt = (
-      <Detail a={aktuell} user={user} mitarbeiter={mitarbeiter}
+      <Detail a={aktuell} user={user} mitarbeiter={mitarbeiter} versorger={versorger}
         onZurueck={() => setOffen(null)} onUpdate={(a) => speichern(a)}
         onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }} />
     );
@@ -4769,6 +5061,8 @@ export default function App() {
         onUebernehmen={ausLead}
         onGelesen={(id) => setLeads(leads.map((l) => (l.id === id ? { ...l, gelesen: true } : l)))} />
     );
+  } else if (ansicht === "versorgerliste") {
+    inhalt = <Versorgerliste versorger={versorger} setVersorger={setVersorger} user={user} />;
   } else if (ansicht === "unterlagen") {
     inhalt = <Ablage ablage={ablage} setAblage={setAblage} user={user} />;
   } else if (ansicht === "partner") {
