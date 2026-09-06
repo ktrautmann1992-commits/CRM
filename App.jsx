@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Zap, Flame, Plus, Send, ArrowLeft, Upload, FileText, Check, X,
   AlertTriangle, Users, Calculator, FileSignature, BarChart3,
-  Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw,
+  Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw, Menu,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -209,7 +209,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v1.5 · 06.09.2026 · Nachrichten oben im Vorgang";
+const VERSION = "v1.7 · 06.09.2026 · Dateien auf iPhone";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -834,6 +834,39 @@ function dateiLesen(file, fertig) {
   r.readAsDataURL(file);
 }
 
+/* Safari blockiert Links auf Daten-URLs. Deshalb wird die Datei in ein
+   Blob-Objekt umgewandelt und darüber geöffnet oder gespeichert. */
+function blobVon(datei) {
+  const teile = String(datei.url || "").split(",");
+  const typ = (teile[0].match(/data:([^;]+)/) || [])[1] || "application/octet-stream";
+  const roh = atob(teile[1] || "");
+  const feld = new Uint8Array(roh.length);
+  for (let i = 0; i < roh.length; i++) feld[i] = roh.charCodeAt(i);
+  return new Blob([feld], { type: typ });
+}
+
+function dateiOeffnen(datei) {
+  try {
+    const url = URL.createObjectURL(blobVon(datei));
+    const fenster = window.open(url, "_blank");
+    if (!fenster) location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { /* Datei nicht lesbar */ }
+}
+
+function dateiLaden(datei) {
+  try {
+    const url = URL.createObjectURL(blobVon(datei));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = datei.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { /* Datei nicht lesbar */ }
+}
+
 const kb = (n) => (!n ? "" : n > 1048576 ? num(n / 1048576, 1) + " MB" : num(n / 1024, 0) + " KB");
 
 /* Anzeige einer Datei mit Öffnen und Herunterladen */
@@ -864,10 +897,10 @@ function DateiChip({ datei, label, klein }) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded text-sm" style={stil}>
       {inhalt}
-      <a href={datei.url} target="_blank" rel="noreferrer" className="text-xs px-2 py-0.5 rounded"
-         style={{ border: "1px solid " + C.line, background: "#fff", color: C.strom }}>öffnen</a>
-      <a href={datei.url} download={datei.name} className="text-xs px-2 py-0.5 rounded"
-         style={{ border: "1px solid " + C.line, background: "#fff", color: C.strom }}>laden</a>
+      <button onClick={() => dateiOeffnen(datei)} className="text-xs px-2 py-1 rounded"
+              style={{ border: "1px solid " + C.line, background: "#fff", color: C.strom }}>öffnen</button>
+      <button onClick={() => dateiLaden(datei)} className="text-xs px-2 py-1 rounded"
+              style={{ border: "1px solid " + C.line, background: "#fff", color: C.strom }}>laden</button>
     </div>
   );
 }
@@ -4038,11 +4071,18 @@ function Ablage({ ablage, setAblage, user, start }) {
                     <Send size={14} /> Öffnen
                   </a>
                 ) : d.datei && d.datei.url ? (
-                  <a href={d.datei.url} download={d.datei.name}
-                     className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded"
-                     style={{ background: C.ink, color: "#fff" }}>
-                    <Upload size={14} style={{ transform: "rotate(180deg)" }} /> Herunterladen
-                  </a>
+                  <div className="flex gap-2">
+                    <button onClick={() => dateiOeffnen(d.datei)}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded"
+                            style={{ background: C.ink, color: "#fff" }}>
+                      <FileText size={14} /> Öffnen
+                    </button>
+                    <button onClick={() => dateiLaden(d.datei)}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded"
+                            style={{ border: "1px solid " + C.line, color: C.text }}>
+                      <Upload size={14} style={{ transform: "rotate(180deg)" }} /> Speichern
+                    </button>
+                  </div>
                 ) : (
                   <span className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded"
                         style={{ border: "1px solid " + C.line, color: C.muted }}>
@@ -4457,6 +4497,7 @@ export default function App() {
   const [tab, setTab] = useState("offen");
   const [entwurf, setEntwurf] = useState(null);
   const [geladen, setGeladen] = useState(false);
+  const [menu, setMenu] = useState(false);
 
   const user = mitarbeiter.find((u) => u.id === userId) || null;
 
@@ -4741,60 +4782,77 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row"
          style={{ background: C.paper, color: C.text, fontFamily: FONT }}>
-      {/* Seitenleiste */}
-      <aside className="lg:w-64 shrink-0 px-4 py-5" style={{ background: C.ink, color: "#fff" }}>
-        <div className="mb-6">
-          <img src={LOGO} alt="EGC Energie" className="w-40 lg:w-48" />
-          <div className="text-xs mt-2" style={{ color: "#8B9BB0" }}>Vertriebsportal</div>
-        </div>
+      {/* Seitenleiste, auf dem Handy als einklappbare Kopfzeile */}
+      <aside className="lg:w-64 shrink-0 lg:px-4 lg:py-5" style={{ background: C.ink, color: "#fff" }}>
+        {/* Kopfzeile mobil */}
+        <div className="flex items-center gap-3 px-4 py-3 lg:px-0 lg:py-0 lg:block lg:mb-6">
+          <img src={LOGO} alt="EGC Energie" className="w-28 lg:w-48" />
+          <div className="hidden lg:block text-xs mt-2" style={{ color: "#8B9BB0" }}>Vertriebsportal</div>
 
-        <div className="flex items-center gap-3 mb-3">
-          <Avatar m={user} size={38} />
-          <div className="flex-1 min-w-0">
-            <div className="text-sm truncate">{user.name}</div>
-            <div className="text-xs truncate" style={{ color: "#8B9BB0" }}>{user.rolle}</div>
-          </div>
-          <button onClick={() => setUserId(null)} title="Abmelden" style={{ color: "#8B9BB0" }}>
-            <ArrowLeft size={16} />
+          <span className="flex-1 lg:hidden" />
+
+          <button onClick={() => setMenu(!menu)} className="lg:hidden flex items-center gap-2 px-3 py-2 rounded"
+            style={{ background: C.inkSoft, color: "#fff" }}>
+            {menu ? <X size={18} /> : <Menu size={18} />}
+            <span className="text-sm">{menu ? "Schließen" : "Menü"}</span>
+            {!menu && neueLeads > 0 && (
+              <span className="text-xs px-1.5 rounded-full"
+                    style={{ background: C.gruen, color: "#0A1626" }}>{neueLeads}</span>
+            )}
           </button>
         </div>
 
-        <select value={userId} onChange={(e) => setUserId(e.target.value)}
-          className="w-full mb-6 px-3 py-2 text-xs rounded outline-none"
-          style={{ background: C.inkSoft, color: "#8B9BB0", border: "1px solid " + C.inkLine }}>
-          {mitarbeiter.map((u) => (
-            <option key={u.id} value={u.id}>Demo-Ansicht: {u.rolle} · {u.name}</option>
-          ))}
-        </select>
-
-        <nav className="flex lg:block gap-1 flex-wrap">
-          {(gesperrt ? [] : NAV).map((n) => (
-            <button key={n.id}
-              onClick={() => { setAnsicht(n.id); setOffen(null); setEntwurf(null); }}
-              className="flex items-center gap-2.5 px-3 py-2 rounded text-sm w-full lg:w-full"
-              style={{
-                background: ansicht === n.id && !offen ? C.inkSoft : "transparent",
-                color: ansicht === n.id && !offen ? "#fff" : "#93A4B8",
-              }}>
-              <n.icon size={15} />
-              <span className="flex-1 text-left">{n.label}</span>
-              {n.badge > 0 && (
-                <span className="text-xs px-1.5 rounded-full"
-                      style={{ background: C.gruen, color: "#0A1626" }}>{n.badge}</span>
-              )}
+        {/* Alles Weitere: mobil nur bei geöffnetem Menü */}
+        <div className={(menu ? "block" : "hidden") + " lg:block px-4 pb-4 lg:px-0 lg:pb-0"}>
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar m={user} size={38} />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm truncate">{user.name}</div>
+              <div className="text-xs truncate" style={{ color: "#8B9BB0" }}>{user.rolle}</div>
+            </div>
+            <button onClick={() => setUserId(null)} title="Abmelden" style={{ color: "#8B9BB0" }}>
+              <ArrowLeft size={16} />
             </button>
-          ))}
-        </nav>
-        <p className="text-xs mt-6" style={{ color: "#5C6E85" }}>{VERSION}</p>
-        {gesperrt && (
-          <p className="text-xs" style={{ color: "#8B9BB0" }}>
-            Das Portal wird freigeschaltet, sobald deine Stammdaten geprüft sind.
-          </p>
-        )}
+          </div>
+
+          <nav className="lg:block">
+            {(gesperrt ? [] : NAV).map((n) => (
+              <button key={n.id}
+                onClick={() => { setAnsicht(n.id); setOffen(null); setEntwurf(null); setMenu(false); }}
+                className="flex items-center gap-2.5 px-3 py-2 rounded text-sm w-full"
+                style={{
+                  background: ansicht === n.id && !offen ? C.inkSoft : "transparent",
+                  color: ansicht === n.id && !offen ? "#fff" : "#93A4B8",
+                }}>
+                <n.icon size={15} />
+                <span className="flex-1 text-left">{n.label}</span>
+                {n.badge > 0 && (
+                  <span className="text-xs px-1.5 rounded-full"
+                        style={{ background: C.gruen, color: "#0A1626" }}>{n.badge}</span>
+                )}
+              </button>
+            ))}
+          </nav>
+
+          <select value={userId} onChange={(e) => { setUserId(e.target.value); setMenu(false); }}
+            className="w-full mt-5 px-3 py-2 text-xs rounded outline-none"
+            style={{ background: C.inkSoft, color: "#8B9BB0", border: "1px solid " + C.inkLine }}>
+            {mitarbeiter.map((u) => (
+              <option key={u.id} value={u.id}>Demo-Ansicht: {u.rolle} · {u.name}</option>
+            ))}
+          </select>
+
+          <p className="text-xs mt-4" style={{ color: "#5C6E85" }}>{VERSION}</p>
+          {gesperrt && (
+            <p className="text-xs mt-2" style={{ color: "#8B9BB0" }}>
+              Das Portal wird freigeschaltet, sobald deine Stammdaten geprüft sind.
+            </p>
+          )}
+        </div>
       </aside>
 
       {/* Inhalt */}
-      <main className="flex-1 px-4 sm:px-8 py-6 max-w-6xl w-full">{inhalt}</main>
+      <main className="flex-1 px-4 sm:px-8 py-5 lg:py-6 max-w-6xl w-full">{inhalt}</main>
     </div>
   );
 }
