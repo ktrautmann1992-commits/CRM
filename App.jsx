@@ -280,7 +280,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v4.2 · 08.09.2026 · Kalender für alle Rollen";
+const VERSION = "v4.3 · 08.09.2026 · Suche, Aufgaben, Pipeline, Import, Protokoll";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -2292,7 +2292,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, entwurf, onSpeichern, onSe
 /*  Anfrage-Detail                                                     */
 /* ------------------------------------------------------------------ */
 function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
-                 onBearbeiten, onVerlaengern }) {
+                 onBearbeiten, onVerlaengern, onNotieren }) {
   const [vars, setVars] = useState(
     a.kalkulation && a.kalkulation.varianten && a.kalkulation.varianten.length
       ? a.kalkulation.varianten
@@ -2797,6 +2797,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                       w: user.name,
                     }],
                   });
+                  if (onNotieren) onNotieren("Betreuung",
+                    a.kunde.firma + ": " + teilhaber.filter((x) => x.id).map((x) => {
+                      const pp = mitarbeiter.find((y) => y.id === x.id);
+                      return (pp ? pp.name : "?") + " " + (x.anteil || 0) + " %";
+                    }).join(", "));
                 }} disabled={teilhaber.reduce((t, x) => t + (parseFloat(x.anteil) || 0), 0) !== 100}>
                   Aufteilung speichern
                 </Btn>
@@ -4269,7 +4274,7 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
 }
 
 /* Verwaltung der Vertriebsmitarbeiter: anlegen, einladen, Sätze setzen, freigeben */
-function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user }) {
+function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren }) {
   const [auswahl, setAuswahl] = useState(null);
   const [neu, setNeu] = useState(null);
   const [link, setLink] = useState(null);
@@ -4283,7 +4288,20 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user }) {
   const koepfe = mitarbeiter.filter((m) => ["Teamleiter", "Leitung Vertrieb"].includes(m.rolle));
   const gewaehlt = mitarbeiter.find((m) => m.id === auswahl);
 
-  const setz = (id, aend) => setMitarbeiter(mitarbeiter.map((m) => (m.id === id ? { ...m, ...aend } : m)));
+  const setz = (id, aend) => {
+    const m = mitarbeiter.find((x) => x.id === id);
+    if (m && notieren) {
+      if (aend.satz != null && aend.satz !== m.satz)
+        notieren("Provisionssatz", m.name + ": " + num(m.satz, 0) + " % auf " + num(aend.satz, 0) + " % geändert");
+      if (aend.upline !== undefined && aend.upline !== m.upline) {
+        const neu = mitarbeiter.find((x) => x.id === aend.upline);
+        notieren("Struktur", m.name + " zugeordnet an " + (neu ? neu.name : "niemanden"));
+      }
+      if (aend.status === "aktiv" && m.status !== "aktiv")
+        notieren("Freigabe", m.name + " freigeschaltet");
+    }
+    setMitarbeiter(mitarbeiter.map((x) => (x.id === id ? { ...x, ...aend } : x)));
+  };
 
   const anlegen = () => {
     const code = uid().toUpperCase() + uid().toUpperCase();
@@ -4295,6 +4313,7 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user }) {
       stammdaten: leereStammdaten(),
     };
     setMitarbeiter([...mitarbeiter, m]);
+    if (notieren) notieren("Mitarbeiter", m.name + " angelegt als " + m.rolle + " mit " + m.satz + " %");
     setLink({ name: m.name, url: "https://egc-energie-vertriebsportal.netlify.app/registrieren?code=" + code });
     setNeu(null);
   };
@@ -5471,8 +5490,10 @@ function Ablage({ ablage, setAblage, user, start }) {
 
 /* Kundenliste exportieren und Datensicherung */
 function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter,
-                       user, alleSetzen }) {
+                       user, alleSetzen, kundenImport }) {
   const [meldung, setMeldung] = useState("");
+  const [importMeldung, setImportMeldung] = useState("");
+  const [importPartner, setImportPartner] = useState("");
 
   const kunden = anfragen.filter((a) =>
     ["uebermittelt", "bestaetigt", "abgeschlossen"].includes(a.status));
@@ -5565,6 +5586,51 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
           <Btn icon={FileText} onClick={excel}>Als Excel-Datei</Btn>
           <Btn variante="hell" icon={FileText} onClick={pdf}>Als PDF</Btn>
         </div>
+      </div>
+
+      <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
+        <div className="text-sm mb-1">Bestandskunden importieren</div>
+        <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+          Übernimmt bestehende Kunden mit laufenden Verträgen aus einer Excel-Datei. Erwartet werden
+          die Spalten Firma, Branche, Straße, PLZ, Ort, Ansprechpartner, Telefon, E-Mail, Sparte,
+          Versorger, Zählernummer, Marktlokations-ID, Jahresverbrauch, Zählerart, Lieferbeginn,
+          Lieferende und Aufschlag. Mehrere Zeilen mit derselben Firma werden zu einem Kunden mit
+          mehreren Lieferstellen zusammengefasst.
+        </p>
+        <div className="grid sm:grid-cols-2 gap-4 items-end mb-4">
+          <Select label="Kunden zuordnen an" value={importPartner} onChange={setImportPartner}
+            options={[{ value: "", label: "Bitte wählen" },
+              ...mitarbeiter.filter((m) => ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle))
+                .map((m) => ({ value: m.id, label: m.name + " · " + m.rolle }))]} />
+          <label className="inline-flex items-center gap-2 px-3.5 py-2 text-sm rounded cursor-pointer"
+                 style={{ border: "1px solid " + C.line, background: importPartner ? "#fff" : "#F1F3F5",
+                          opacity: importPartner ? 1 : 0.5 }}>
+            <Upload size={15} /> Excel-Datei wählen
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={!importPartner}
+              onChange={(e) => {
+                const f = e.target.files && e.target.files[0];
+                if (f) dateiLesen(f, async (d) => {
+                  setImportMeldung("Wird eingelesen …");
+                  try { setImportMeldung(await kundenImport(d, importPartner)); }
+                  catch (fehler) { setImportMeldung(fehler.message || "Die Datei konnte nicht gelesen werden."); }
+                });
+              }} />
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Btn variante="hell" icon={FileText} onClick={() => {
+            const v = erzeugeXlsx("bestandskunden_vorlage.xlsx", "Bestandskunden", [
+              ["Firma", "Branche", "Straße", "PLZ", "Ort", "Ansprechpartner", "Telefon", "E-Mail",
+               "Sparte", "Versorger", "Kundennummer", "Zählernummer", "Marktlokations-ID",
+               "Jahresverbrauch kWh", "Zählerart", "Lieferbeginn", "Lieferende", "Aufschlag ct/kWh"],
+              ["Beispiel GmbH", "Hotellerie", "Musterstraße 1", "66111", "Saarbrücken", "Herr Muster",
+               "0681 123456", "info@beispiel.de", "Strom", "Stadtwerke", "4711", "1ESY116089",
+               "51238106877", 120000, "SLP", "01.01.2026", "31.12.2027", 0.6],
+            ]);
+            if (v) dateiLaden(v);
+          }}>Vorlage herunterladen</Btn>
+        </div>
+        {importMeldung && <p className="text-sm mt-3" style={{ color: C.ok }}>{importMeldung}</p>}
       </div>
 
       <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.gruen }}>
@@ -6084,6 +6150,354 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
               </details>
               <button onClick={() => setListen(listen.filter((x) => x.id !== l.id))}
                 style={{ color: C.muted }}><Trash2 size={15} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Globale Suche über Kunden, Vorgänge, Leads, Kontakte und Tickets */
+function Suche({ anfragen, leads, tickets, akquise, mitarbeiter, user, aufSprung }) {
+  const [text, setText] = useState("");
+  const suche = text.trim().toLowerCase();
+
+  const treffer = [];
+  if (suche.length >= 2) {
+    const passt = (...felder) =>
+      felder.some((f) => String(f || "").toLowerCase().includes(suche));
+
+    anfragen.forEach((a) => {
+      const malo = a.lieferstellen.map((l) => l.maloId).join(" ");
+      const zaehler = a.lieferstellen.map((l) => l.zaehlernummer).join(" ");
+      if (passt(a.kunde.firma, a.id, a.kunde.ansprechpartner, a.kunde.ort, a.kunde.branche, malo, zaehler))
+        treffer.push({ art: "Vorgang", titel: a.kunde.firma,
+          unten: a.id + " · " + STATUS[a.status].label + " · " + a.partnerName,
+          ziel: { ansicht: "alle", vorgang: a.id } });
+    });
+
+    (leads || []).forEach((l) => {
+      if (passt(l.firma, l.id, l.ansprechpartner, l.ort, l.telefon))
+        treffer.push({ art: "Lead", titel: l.firma,
+          unten: l.id + " · " + (LEAD_STATUS[leadSpalte(l)] || {}).label,
+          ziel: { ansicht: "leads" } });
+    });
+
+    (akquise || []).forEach((li) =>
+      li.eintraege.forEach((e) => {
+        if (passt(e.firma, e.ansprechpartner, e.telefon, e.adresse))
+          treffer.push({ art: "Kontakt", titel: e.firma,
+            unten: li.branche + " · " + (e.telefon || ""), ziel: { ansicht: "akquise" } });
+      }));
+
+    (tickets || []).forEach((t) => {
+      if (passt(t.betreff, "#" + t.nummer, t.von))
+        treffer.push({ art: "Ticket", titel: t.betreff,
+          unten: "#" + t.nummer + " · " + t.empfaenger, ziel: { ansicht: "tickets" } });
+    });
+
+    mitarbeiter.forEach((m) => {
+      if (passt(m.name, m.email, m.rolle))
+        treffer.push({ art: "Person", titel: m.name, unten: m.rolle + " · " + m.email,
+          ziel: { ansicht: user.rolle === "Geschäftsführung" ? "partner" : "dashboard" } });
+    });
+  }
+
+  return (
+    <div className="relative mb-3">
+      <input value={text} onChange={(e) => setText(e.target.value)}
+        placeholder="Suchen: Kunde, Vorgang, MaLo, Zähler …"
+        className="w-full px-3 py-2 text-sm rounded outline-none"
+        style={{ background: C.inkSoft, color: "#fff", border: "1px solid " + C.inkLine }} />
+
+      {suche.length >= 2 && (
+        <div className="mt-2 rounded overflow-hidden"
+             style={{ background: "#fff", border: "1px solid " + C.line, maxHeight: 320, overflowY: "auto" }}>
+          {treffer.length === 0 ? (
+            <p className="text-sm px-3 py-3" style={{ color: C.muted }}>Nichts gefunden.</p>
+          ) : (
+            treffer.slice(0, 25).map((t, i) => (
+              <button key={i} onClick={() => { aufSprung(t.ziel); setText(""); }}
+                className="w-full text-left px-3 py-2 flex items-start gap-2"
+                style={{ borderTop: i ? "1px solid " + C.line : "none", color: C.text }}>
+                <span className="text-xs px-1.5 py-0.5 rounded mt-0.5"
+                      style={{ border: "1px solid " + C.line, color: C.muted }}>{t.art}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="text-sm block truncate">{t.titel}</span>
+                  <span className="text-xs block truncate" style={{ color: C.muted }}>{t.unten}</span>
+                </span>
+              </button>
+            ))
+          )}
+          {treffer.length > 25 && (
+            <p className="text-xs px-3 py-2" style={{ color: C.muted, borderTop: "1px solid " + C.line }}>
+              {treffer.length - 25} weitere Treffer, Suche eingrenzen.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Pipeline der Vorgänge mit Umsatzprognose */
+const PIPELINE = [
+  { id: "eingereicht", label: "Anfrage", chance: 0.2, f: (a) => ["eingereicht", "ruecksprache"].includes(a.status) },
+  { id: "angefragt", label: "In Kalkulation", chance: 0.3, f: (a) => a.status === "angefragt" },
+  { id: "klaerfall", label: "Klärfall", chance: 0.25, f: (a) => a.status === "klaerfall" },
+  { id: "angebot", label: "Angebot beim Kunden", chance: 0.5, f: (a) => a.status === "angebot" },
+  { id: "uebermittelt", label: "Beim Versorger", chance: 0.85, f: (a) => a.status === "uebermittelt" },
+  { id: "bestaetigt", label: "Bestätigt", chance: 1, f: (a) => a.status === "bestaetigt" },
+];
+
+function Pipeline({ anfragen, mitarbeiter, user, onOeffnen }) {
+  const vollsicht = ["Geschäftsführung", "Finanzbuchhaltung", "Leitung Vertrieb"].includes(user.rolle);
+  const meineIds = user.rolle === "Teamleiter"
+    ? [user.id, ...strukturUnter(user.id, mitarbeiter).map((m) => m.id)]
+    : [user.id];
+  const menge = vollsicht ? anfragen : anfragen.filter((a) => meineIds.some((id) => istBeteiligt(a, id)));
+
+  const wert = (a) => (vollsicht ? gesamtprovision(a) : anteilVon(a, user.id, mitarbeiter));
+  const spalten = PIPELINE.map((sp) => {
+    const drin = menge.filter(sp.f);
+    return { ...sp, drin,
+      summe: drin.reduce((t, a) => t + wert(a), 0),
+      kwh: drin.reduce((t, a) => t + verbrauchGesamt(a), 0) };
+  });
+  const forecast = spalten.reduce((t, sp) => t + sp.summe * sp.chance, 0);
+  const gesamt = spalten.reduce((t, sp) => t + sp.summe, 0);
+
+  return (
+    <div>
+      <div className="grid sm:grid-cols-3 gap-3 mb-5">
+        {[["Vorgänge in der Pipeline", spalten.reduce((t, sp) => t + sp.drin.length, 0), C.text],
+          ["Provision unverrechnet", eur(gesamt), C.text],
+          ["Erwartet nach Gewichtung", eur(forecast), C.ok]].map(([k, v, f]) => (
+          <div key={k} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="text-xs mb-2" style={{ color: C.muted }}>{k}</div>
+            <div className="text-2xl" style={{ color: f, fontVariantNumeric: "tabular-nums" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="overflow-x-auto pb-2">
+        <div className="flex gap-3" style={{ minWidth: PIPELINE.length * 236 }}>
+          {spalten.map((sp) => (
+            <div key={sp.id} className="flex-1 rounded p-2"
+                 style={{ minWidth: 224, background: "#F6F8FA", border: "1px solid " + C.line }}>
+              <div className="px-2 py-2 mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm flex-1">{sp.label}</span>
+                  <span className="text-xs" style={{ color: C.muted }}>{sp.drin.length}</span>
+                </div>
+                <div className="text-xs mt-1" style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                  {eur(sp.summe)} · {num(sp.chance * 100)} % Chance
+                </div>
+                <div className="mt-2"><Balken anteil={sp.chance} farbe={C.strom} /></div>
+              </div>
+
+              {sp.drin.length === 0 && (
+                <div className="rounded px-2 py-5 text-center text-xs"
+                     style={{ border: "1px dashed " + C.line, color: C.muted }}>leer</div>
+              )}
+              {sp.drin.map((a) => (
+                <button key={a.id} onClick={() => onOeffnen(a.id)}
+                  className="w-full text-left rounded p-3 mb-2"
+                  style={{ background: "#fff", border: "1px solid " + C.line }}>
+                  <div className="text-sm">{a.kunde.firma}</div>
+                  <div className="text-xs mt-1" style={{ color: C.muted }}>
+                    {a.id} · {num(verbrauchGesamt(a))} kWh
+                  </div>
+                  <div className="flex items-center justify-between mt-2 text-xs">
+                    <span style={{ color: C.muted }}>{a.partnerName}</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums" }}>{eur(wert(a))}</span>
+                  </div>
+                  {liegezeit(a) > 7 && (
+                    <div className="text-xs mt-1" style={{ color: liegezeit(a) > 14 ? C.warn : C.gas }}>
+                      seit {num(liegezeit(a))} Tagen unbewegt
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <p className="text-xs mt-3" style={{ color: C.muted, maxWidth: "68ch" }}>
+        Die Prognose gewichtet die Provision jeder Phase mit ihrer Abschlusswahrscheinlichkeit.
+        Die Werte sind Erfahrungswerte und lassen sich anpassen, sobald genug eigene Abschlüsse
+        vorliegen.
+      </p>
+    </div>
+  );
+}
+
+/* Persönliche Aufgaben mit Fälligkeit */
+const PRIO = { hoch: { label: "Hoch", color: "#B24328" }, normal: { label: "Normal", color: "#6B7787" } };
+
+function Aufgaben({ aufgaben, setAufgaben, user, mitarbeiter, kompakt, onOeffnen }) {
+  const [titel, setTitel] = useState("");
+  const [faellig, setFaellig] = useState(heute());
+  const [prio, setPrio] = useState("normal");
+  const [zeigeErledigte, setZeigeErledigte] = useState(false);
+
+  const meine = aufgaben.filter((a) => a.fuerId === user.id);
+  const offen = meine.filter((a) => !a.erledigt)
+    .sort((a, b) => (a.faellig || "").localeCompare(b.faellig || ""));
+  const erledigt = meine.filter((a) => a.erledigt).slice(0, 20);
+  const heuteFaellig = offen.filter((a) => a.faellig <= heute());
+
+  const anlegen = () => {
+    if (!titel.trim()) return;
+    setAufgaben([...aufgaben, {
+      id: "AU" + uid(), titel: titel.trim(), faellig, prio, erledigt: false,
+      fuerId: user.id, angelegt: heute(), bezug: null,
+    }]);
+    setTitel(""); setPrio("normal");
+  };
+
+  const umschalten = (id) =>
+    setAufgaben(aufgaben.map((a) => (a.id === id ? { ...a, erledigt: !a.erledigt,
+      erledigtAm: a.erledigt ? null : heute() } : a)));
+
+  const Zeile = ({ a, i }) => {
+    const spaet = !a.erledigt && a.faellig < heute();
+    return (
+      <div className="flex items-start gap-3 px-4 py-3"
+           style={{ borderTop: i ? "1px solid " + C.line : "none",
+                    background: spaet ? "#FCF3F0" : "transparent" }}>
+        <input type="checkbox" checked={!!a.erledigt} onChange={() => umschalten(a.id)}
+          className="mt-1" style={{ accentColor: C.ok }} />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm" style={{ textDecoration: a.erledigt ? "line-through" : "none",
+               color: a.erledigt ? C.muted : C.text }}>{a.titel}</div>
+          <div className="text-xs" style={{ color: spaet ? C.warn : C.muted }}>
+            {a.faellig ? (spaet ? "überfällig seit " : "fällig ") + datum(a.faellig) : "ohne Termin"}
+            {a.prio === "hoch" ? " · Hoch" : ""}
+            {a.bezug ? " · " + a.bezug.text : ""}
+          </div>
+        </div>
+        {a.bezug && a.bezug.art === "vorgang" && onOeffnen && (
+          <button className="text-xs" style={{ color: C.strom }}
+            onClick={() => onOeffnen(a.bezug.id)}>öffnen</button>
+        )}
+        {!kompakt && (
+          <button onClick={() => setAufgaben(aufgaben.filter((x) => x.id !== a.id))}
+            style={{ color: C.muted }}><Trash2 size={14} /></button>
+        )}
+      </div>
+    );
+  };
+
+  if (kompakt)
+    return (
+      <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <div className="flex items-baseline justify-between px-4 py-3" style={{ borderBottom: "1px solid " + C.line }}>
+          <span className="text-sm">Meine Aufgaben</span>
+          <span className="text-xs" style={{ color: heuteFaellig.length ? C.warn : C.muted }}>
+            {heuteFaellig.length} fällig · {offen.length} offen
+          </span>
+        </div>
+        {offen.length === 0 && (
+          <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>Nichts offen.</div>
+        )}
+        {offen.slice(0, 5).map((a, i) => <Zeile key={a.id} a={a} i={i} />)}
+      </div>
+    );
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <div className="grid sm:grid-cols-3 gap-4 items-end">
+          <div className="sm:col-span-1">
+            <Feld label="Neue Aufgabe" value={titel} onChange={setTitel}
+              placeholder="z. B. Herrn Thiel zurückrufen" />
+          </div>
+          <Feld label="Fällig am" type="date" value={faellig} onChange={setFaellig} />
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <Select label="Priorität" value={prio} onChange={setPrio}
+                options={[{ value: "normal", label: "Normal" }, { value: "hoch", label: "Hoch" }]} />
+            </div>
+            <div className="pb-0.5"><Btn icon={Plus} onClick={anlegen} disabled={!titel.trim()}>Anlegen</Btn></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <div className="flex items-baseline justify-between px-4 py-3" style={{ borderBottom: "1px solid " + C.line }}>
+          <span className="text-sm">Offen</span>
+          <span className="text-xs" style={{ color: heuteFaellig.length ? C.warn : C.muted }}>
+            {heuteFaellig.length} fällig oder überfällig
+          </span>
+        </div>
+        {offen.length === 0 && (
+          <div className="px-4 py-6 text-sm text-center" style={{ color: C.muted }}>
+            Keine offenen Aufgaben.
+          </div>
+        )}
+        {offen.map((a, i) => <Zeile key={a.id} a={a} i={i} />)}
+      </div>
+
+      {erledigt.length > 0 && (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <button className="w-full flex items-baseline justify-between px-4 py-3"
+            onClick={() => setZeigeErledigte(!zeigeErledigte)}
+            style={{ borderBottom: zeigeErledigte ? "1px solid " + C.line : "none" }}>
+            <span className="text-sm">Erledigt ({erledigt.length})</span>
+            <span className="text-xs" style={{ color: C.strom }}>{zeigeErledigte ? "ausblenden" : "anzeigen"}</span>
+          </button>
+          {zeigeErledigte && erledigt.map((a, i) => <Zeile key={a.id} a={a} i={i} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Änderungsprotokoll für kritische Vorgänge */
+function Protokoll({ protokoll, mitarbeiter }) {
+  const [filter, setFilter] = useState("alle");
+  const arten = [...new Set(protokoll.map((p) => p.art))];
+  const liste = protokoll
+    .filter((p) => filter === "alle" || p.art === filter)
+    .slice()
+    .reverse();
+
+  return (
+    <div>
+      <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+        Lückenlose Aufzeichnung aller Änderungen an Provisionssätzen, Zuordnungen, Freigaben und
+        Auszahlungen. Einträge lassen sich nicht löschen.
+      </p>
+
+      <div className="rounded p-3 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <Select label="Art der Änderung" value={filter} onChange={setFilter}
+          options={[{ value: "alle", label: "Alle Änderungen" }, ...arten]} />
+      </div>
+
+      {liste.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm"
+             style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          Noch keine Einträge.
+        </div>
+      ) : (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {liste.map((p, i) => (
+            <div key={p.id} className="flex flex-wrap items-start gap-x-4 gap-y-1 px-4 py-3"
+                 style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <span className="text-xs w-32" style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                {datum(p.datum)}, {p.zeit}
+              </span>
+              <div className="flex-1 min-w-40">
+                <div className="text-sm">{p.text}</div>
+                <div className="text-xs" style={{ color: ROLLENFARBE[p.rolle] || C.muted }}>
+                  {p.wer} · {p.rolle}
+                </div>
+              </div>
+              <span className="text-xs px-2 py-0.5 rounded"
+                    style={{ border: "1px solid " + C.line, color: C.muted }}>{p.art}</span>
             </div>
           ))}
         </div>
@@ -7082,7 +7496,7 @@ function faelligkeiten(a) {
   }));
 }
 
-function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen }) {
+function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren }) {
   const [wer, setWer] = useState("alle");
   const [nurOffen, setNurOffen] = useState(false);
   const abg = anfragen.filter((a) => a.status === "abgeschlossen" && a.kalkulation);
@@ -7112,8 +7526,15 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen }) {
     setAnfragen((alt) => alt.map((a) => {
       if (a.id !== z.anfrage.id) return a;
       const aus = { ...(a.ausgezahlt || {}) };
-      if (aus[z.schluessel]) delete aus[z.schluessel];
-      else aus[z.schluessel] = { datum: heute(), von: user.name, jahr: z.jahr };
+      if (aus[z.schluessel]) {
+        delete aus[z.schluessel];
+        if (notieren) notieren("Auszahlung",
+          "Auszahlung zurückgenommen: " + z.person.name + ", " + a.kunde.firma + ", Jahr " + z.jahr);
+      } else {
+        aus[z.schluessel] = { datum: heute(), von: user.name, jahr: z.jahr };
+        if (notieren) notieren("Auszahlung",
+          eur(z.person.betrag) + " an " + z.person.name + " für " + a.kunde.firma + ", Jahr " + z.jahr);
+      }
       if (z.jahr === 1 && aus[z.person.id]) delete aus[z.person.id];
       return { ...a, ausgezahlt: aus };
     }));
@@ -7441,7 +7862,7 @@ function Rangliste({ titel, zeilen, hinweis, geld = true }) {
 }
 
 function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, leads,
-                    setMitarbeiter }) {
+                    setMitarbeiter, aufgaben, setAufgaben }) {
   const [bereich, setBereich] = useState("meine");
   const [anpassen, setAnpassen] = useState(false);
   const istTL = user.rolle === "Teamleiter";
@@ -7549,6 +7970,7 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, l
           <div className="text-sm mb-3">Was möchtest du sehen?</div>
           <div className="grid sm:grid-cols-2 gap-2 mb-4">
             {[...KACHELN, ...ZAHLEN, { id: "ziele", k: "Zielerreichung" },
+              { id: "aufgaben", k: "Aufgaben" },
               { id: "termine", k: "Termine" }, { id: "listen", k: "Listen und Ranglisten" }].map((x) => (
               <label key={x.id} className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={zeigt(x.id)} onChange={() => umschalten(x.id)}
@@ -7619,6 +8041,11 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, l
             ))}
           </div>
         </Karte>
+      )}
+
+      {zeigt("aufgaben") && (
+        <Aufgaben aufgaben={aufgaben} setAufgaben={setAufgaben} user={user}
+          mitarbeiter={mitarbeiter} kompakt onOeffnen={onOeffnen} />
       )}
 
       {zeigt("termine") && (
@@ -7783,6 +8210,8 @@ export default function App() {
   const [probleme, setProbleme] = useState([]);
   const [termine, setTermine] = useState([]);
   const [akquise, setAkquise] = useState([]);
+  const [aufgaben, setAufgaben] = useState([]);
+  const [protokoll, setProtokoll] = useState([]);
   const [listenAnsicht, setListenAnsicht] = useState(null);
   const [userId, setUserId] = useState(null);
   const [registriert, setRegistriert] = useState(null);
@@ -7836,6 +8265,14 @@ export default function App() {
           const ak = await window.storage.get("egc-crm:akquise");
           if (ak && ak.value) setAkquise(JSON.parse(ak.value));
         } catch (e10) { /* noch keine Kontaktlisten */ }
+        try {
+          const au = await window.storage.get("egc-crm:aufgaben");
+          if (au && au.value) setAufgaben(JSON.parse(au.value));
+        } catch (e11) { /* noch keine Aufgaben */ }
+        try {
+          const pr2 = await window.storage.get("egc-crm:protokoll");
+          if (pr2 && pr2.value) setProtokoll(JSON.parse(pr2.value));
+        } catch (e12) { /* noch kein Protokoll */ }
       } catch (e) { /* erster Start: Demodaten */ }
       setGeladen(true);
     })();
@@ -7855,10 +8292,12 @@ export default function App() {
         await window.storage.set("egc-crm:probleme", JSON.stringify(probleme));
         await window.storage.set("egc-crm:termine", JSON.stringify(termine));
         await window.storage.set("egc-crm:akquise", JSON.stringify(akquise));
+        await window.storage.set("egc-crm:aufgaben", JSON.stringify(aufgaben));
+        await window.storage.set("egc-crm:protokoll", JSON.stringify(protokoll));
       } catch (e) { /* Speichern nicht verfügbar */ }
     })();
   }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine,
-      akquise, geladen]);
+      akquise, aufgaben, protokoll, geladen]);
 
   const speichern = (a) =>
     setAnfragen((prev) => (prev.some((x) => x.id === a.id)
@@ -7880,11 +8319,111 @@ export default function App() {
   const offeneTickets = user
     ? tickets.filter((t) => t.empfaenger === user.rolle && t.status !== "abgeschlossen").length : 0;
   const neueAuftraege = anfragen.filter((a) => a.status === "uebermittelt").length;
+  const offeneAufgaben = user
+    ? aufgaben.filter((t) => t.fuerId === user.id && !t.erledigt && t.faellig <= heute()).length : 0;
   const offeneProbleme = user
     ? probleme.filter((p) => p.status !== "erledigt" &&
         (["Vertragsmanagement", "Geschäftsführung"].includes(user.rolle) ||
          p.betroffene.some((b) => b.id === user.id ||
            strukturUnter(user.id, mitarbeiter).some((m) => m.id === b.id)))).length : 0;
+
+  /* Änderungen aufzeichnen */
+  const notieren = (art, text) =>
+    setProtokoll((alt) => [...alt, {
+      id: "PR" + uid(), art, text, wer: user ? user.name : "System",
+      rolle: user ? user.rolle : "-", datum: heute(), zeit: jetzt(),
+    }]);
+
+  /* Bestandskunden aus einer Tabelle übernehmen */
+  const kundenImport = async (datei, partnerId) => {
+    const zeilen = /\.xlsx?$/i.test(datei.name) ? await xlsxLesen(datei) : csvLesen(datei);
+    if (zeilen.length < 2) throw new Error("Die Datei enthält keine Daten.");
+    const kopf = zeilen[0].map((h) => String(h || "").toLowerCase());
+    const sp = (...begriffe) => kopf.findIndex((h) => begriffe.some((b) => h.includes(b)));
+    const i = {
+      firma: sp("firma", "kunde", "name"), branche: sp("branche"),
+      strasse: sp("straße", "strasse"), plz: sp("plz"), ort: sp("ort"),
+      ansprech: sp("ansprech"), telefon: sp("telefon"), email: sp("mail"),
+      sparte: sp("sparte", "medium"), versorger: sp("versorger"), kundennr: sp("kundennummer"),
+      zaehler: sp("zählernummer", "zaehlernummer"), malo: sp("marktlokation", "malo"),
+      verbrauch: sp("verbrauch", "kwh"), art: sp("zählerart", "zaehlerart", "slp"),
+      beginn: sp("lieferbeginn", "beginn"), ende: sp("lieferende", "ende"),
+      aufschlag: sp("aufschlag"),
+    };
+    if (i.firma < 0) throw new Error("Keine Spalte für die Firma gefunden.");
+
+    const partner = mitarbeiter.find((m) => m.id === partnerId);
+    const hol = (z, k) => (i[k] >= 0 ? String(z[i[k]] || "").trim() : "");
+    const datumLesen = (t) => {
+      const m = String(t).match(/(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})/);
+      if (m) return (m[3].length === 2 ? "20" + m[3] : m[3]) + "-" +
+        m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");
+      return /^\d{4}-\d{2}-\d{2}/.test(String(t)) ? String(t).slice(0, 10) : "";
+    };
+
+    const kunden = {};
+    zeilen.slice(1).forEach((z) => {
+      const firma = hol(z, "firma");
+      if (!firma) return;
+      if (!kunden[firma]) kunden[firma] = { zeilen: [], erste: z };
+      kunden[firma].zeilen.push(z);
+    });
+
+    const neueVorgaenge = Object.entries(kunden).map(([firma, k]) => {
+      const z0 = k.erste;
+      const a = leereAnfrage(partner || user);
+      a.id = "A-" + new Date().getFullYear() + "-" + Math.floor(1000 + Math.random() * 8999);
+      a.status = "abgeschlossen";
+      a.vertragsStatus = "Lieferung aktiv";
+      a.importiert = true;
+      a.kunde = {
+        firma, branche: hol(z0, "branche"), strasse: hol(z0, "strasse"),
+        plz: hol(z0, "plz"), ort: hol(z0, "ort"), ansprechpartner: hol(z0, "ansprech"),
+        telefon: hol(z0, "telefon"), email: hol(z0, "email"),
+      };
+      a.lieferstellen = k.zeilen.map((z) => {
+        const sparte = hol(z, "sparte").toLowerCase();
+        const medium = sparte.includes("gas") ? "gas" : "strom";
+        return {
+          ...leereLieferstelle(medium),
+          bezeichnung: hol(z, "ort") || firma,
+          strasse: hol(z, "strasse"), plz: hol(z, "plz"), ort: hol(z, "ort"),
+          versorger: hol(z, "versorger"), kundennummer: hol(z, "kundennr"),
+          zaehlernummer: hol(z, "zaehler"), maloId: hol(z, "malo"),
+          verbrauch: String(hol(z, "verbrauch")).replace(/\D/g, ""),
+          zaehlerart: hol(z, "art").toUpperCase().includes("RLM") ? "RLM" : "SLP",
+          adresseVon: "manuell",
+        };
+      });
+      const beginn = datumLesen(hol(z0, "beginn"));
+      const ende = datumLesen(hol(z0, "ende"));
+      const aufschlag = parseFloat(String(hol(z0, "aufschlag")).replace(",", ".")) || 0;
+      a.aufschlag = aufschlag;
+      a.kalkulation = {
+        bearbeiter: "Import", datum: heute(), vollmacht: null, gewaehlt: ["v1"],
+        varianten: [{
+          id: "v1", sparte: "beide", produkt: "Festpreis",
+          laufzeitArt: ende ? "ende" : "monate", laufzeit: 24, lieferende: ende,
+          aufschlag, lieferbeginn: beginn, gueltigBis: "", bemerkung: "Aus Bestandsdaten übernommen.",
+          angebot: null, preise: {},
+        }],
+      };
+      a.bestaetigung = {
+        versorger: hol(z0, "versorger"), aufschlag, bonus: "", bonusArt: "keine",
+        von: "Import", datum: heute(),
+        stellen: a.lieferstellen.reduce((o, l) => ({
+          ...o, [l.id]: { kwh: l.verbrauch, beginn, ende } }), {}),
+      };
+      a.verlauf = [{ d: heute(), t: "Bestandskunde importiert", w: user.name }];
+      return a;
+    });
+
+    setAnfragen((alt) => [...neueVorgaenge, ...alt]);
+    notieren("Import", neueVorgaenge.length + " Bestandskunden importiert für " +
+      (partner ? partner.name : "unbekannt"));
+    return neueVorgaenge.length + " Kunden mit " +
+      neueVorgaenge.reduce((t, x) => t + x.lieferstellen.length, 0) + " Lieferstellen übernommen.";
+  };
 
   /* Verlängerung: übernimmt Kunde und Lieferstellen aus dem Altvertrag */
   const verlaengern = (alt) => {
@@ -7969,6 +8508,8 @@ export default function App() {
       { id: "neu", label: "Neue Anfrage", icon: Plus },
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "kunden", label: "Meine Kunden", icon: FileSignature },
+      { id: "pipeline", label: "Pipeline", icon: BarChart3 },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "smartmeter", label: "Smartmeter", icon: Zap },
@@ -7987,6 +8528,8 @@ export default function App() {
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "alle", label: "Team-Vorgänge", icon: Users },
       { id: "kunden", label: "Kunden im Team", icon: FileSignature },
+      { id: "pipeline", label: "Pipeline", icon: BarChart3 },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "smartmeter", label: "Smartmeter", icon: Zap },
@@ -8003,6 +8546,8 @@ export default function App() {
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
+      { id: "pipeline", label: "Pipeline", icon: BarChart3 },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "neu", label: "Neue Anfrage", icon: Plus },
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
@@ -8025,6 +8570,7 @@ export default function App() {
       { id: "auftraege", label: "Neue Aufträge", icon: FileSignature, badge: neueAuftraege },
       { id: "smartmeter", label: "Smartmeter", icon: Zap },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
@@ -8039,6 +8585,7 @@ export default function App() {
       { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
       { id: "stornos", label: "Stornierungen", icon: X },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
@@ -8049,6 +8596,7 @@ export default function App() {
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
@@ -8061,6 +8609,7 @@ export default function App() {
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
       { id: "stornos", label: "Stornierungen", icon: X },
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
@@ -8070,6 +8619,8 @@ export default function App() {
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
+      { id: "pipeline", label: "Pipeline", icon: BarChart3 },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "ruecksprachen", label: "Rücksprachen", icon: AlertTriangle },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
@@ -8081,6 +8632,7 @@ export default function App() {
       { id: "stornos", label: "Stornierungen", icon: X },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
+      { id: "protokoll", label: "Änderungsprotokoll", icon: FileText },
       { id: "export", label: "Export und Sicherung", icon: Upload },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
@@ -8142,7 +8694,7 @@ export default function App() {
         alleAnfragen={anfragen}
         onZurueck={() => setOffen(null)} onUpdate={(a) => speichern(a)}
         onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }}
-        onVerlaengern={verlaengern} />
+        onVerlaengern={verlaengern} onNotieren={notieren} />
     );
   } else if (listenAnsicht) {
     inhalt = (
@@ -8223,6 +8775,7 @@ export default function App() {
     inhalt = (
       <Dashboard anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
         termine={termine} leads={leads} setMitarbeiter={setMitarbeiter}
+        aufgaben={aufgaben} setAufgaben={setAufgaben}
         onOeffnen={(id, ziel) => { if (ziel) { setOffen(null); setAnsicht(ziel); } else setOffen(id); }}
         onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />
     );
@@ -8285,10 +8838,19 @@ export default function App() {
     );
   } else if (ansicht === "kalender") {
     inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} />;
+  } else if (ansicht === "aufgaben") {
+    inhalt = <Aufgaben aufgaben={aufgaben} setAufgaben={setAufgaben} user={user}
+               mitarbeiter={mitarbeiter} onOeffnen={(id) => setOffen(id)} />;
+  } else if (ansicht === "pipeline") {
+    inhalt = <Pipeline anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
+               onOeffnen={(id) => setOffen(id)} />;
+  } else if (ansicht === "protokoll") {
+    inhalt = <Protokoll protokoll={protokoll} mitarbeiter={mitarbeiter} />;
   } else if (ansicht === "export") {
     inhalt = (
       <Datenexport anfragen={anfragen} mitarbeiter={mitarbeiter} leads={leads} ablage={ablage}
         versorger={versorger} tickets={tickets} smartmeter={smartmeter} user={user}
+        kundenImport={kundenImport}
         alleSetzen={(d) => {
           if (d.anfragen) setAnfragen(migriereAnfragen(d.anfragen));
           if (d.mitarbeiter) setMitarbeiter(migriereMitarbeiter(d.mitarbeiter));
@@ -8305,13 +8867,15 @@ export default function App() {
     inhalt = <Smartmeter vorgaenge={smartmeter} setVorgaenge={setSmartmeter}
                anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "abrechnung") {
-    inhalt = <Abrechnung anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} setAnfragen={setAnfragen} />;
+    inhalt = <Abrechnung anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
+               setAnfragen={setAnfragen} notieren={notieren} />;
   } else if (ansicht === "versorgerliste") {
     inhalt = <Versorgerliste versorger={versorger} setVersorger={setVersorger} user={user} />;
   } else if (ansicht === "unterlagen") {
     inhalt = <Ablage ablage={ablage} setAblage={setAblage} user={user} />;
   } else if (ansicht === "partner") {
-    inhalt = <Partnerverwaltung mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} user={user} />;
+    inhalt = <Partnerverwaltung mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
+               user={user} notieren={notieren} />;
   } else if (ansicht === "meine-daten") {
     inhalt = <MeineStammdaten user={user} mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} />;
   } else {
@@ -8355,6 +8919,15 @@ export default function App() {
               <ArrowLeft size={16} />
             </button>
           </div>
+
+          <Suche anfragen={anfragen} leads={leads} tickets={tickets} akquise={akquise}
+            mitarbeiter={mitarbeiter} user={user}
+            aufSprung={(ziel) => {
+              setListenAnsicht(null);
+              if (ziel.vorgang) { setAnsicht(ziel.ansicht); setOffen(ziel.vorgang); }
+              else { setOffen(null); setAnsicht(ziel.ansicht); }
+              setMenu(false);
+            }} />
 
           <div className="mb-2">
             <Glocke meldungen={meldungen} gelesen={gelesen}
