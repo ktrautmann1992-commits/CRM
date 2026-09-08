@@ -149,6 +149,16 @@ function seedAblage() {
       "Vorlage zur fristgerechten Kündigung beim bisherigen Versorger."),
     e("dokumente", "Datenschutzhinweise", "PDF", "datenschutz_kunden.pdf",
       "Aushändigen beim Erstkontakt, Stand Mai 2026."),
+    { id: "D-" + uid(), bereich: "dokumente", titel: "Lieferstellenliste, Blankovorlage",
+      art: "Excel", beschreibung:
+        "Vorlage zum Ausfüllen durch den Kunden bei vielen Lieferstellen. Ausgefüllt bei der Angebotsanfrage hochladen.",
+      datei: erzeugeXlsx("lieferstellenliste_vorlage.xlsx", "Lieferstellen", [
+        ["Bezeichnung", "Sparte", "Straße", "PLZ", "Ort", "Versorger", "Kundennummer",
+         "Zählernummer", "Marktlokations-ID", "Jahresverbrauch kWh", "Zählerart SLP/RLM", "Bemerkung"],
+        ["Beispiel: Haupthaus", "Strom", "Musterstraße 1", "66111", "Saarbrücken",
+         "Stadtwerke", "1234567", "1ESY1160892344", "51238106877", 120000, "SLP", ""],
+      ]),
+      url: "", von: "Karsten", datum: "2026-06-02" },
     e("marketing", "Flyer Hotellerie und Gastronomie", "PDF", "flyer_hotel_gastro.pdf",
       "Vierseitig, für Erstgespräche im Gastgewerbe."),
     e("marketing", "Flyer Produktion und Gewerbe", "PDF", "flyer_produktion.pdf",
@@ -185,7 +195,8 @@ function migriereAnfragen(liste) {
   return (liste || []).map((a) => ({
     laufzeitArt: "monate", wunschLieferbeginn: "", wunschLieferende: "",
     produktGas: a.produkt || "Festpreis", beratungHinweis: "", bemerkungVertrieb: "",
-    dienstleistungsvertrag: false, zielpreis: "", zielpreisNotiz: "",
+    dienstleistungsvertrag: false, lieferstellenListe: false, lieferstellenDatei: null,
+    zielpreis: "", zielpreisNotiz: "",
     fehlend: [], fehlendText: "", nachrichten: [], verlauf: [], ausgezahlt: {},
     annahme: null, einreichung: false, bestaetigung: null, klaerung: null,
     provisionErhalten: null, vertragsStatus: null, ruecksprache: null, absage: null,
@@ -265,7 +276,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v3.0 · 07.09.2026 · Benachrichtigungen, Ziele, Kalender, Problemfälle";
+const VERSION = "v3.7 · 07.09.2026 · Listen mehrfach zuweisen";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -303,6 +314,9 @@ const USERS = [
   { id: "vm", name: "Nadine Petry", rolle: "Vertragsmanagement", team: "-", satz: 0, upline: null,
     email: "n.petry@egc-energie.de", telefon: "", status: "aktiv", passwort: DEMO_PASSWORT,
     bild: null, stammdaten: leereStammdaten() },
+  { id: "lead", name: "Timo Bauer", rolle: "Leadmanagement", team: "-", satz: 0, upline: null,
+    email: "leads@egc-energie.de", telefon: "", status: "aktiv", passwort: DEMO_PASSWORT,
+    bild: null, stammdaten: leereStammdaten() },
   { id: "fibu", name: "Petra Simon", rolle: "Finanzbuchhaltung", team: "-", satz: 0, upline: null,
     email: "buchhaltung@egc-energie.de", telefon: "", status: "aktiv", passwort: DEMO_PASSWORT,
     bild: null, stammdaten: leereStammdaten() },
@@ -333,6 +347,7 @@ const ROLLENFARBE = {
   Kalkulation: "#BE6A16",
   Vertragsmanagement: "#6B7787",
   Finanzbuchhaltung: "#7A5AA8",
+  Leadmanagement: "#1F8A8A",
   "Geschäftsführung": "#0A1626",
 };
 /* frühestmöglicher Lieferbeginn: 14 Tage Vorlauf */
@@ -343,6 +358,131 @@ const fruehesterBeginn = () => {
 };
 const datum = (s) => (s ? s.split("-").reverse().join(".") : "–");
 const uid = () => Math.random().toString(36).slice(2, 9);
+
+/* ---------- Excel- und CSV-Dateien einlesen ---------- */
+async function entpacken(bytes, methode, start, groesse) {
+  const teil = bytes.slice(start, start + groesse);
+  if (methode === 0) return teil;
+  if (typeof DecompressionStream === "undefined")
+    throw new Error("Dieser Browser kann keine Excel-Dateien entpacken.");
+  const strom = new Blob([teil]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(strom).arrayBuffer());
+}
+
+async function zipOeffnen(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0 && i > bytes.length - 66000; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Das ist keine gültige Excel-Datei.");
+  const anzahl = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const dateien = {};
+  for (let n = 0; n < anzahl; n++) {
+    const methode = dv.getUint16(off + 10, true);
+    const groesse = dv.getUint32(off + 20, true);
+    const nameLen = dv.getUint16(off + 28, true);
+    const extraLen = dv.getUint16(off + 30, true);
+    const kommLen = dv.getUint16(off + 32, true);
+    const lokal = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(bytes.slice(off + 46, off + 46 + nameLen));
+    dateien[name] = { methode, groesse, lokal };
+    off += 46 + nameLen + extraLen + kommLen;
+  }
+  return { dv, bytes, dateien };
+}
+
+async function zipText(z, name) {
+  const e = z.dateien[name];
+  if (!e) return null;
+  const nameLen = z.dv.getUint16(e.lokal + 26, true);
+  const extraLen = z.dv.getUint16(e.lokal + 28, true);
+  const start = e.lokal + 30 + nameLen + extraLen;
+  return new TextDecoder().decode(await entpacken(z.bytes, e.methode, start, e.groesse));
+}
+
+const spalteZuIndex = (ref) => {
+  const buchstaben = (ref.match(/[A-Z]+/) || ["A"])[0];
+  let n = 0;
+  for (let i = 0; i < buchstaben.length; i++) n = n * 26 + (buchstaben.charCodeAt(i) - 64);
+  return n - 1;
+};
+
+async function xlsxLesen(datei) {
+  const roh = atob(String(datei.url).split(",")[1]);
+  const bytes = new Uint8Array(roh.length);
+  for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
+  const z = await zipOeffnen(bytes);
+
+  const parser = new DOMParser();
+  let texte = [];
+  const shared = await zipText(z, "xl/sharedStrings.xml");
+  if (shared) {
+    const doc = parser.parseFromString(shared, "application/xml");
+    texte = Array.from(doc.getElementsByTagName("si")).map((si) =>
+      Array.from(si.getElementsByTagName("t")).map((t) => t.textContent).join(""));
+  }
+
+  const blattName = Object.keys(z.dateien).find((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
+  const blatt = await zipText(z, blattName);
+  if (!blatt) throw new Error("Kein Tabellenblatt gefunden.");
+  const doc = parser.parseFromString(blatt, "application/xml");
+
+  return Array.from(doc.getElementsByTagName("row")).map((row) => {
+    const zeile = [];
+    Array.from(row.getElementsByTagName("c")).forEach((c) => {
+      const i = spalteZuIndex(c.getAttribute("r") || "A1");
+      const typ = c.getAttribute("t");
+      let wert = "";
+      if (typ === "s") {
+        const v = c.getElementsByTagName("v")[0];
+        wert = v ? texte[parseInt(v.textContent)] || "" : "";
+      } else if (typ === "inlineStr") {
+        wert = Array.from(c.getElementsByTagName("t")).map((t) => t.textContent).join("");
+      } else {
+        const v = c.getElementsByTagName("v")[0];
+        wert = v ? v.textContent : "";
+      }
+      zeile[i] = String(wert).trim();
+    });
+    return zeile;
+  }).filter((z2) => z2.some((w) => w));
+}
+
+function csvLesen(datei) {
+  const roh = decodeURIComponent(escape(atob(String(datei.url).split(",")[1])));
+  const trenner = (roh.split("\n")[0].match(/;/g) || []).length >=
+                  (roh.split("\n")[0].match(/,/g) || []).length ? ";" : ",";
+  return roh.split(/\r?\n/).filter((z) => z.trim()).map((z) => {
+    const felder = [];
+    let feld = "", inAnf = false;
+    for (let i = 0; i < z.length; i++) {
+      const c = z[i];
+      if (c === '"') { if (inAnf && z[i + 1] === '"') { feld += '"'; i++; } else inAnf = !inAnf; }
+      else if (c === trenner && !inAnf) { felder.push(feld.trim()); feld = ""; }
+      else feld += c;
+    }
+    felder.push(feld.trim());
+    return felder;
+  });
+}
+
+/* Spalten anhand der Kopfzeile zuordnen, sonst nach Position */
+function spaltenZuordnen(kopf) {
+  const finde = (...begriffe) => {
+    const i = kopf.findIndex((h) =>
+      begriffe.some((b) => String(h || "").toLowerCase().includes(b)));
+    return i;
+  };
+  return {
+    firma: finde("firma", "name", "unternehmen", "title"),
+    ansprechpartner: finde("ansprech", "kontakt", "contact", "inhaber"),
+    telefon: finde("telefon", "phone", "tel"),
+    adresse: finde("adresse", "address", "anschrift", "straße", "strasse"),
+    website: finde("website", "webseite", "url", "homepage", "internet"),
+  };
+}
 
 /* Erzeugt eine echte Excel-Datei (xlsx). Der Inhalt wird als ZIP ohne
    Komprimierung zusammengesetzt, damit keine Fremdbibliothek nötig ist. */
@@ -573,6 +713,8 @@ const leereAnfrage = (user) => ({
     ansprechpartner: "", email: "", telefon: "",
   },
   bemerkungVertrieb: "",
+  lieferstellenListe: false,
+  lieferstellenDatei: null,
   dienstleistungsvertrag: false,
   zielpreis: "",
   zielpreisNotiz: "",
@@ -1445,6 +1587,34 @@ function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrec
 
         {schritt === 2 && (
           <div className="space-y-6">
+            <div className="p-4 rounded"
+                 style={{ background: a.lieferstellenListe ? "#F1F5FA" : "#F6F8FA",
+                          border: "1px solid " + (a.lieferstellenListe ? C.strom : C.line) }}>
+              <label className="flex items-start gap-3 text-sm">
+                <input type="checkbox" className="mt-0.5" checked={!!a.lieferstellenListe}
+                  onChange={(e) => setA({ ...a, lieferstellenListe: e.target.checked,
+                    lieferstellenDatei: e.target.checked ? a.lieferstellenDatei : null })}
+                  style={{ accentColor: C.strom }} />
+                <span>
+                  Lieferstellenliste hochladen
+                  <span className="block text-xs mt-0.5" style={{ color: C.muted }}>
+                    Bei vielen Lieferstellen: Liste des Kunden als Excel- oder CSV-Datei beifügen,
+                    statt jede Stelle einzeln zu erfassen. Eine Blankovorlage findest du unter
+                    Unterlagen im Bereich Dokumente.
+                  </span>
+                </span>
+              </label>
+              {a.lieferstellenListe && (
+                <div className="mt-4">
+                  <Datei label="Lieferstellenliste (Excel oder CSV)" datei={a.lieferstellenDatei}
+                    onSet={(f) => setA({ ...a, lieferstellenDatei: f })} hinweis="Datei auswählen" />
+                  <p className="text-xs mt-2" style={{ color: C.muted }}>
+                    Freiwillig. Erfasse unten trotzdem mindestens eine Lieferstelle, damit Menge und
+                    Zählerart für die Kalkulation vorliegen.
+                  </p>
+                </div>
+              )}
+            </div>
             {[
               { medium: "strom", titel: "Strom", stellen: stromStellen },
               { medium: "gas", titel: "Erdgas", stellen: gasStellen },
@@ -2657,6 +2827,13 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
                 </p>
               )}
               {a.absage.notiz && <p className="text-sm mt-1" style={{ color: C.muted }}>{a.absage.notiz}</p>}
+            </div>
+          )}
+
+          {a.lieferstellenDatei && (
+            <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+              <div className="text-sm mb-2">Lieferstellenliste des Kunden</div>
+              <DateiChip datei={a.lieferstellenDatei} label="Liste" />
             </div>
           )}
 
@@ -4105,10 +4282,11 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
 
   /* Sehen alle Leads: Leitung und Geschäftsführung.
      Anlegen darf jeder im Vertrieb, zuweisen an andere nur ab Teamleiter aufwärts. */
-  const sichtAlle = ["Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
-  const darfAnlegen = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb", "Geschäftsführung"]
+  const sichtAlle = ["Leitung Vertrieb", "Geschäftsführung", "Leadmanagement"].includes(user.rolle);
+  const darfAnlegen = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb", "Geschäftsführung",
+    "Leadmanagement"].includes(user.rolle);
+  const darfZuweisen = ["Teamleiter", "Leitung Vertrieb", "Geschäftsführung", "Leadmanagement"]
     .includes(user.rolle);
-  const darfZuweisen = ["Teamleiter", "Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
   const meineIds = user.rolle === "Teamleiter"
     ? [user.id, ...strukturUnter(user.id, mitarbeiter).map((m) => m.id)]
     : [user.id];
@@ -5041,7 +5219,7 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
 
 /* Punkt 4: Benachrichtigungen werden aus dem Datenbestand abgeleitet.
    Gelesenes merkt sich der Mitarbeiter über die Schlüssel der Meldungen. */
-function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter) {
+function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter, akquise) {
   const m = [];
   const zu = (art, id, text, ziel, datum) => m.push({ id: art + ":" + id, art, text, ziel, datum });
   const meineIds = user.rolle === "Teamleiter"
@@ -5059,6 +5237,14 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
     });
     (leads || []).filter((l) => l.zugewiesen === user.id && !l.gelesen)
       .forEach((l) => zu("lead", l.id, "Neuer Lead: " + l.firma, { ansicht: "leads" }, l.angelegt));
+    (akquise || []).filter((l) =>
+      (Array.isArray(l.zugewiesen) ? l.zugewiesen : l.zugewiesen ? [l.zugewiesen] : [])
+        .includes(user.id)).forEach((l) => {
+      const offen = l.eintraege.filter((e) => e.status === "offen").length;
+      if (offen > 0)
+        zu("akquise", l.id, "Kontaktliste " + l.branche + ": " + offen + " offene Kontakte",
+          { ansicht: "akquise" }, l.hochgeladen);
+    });
   }
 
   if (user.rolle === "Kalkulation") {
@@ -5146,6 +5332,371 @@ function Glocke({ meldungen, gelesen, aufGelesen, aufSpringen }) {
               );
             })}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Akquise-Tool: Kontaktlisten je Branche abtelefonieren */
+/* Listen können mehreren Partnern zugewiesen sein.
+   Ältere Listen mit einer einzelnen Zuweisung werden mitgelesen. */
+const zugewiesenAn = (l) =>
+  Array.isArray(l.zugewiesen) ? l.zugewiesen : l.zugewiesen ? [l.zugewiesen] : [];
+
+const AKQ_STATUS = {
+  offen: { label: "Offen", color: "#6B7787" },
+  termin: { label: "Termin ausgemacht", color: "#4A9130" },
+  wiedervorlage: { label: "Wiedervorlage", color: "#BE6A16" },
+  kein: { label: "Kein Interesse", color: "#B24328" },
+};
+const TERMINFORM = ["Telefonisch", "Vor Ort", "Video"];
+
+function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
+  const [branche, setBranche] = useState("");
+  const [maske, setMaske] = useState(null);
+  const [neuOffen, setNeuOffen] = useState(false);
+  const [datei, setDatei] = useState(null);
+  const [neuBranche, setNeuBranche] = useState("");
+  const [neuName, setNeuName] = useState("");
+  const [neuPartner, setNeuPartner] = useState([]);
+  const [fehler, setFehler] = useState("");
+  const [laedt, setLaedt] = useState(false);
+
+  const darfPflegen = ["Leadmanagement", "Geschäftsführung", "Leitung Vertrieb"].includes(user.rolle);
+  const meineIds = user.rolle === "Teamleiter"
+    ? [user.id, ...strukturUnter(user.id, mitarbeiter).map((m) => m.id)]
+    : [user.id];
+  /* Vertrieb sieht nur die ihm zugewiesenen Listen */
+  const sichtbareListen = darfPflegen ? listen
+    : listen.filter((l) => zugewiesenAn(l).some((id) => meineIds.includes(id)));
+  const branchen = [...new Set(sichtbareListen.map((l) => l.branche))].sort();
+  const aktuelle = sichtbareListen.filter((l) => !branche || l.branche === branche);
+  const eintraege = aktuelle.flatMap((l) =>
+    l.eintraege.map((e) => ({ ...e, listeId: l.id, branche: l.branche })));
+  const empfaenger = mitarbeiter.filter((m) =>
+    ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle) && m.status === "aktiv");
+
+  const setzEintrag = (listeId, eintragId, aend) =>
+    setListen(listen.map((l) => l.id !== listeId ? l
+      : { ...l, eintraege: l.eintraege.map((e) => (e.id === eintragId ? { ...e, ...aend } : e)) }));
+
+  const einlesen = async () => {
+    setFehler(""); setLaedt(true);
+    try {
+      const istExcel = /\.xlsx?$/i.test(datei.name);
+      const zeilen = istExcel ? await xlsxLesen(datei) : csvLesen(datei);
+      if (zeilen.length < 2) throw new Error("Die Datei enthält keine Daten.");
+      const sp = spaltenZuordnen(zeilen[0]);
+      const holen = (z, i, ersatz) => (i >= 0 ? z[i] || "" : z[ersatz] || "");
+      const eintraegeNeu = zeilen.slice(1).map((z) => ({
+        id: uid(),
+        firma: holen(z, sp.firma, 0),
+        ansprechpartner: holen(z, sp.ansprechpartner, 1),
+        telefon: holen(z, sp.telefon, 2),
+        adresse: holen(z, sp.adresse, 3),
+        website: holen(z, sp.website, 4),
+        status: "offen", bearbeiterId: null, bearbeiter: "", notiz: "",
+        daten: { verbrauchStrom: "", verbrauchGas: "", versorger: "", laufzeit: "" },
+        termin: null,
+      })).filter((e) => e.firma);
+      if (!eintraegeNeu.length) throw new Error("Keine Firmennamen erkannt.");
+      setListen([{
+        id: "AK-" + uid(), name: neuName || datei.name, branche: neuBranche,
+        hochgeladen: heute(), von: user.name, zugewiesen: neuPartner,
+        eintraege: eintraegeNeu,
+      }, ...listen]);
+      setNeuOffen(false); setDatei(null); setNeuBranche(""); setNeuName(""); setNeuPartner([]);
+    } catch (e) {
+      setFehler(e.message || "Die Datei konnte nicht gelesen werden.");
+    }
+    setLaedt(false);
+  };
+
+  /* ---------- Liste hochladen ---------- */
+  if (neuOffen)
+    return (
+      <div>
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={() => setNeuOffen(false)} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
+          <h2 className="text-lg">Kontaktliste hochladen</h2>
+        </div>
+        <div className="rounded p-5 space-y-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <p className="text-sm" style={{ color: C.muted, maxWidth: "62ch" }}>
+            Erwartet werden die Spalten Firma, Ansprechpartner, Telefon, Adresse und Website.
+            Die Zuordnung erfolgt über die Kopfzeile, andernfalls über die Reihenfolge.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Feld label="Branche" value={neuBranche} onChange={setNeuBranche}
+              placeholder="z. B. Hotellerie, Bäckereien, Autohäuser" />
+            <Feld label="Bezeichnung der Liste" value={neuName} onChange={setNeuName}
+              placeholder="z. B. Hotels Saarland September" />
+          </div>
+          <Datei label="Excel- oder CSV-Datei" datei={datei} onSet={setDatei} hinweis="Datei auswählen" />
+          <div>
+            <span className="block text-xs mb-2" style={{ color: C.muted }}>
+              Liste zuweisen an ({neuPartner.length} ausgewählt)
+            </span>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {empfaenger.map((m) => (
+                <label key={m.id} className="flex items-center gap-2 text-sm px-3 py-2 rounded"
+                       style={{ border: "1px solid " + (neuPartner.includes(m.id) ? C.strom : C.line),
+                                background: neuPartner.includes(m.id) ? "#F1F5FA" : "#fff" }}>
+                  <input type="checkbox" checked={neuPartner.includes(m.id)}
+                    onChange={() => setNeuPartner(neuPartner.includes(m.id)
+                      ? neuPartner.filter((x) => x !== m.id) : [...neuPartner, m.id])}
+                    style={{ accentColor: C.strom }} />
+                  <span className="flex-1 truncate">{m.name}
+                    <span className="block text-xs" style={{ color: C.muted }}>{m.rolle} · Team {m.team}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs mt-2" style={{ color: C.muted }}>
+              Mehrfachauswahl möglich. Alle Zugewiesenen sehen dieselbe Liste; bearbeitete Kontakte
+              sind für die anderen sofort als erledigt markiert, damit niemand doppelt anruft.
+              Ohne Auswahl bleibt die Liste beim Leadmanagement liegen.
+            </p>
+          </div>
+          {fehler && <p className="text-sm" style={{ color: C.warn }}>{fehler}</p>}
+          <Btn icon={Check} onClick={einlesen} disabled={!datei || !neuBranche.trim() || laedt}>
+            {laedt ? "Wird eingelesen …" : "Liste einlesen"}
+          </Btn>
+        </div>
+      </div>
+    );
+
+  /* ---------- Maske für Termin oder Wiedervorlage ---------- */
+  const Maske = () => {
+    const e = maske.eintrag;
+    const [f, setF] = useState({
+      datum: heute(), zeit: "10:00", art: "Telefonisch",
+      verbrauchStrom: e.daten.verbrauchStrom, verbrauchGas: e.daten.verbrauchGas,
+      versorger: e.daten.versorger, laufzeit: e.daten.laufzeit, notiz: e.notiz,
+    });
+    const istTermin = maske.art === "termin";
+    return (
+      <div className="rounded p-5 mb-5"
+           style={{ background: C.card, border: "1px solid " + (istTermin ? C.ok : C.gas) }}>
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-sm">
+            {istTermin ? "Termin ausgemacht" : "Wiedervorlage"} · {e.firma}
+          </span>
+          <button onClick={() => setMaske(null)} style={{ color: C.muted }}><X size={16} /></button>
+        </div>
+
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Feld label={istTermin ? "Termin am" : "Wiedervorlage am"} type="date" value={f.datum}
+            onChange={(v) => setF({ ...f, datum: v })} />
+          <Feld label="Uhrzeit" value={f.zeit} onChange={(v) => setF({ ...f, zeit: v })} placeholder="10:00" />
+          {istTermin && (
+            <Select label="Terminform" value={f.art} onChange={(v) => setF({ ...f, art: v })}
+              options={TERMINFORM} />
+          )}
+        </div>
+
+        <div className="text-sm mt-5 mb-3">Bereits erfragte Daten</div>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Feld label="Jahresverbrauch Strom in kWh" value={f.verbrauchStrom} zahl
+            onChange={(v) => setF({ ...f, verbrauchStrom: v })} />
+          <Feld label="Jahresverbrauch Erdgas in kWh" value={f.verbrauchGas} zahl
+            onChange={(v) => setF({ ...f, verbrauchGas: v })} />
+          <Feld label="Aktueller Versorger" value={f.versorger}
+            onChange={(v) => setF({ ...f, versorger: v })} />
+          <Feld label="Vertrag läuft bis" type="date" value={f.laufzeit}
+            onChange={(v) => setF({ ...f, laufzeit: v })} />
+        </div>
+
+        <label className="block mt-4">
+          <span className="block text-xs mb-1" style={{ color: C.muted }}>Weitere Informationen</span>
+          <textarea rows={3} value={f.notiz} onChange={(e2) => setF({ ...f, notiz: e2.target.value })}
+            className="w-full px-3 py-2 text-sm rounded outline-none"
+            style={{ border: "1px solid " + C.line }} />
+        </label>
+
+        <div className="flex flex-wrap gap-2 mt-4">
+          <Btn variante={istTermin ? "ok" : "primär"} icon={Check}
+            onClick={() => {
+              setzEintrag(maske.listeId, e.id, {
+                status: istTermin ? "termin" : "wiedervorlage",
+                bearbeiterId: user.id, bearbeiter: user.name, notiz: f.notiz,
+                daten: { verbrauchStrom: f.verbrauchStrom, verbrauchGas: f.verbrauchGas,
+                         versorger: f.versorger, laufzeit: f.laufzeit },
+                termin: { datum: f.datum, zeit: f.zeit, art: istTermin ? f.art : "Wiedervorlage" },
+              });
+              onTermin({
+                titel: (istTermin ? "Termin " : "Wiedervorlage ") + e.firma,
+                datum: f.datum, zeit: f.zeit, dauer: "60",
+                ort: istTermin ? f.art : "Wiedervorlage",
+                notiz: [f.versorger && "Versorger " + f.versorger, f.notiz].filter(Boolean).join(" · "),
+              });
+              setMaske(null);
+            }}>
+            Speichern und in den Kalender
+          </Btn>
+          <Btn variante="hell" onClick={() => setMaske(null)}>Abbrechen</Btn>
+        </div>
+      </div>
+    );
+  };
+
+  /* ---------- Übersicht ---------- */
+  const zahl = (st) => eintraege.filter((e) => e.status === st).length;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <p className="text-sm" style={{ color: C.muted, maxWidth: "50ch" }}>
+          {darfPflegen
+            ? "Kontaktlisten je Branche einspielen und einem Vertriebspartner zuweisen."
+            : "Die dir zugewiesenen Kontaktlisten. Wähle eine Branche und arbeite sie ab."}
+        </p>
+        {darfPflegen && (
+          <Btn icon={Plus} onClick={() => setNeuOffen(true)}>Kontaktliste hochladen</Btn>
+        )}
+      </div>
+
+      <div className="rounded p-3 mb-5 grid sm:grid-cols-2 gap-3"
+           style={{ background: C.card, border: "1px solid " + C.line }}>
+        <Select label="Branche" value={branche} onChange={setBranche}
+          options={[{ value: "", label: "Alle Branchen" }, ...branchen]} />
+        <div className="flex items-end gap-4 text-xs" style={{ color: C.muted }}>
+          <span>{eintraege.length} Kontakte</span>
+          <span style={{ color: C.ok }}>{zahl("termin")} Termine</span>
+          <span style={{ color: C.gas }}>{zahl("wiedervorlage")} Wiedervorlagen</span>
+          <span>{zahl("offen")} offen</span>
+        </div>
+      </div>
+
+      {maske && <Maske />}
+
+      {eintraege.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm"
+             style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          {sichtbareListen.length === 0
+            ? (darfPflegen ? "Noch keine Kontaktlisten eingespielt."
+               : "Dir wurde noch keine Kontaktliste zugewiesen.")
+            : "Keine Kontakte in dieser Branche."}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {eintraege.map((e) => {
+            const st = AKQ_STATUS[e.status];
+            return (
+              <div key={e.id} className="rounded p-4"
+                   style={{ background: C.card, border: "1px solid " + (e.status === "offen" ? C.line : st.color) }}>
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="flex-1 min-w-48">
+                    <button onClick={() => onKunde(e)} className="text-left">
+                      <span className="text-sm" style={{ color: C.strom }}>{e.firma}</span>
+                    </button>
+                    <div className="text-xs mt-1" style={{ color: C.muted }}>
+                      {[e.ansprechpartner, e.adresse].filter(Boolean).join(" · ")}
+                    </div>
+                    <div className="flex flex-wrap gap-3 mt-2">
+                      {e.telefon && (
+                        <a href={"tel:" + e.telefon.replace(/[^+\d]/g, "")}
+                           className="text-sm px-2 py-1 rounded"
+                           style={{ border: "1px solid " + C.line, color: C.strom }}>
+                          {e.telefon}
+                        </a>
+                      )}
+                      {e.website && (
+                        <a href={/^https?:/.test(e.website) ? e.website : "https://" + e.website}
+                           target="_blank" rel="noreferrer" className="text-sm px-2 py-1 rounded"
+                           style={{ border: "1px solid " + C.line, color: C.muted }}>
+                          Website
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: st.color }}>
+                    <span className="w-2 h-2 rounded-full" style={{ background: st.color }} />{st.label}
+                  </span>
+                </div>
+
+                {e.termin && (
+                  <p className="text-xs mt-2" style={{ color: st.color }}>
+                    {e.termin.art} am {datum(e.termin.datum)} um {e.termin.zeit} Uhr
+                    {e.bearbeiter ? " · " + e.bearbeiter : ""}
+                  </p>
+                )}
+                {e.notiz && <p className="text-sm mt-2" style={{ color: C.muted }}>{e.notiz}</p>}
+
+                <div className="flex flex-wrap gap-2 mt-3 pt-3" style={{ borderTop: "1px solid " + C.line }}>
+                  <button onClick={() => setMaske({ art: "termin", eintrag: e, listeId: e.listeId })}
+                    className="text-xs px-2 py-1 rounded"
+                    style={{ border: "1px solid " + C.line, color: C.ok }}>Termin ausgemacht</button>
+                  <button onClick={() => setMaske({ art: "wiedervorlage", eintrag: e, listeId: e.listeId })}
+                    className="text-xs px-2 py-1 rounded"
+                    style={{ border: "1px solid " + C.line, color: C.gas }}>Wiedervorlage</button>
+                  <button onClick={() => setzEintrag(e.listeId, e.id, {
+                      status: "kein", bearbeiterId: user.id, bearbeiter: user.name })}
+                    className="text-xs px-2 py-1 rounded"
+                    style={{ border: "1px solid " + C.line, color: C.warn }}>Kein Interesse</button>
+                  <span className="flex-1" />
+                  <button onClick={() => onKunde(e)} className="text-xs px-2 py-1 rounded"
+                    style={{ border: "1px solid " + C.line, color: C.strom }}>
+                    Als Kunde übernehmen
+                  </button>
+                  {e.status !== "offen" && (
+                    <button onClick={() => setzEintrag(e.listeId, e.id, {
+                        status: "offen", termin: null, bearbeiterId: null, bearbeiter: "" })}
+                      className="text-xs px-2 py-1 rounded"
+                      style={{ border: "1px solid " + C.line, color: C.muted }}>zurücksetzen</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {darfPflegen && listen.length > 0 && (
+        <div className="rounded overflow-hidden mt-6" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="px-4 py-3 text-sm" style={{ borderBottom: "1px solid " + C.line }}>
+            Eingespielte Listen
+          </div>
+          {listen.map((l, i) => (
+            <div key={l.id} className="flex flex-wrap items-center gap-4 px-4 py-3 text-sm"
+                 style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <div className="flex-1 min-w-40">
+                <div>{l.name}</div>
+                <div className="text-xs" style={{ color: C.muted }}>
+                  {l.branche} · {l.eintraege.length} Kontakte · {datum(l.hochgeladen)} · {l.von}
+                </div>
+              </div>
+              <span className="text-xs" style={{ color: C.ok }}>
+                {l.eintraege.filter((e) => e.status === "termin").length} Termine
+              </span>
+              <details className="w-full sm:w-72">
+                <summary className="text-xs cursor-pointer" style={{ color: C.strom }}>
+                  {zugewiesenAn(l).length === 0
+                    ? "nicht zugewiesen"
+                    : "zugewiesen an " + zugewiesenAn(l)
+                        .map((id) => (mitarbeiter.find((m) => m.id === id) || {}).name || "?")
+                        .join(", ")}
+                </summary>
+                <div className="mt-2 space-y-1">
+                  {empfaenger.map((m) => (
+                    <label key={m.id} className="flex items-center gap-2 text-xs">
+                      <input type="checkbox" checked={zugewiesenAn(l).includes(m.id)}
+                        onChange={() => setListen(listen.map((x) => x.id !== l.id ? x : {
+                          ...x,
+                          zugewiesen: zugewiesenAn(x).includes(m.id)
+                            ? zugewiesenAn(x).filter((y) => y !== m.id)
+                            : [...zugewiesenAn(x), m.id],
+                        }))}
+                        style={{ accentColor: C.strom }} />
+                      {m.name}
+                    </label>
+                  ))}
+                </div>
+              </details>
+              <button onClick={() => setListen(listen.filter((x) => x.id !== l.id))}
+                style={{ color: C.muted }}><Trash2 size={15} /></button>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -6372,7 +6923,7 @@ function Kunden({ anfragen, leads, mitarbeiter, user, onOeffnen, onLead }) {
 /* Welche Vorgänge gehören zum gewählten Bereich? null = alle */
 function bereichIds(user, mitarbeiter, bereich) {
   if (["Leitung Vertrieb", "Geschäftsführung", "Kalkulation", "Vertragsmanagement",
-       "Finanzbuchhaltung"].includes(user.rolle))
+       "Finanzbuchhaltung", "Leadmanagement"].includes(user.rolle))
     return null;
   if (user.rolle === "Teamleiter" && bereich === "team")
     return [user.id, ...strukturUnter(user.id, mitarbeiter).map((m) => m.id)];
@@ -6736,6 +7287,7 @@ export default function App() {
   const [smartmeter, setSmartmeter] = useState([]);
   const [probleme, setProbleme] = useState([]);
   const [termine, setTermine] = useState([]);
+  const [akquise, setAkquise] = useState([]);
   const [listenAnsicht, setListenAnsicht] = useState(null);
   const [userId, setUserId] = useState(null);
   const [registriert, setRegistriert] = useState(null);
@@ -6785,6 +7337,10 @@ export default function App() {
           const te = await window.storage.get("egc-crm:termine");
           if (te && te.value) setTermine(JSON.parse(te.value));
         } catch (e9) { /* noch keine Termine */ }
+        try {
+          const ak = await window.storage.get("egc-crm:akquise");
+          if (ak && ak.value) setAkquise(JSON.parse(ak.value));
+        } catch (e10) { /* noch keine Kontaktlisten */ }
       } catch (e) { /* erster Start: Demodaten */ }
       setGeladen(true);
     })();
@@ -6803,9 +7359,11 @@ export default function App() {
         await window.storage.set("egc-crm:smartmeter", JSON.stringify(smartmeter));
         await window.storage.set("egc-crm:probleme", JSON.stringify(probleme));
         await window.storage.set("egc-crm:termine", JSON.stringify(termine));
+        await window.storage.set("egc-crm:akquise", JSON.stringify(akquise));
       } catch (e) { /* Speichern nicht verfügbar */ }
     })();
-  }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine, geladen]);
+  }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine,
+      akquise, geladen]);
 
   const speichern = (a) =>
     setAnfragen((prev) => (prev.some((x) => x.id === a.id)
@@ -6854,7 +7412,7 @@ export default function App() {
   };
 
   const meldungen = user
-    ? meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter) : [];
+    ? meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter, akquise) : [];
   const gelesen = (user && user.gelesen) || [];
   const alsGelesen = (schluessel) =>
     setMitarbeiter((alt) => alt.map((m) => m.id === (user && user.id)
@@ -6875,6 +7433,7 @@ export default function App() {
       { id: "neu", label: "Neue Anfrage", icon: Plus },
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
+      { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "kunden", label: "Meine Kunden", icon: FileSignature },
       { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
       { id: "stornos", label: "Stornierungen", icon: X },
@@ -6910,6 +7469,7 @@ export default function App() {
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "alle", label: "Team-Vorgänge", icon: Users },
       { id: "leads", label: "Meine Leads", icon: Inbox, badge: neueLeads },
+      { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "kunden", label: "Kunden im Team", icon: FileSignature },
       { id: "provisionen", label: "Meine Provisionen", icon: Wallet },
       { id: "stornos", label: "Stornierungen", icon: X },
@@ -6925,6 +7485,7 @@ export default function App() {
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
+      { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
       { id: "provisionen", label: "Provisionen", icon: Wallet },
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
@@ -6947,6 +7508,7 @@ export default function App() {
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
+      { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "ruecksprachen", label: "Rücksprachen", icon: AlertTriangle },
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
@@ -6958,6 +7520,14 @@ export default function App() {
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "export", label: "Export und Sicherung", icon: Upload },
+      { id: "unterlagen", label: "Unterlagen", icon: FileText },
+    ],
+    Leadmanagement: [
+      { id: "dashboard", label: "Übersicht", icon: BarChart3 },
+      { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
+      { id: "akquise", label: "Akquise-Tool", icon: Target },
+      { id: "kalender", label: "Kalender", icon: Calendar },
+      { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
     Finanzbuchhaltung: [
@@ -7138,6 +7708,35 @@ export default function App() {
   } else if (ansicht === "ziele") {
     inhalt = <Ziele mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
                anfragen={anfragen} user={user} />;
+  } else if (ansicht === "akquise") {
+    inhalt = (
+      <Akquise listen={akquise} setListen={setAkquise} user={user} mitarbeiter={mitarbeiter}
+        onTermin={(t) => setTermine((alt) => [...alt, { id: "TE" + uid(), fuerId: user.id, ...t }])}
+        onKunde={(e) => {
+          const a = leereAnfrage(user);
+          const teile = String(e.adresse || "").split(",");
+          const ortTeil = (teile[1] || "").trim();
+          a.kunde = {
+            ...a.kunde, firma: e.firma, ansprechpartner: e.ansprechpartner, telefon: e.telefon,
+            strasse: (teile[0] || "").trim(),
+            plz: (ortTeil.match(/\d{5}/) || [""])[0],
+            ort: ortTeil.replace(/\d{5}/, "").trim(),
+            branche: e.branche || "",
+          };
+          const stellen = [];
+          if (parseFloat(e.daten.verbrauchStrom) > 0)
+            stellen.push({ ...leereLieferstelle("strom"), bezeichnung: "Hauptstandort",
+              versorger: e.daten.versorger || "", verbrauch: e.daten.verbrauchStrom });
+          if (parseFloat(e.daten.verbrauchGas) > 0)
+            stellen.push({ ...leereLieferstelle("gas"), bezeichnung: "Hauptstandort",
+              versorger: e.daten.versorger || "", verbrauch: e.daten.verbrauchGas });
+          if (stellen.length) a.lieferstellen = stellen;
+          if (e.daten.laufzeit) a.wunschLieferbeginn = e.daten.laufzeit;
+          a.bemerkungVertrieb = [e.notiz, e.website].filter(Boolean).join(" · ");
+          setEntwurf(a);
+          setAnsicht("neu");
+        }} />
+    );
   } else if (ansicht === "kalender") {
     inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} />;
   } else if (ansicht === "export") {
