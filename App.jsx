@@ -200,6 +200,7 @@ function migriereAnfragen(liste) {
     fehlend: [], fehlendText: "", nachrichten: [], verlauf: [], ausgezahlt: {},
     annahme: null, einreichung: false, bestaetigung: null, klaerung: null,
     provisionErhalten: null, vertragsStatus: null, ruecksprache: null, absage: null,
+    verlaengerungVon: null,
     ...a,
     kunde: { firma: "", strasse: "", plz: "", ort: "", branche: "",
              ansprechpartner: "", email: "", telefon: "", ...(a.kunde || {}) },
@@ -276,7 +277,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v3.7 · 07.09.2026 · Listen mehrfach zuweisen";
+const VERSION = "v3.8 · 07.09.2026 · Vertragsverlängerung";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -739,6 +740,7 @@ const leereAnfrage = (user) => ({
   klaerung: null,
   provisionErhalten: null,
   absage: null,
+  verlaengerungVon: null,
   ausgezahlt: {},
   verlauf: [],
 });
@@ -784,6 +786,21 @@ const laufzeitMonate = (v) =>
 
 const enddatum = (v) =>
   v.laufzeitArt === "ende" ? v.lieferende || null : monateDazu(v.lieferbeginn, parseInt(v.laufzeit) || 0);
+
+/* Vorlaufzeiten für die Erinnerung an auslaufende Verträge, in Monaten */
+const VERLAENGERUNG_VORLAUF = [12, 6, 3];
+
+const vertragsende = (a) => {
+  const v = aktiveVariante(a);
+  return v ? enddatum(v) : null;
+};
+
+const monateBis = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso), n = new Date();
+  if (isNaN(d)) return null;
+  return (d.getFullYear() - n.getFullYear()) * 12 + (d.getMonth() - n.getMonth());
+};
 
 const laufzeitVon = (a) => {
   const v = aktiveVariante(a);
@@ -2026,7 +2043,8 @@ function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrec
 /* ------------------------------------------------------------------ */
 /*  Anfrage-Detail                                                     */
 /* ------------------------------------------------------------------ */
-function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbeiten }) {
+function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
+                 onBearbeiten, onVerlaengern }) {
   const [vars, setVars] = useState(
     a.kalkulation && a.kalkulation.varianten && a.kalkulation.varianten.length
       ? a.kalkulation.varianten
@@ -2395,6 +2413,73 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
               </div>
             </div>
           </div>
+          {/* Vertragsverlängerung */}
+          {["bestaetigt", "abgeschlossen"].includes(a.status) &&
+           (istPartner || istVM || user.rolle === "Geschäftsführung") && (() => {
+            const ende = vertragsende(a);
+            const rest = monateBis(ende);
+            const faellig = rest != null && rest <= VERLAENGERUNG_VORLAUF[0];
+            const nachfolger = (alleAnfragen || []).find((x) => x.verlaengerungVon === a.id);
+            return (
+              <div className="rounded p-4"
+                   style={{ background: C.card,
+                            border: "1px solid " + (nachfolger ? C.line : faellig ? C.gas : C.line) }}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                  <span className="text-sm">Vertragsverlängerung</span>
+                  <span className="text-xs" style={{ color: faellig ? C.gas : C.muted }}>
+                    {ende
+                      ? "Vertragsende " + datum(ende) +
+                        (rest != null ? " · noch " + num(Math.max(0, rest)) + " Monate" : "")
+                      : "Vertragsende nicht hinterlegt"}
+                  </span>
+                </div>
+
+                {nachfolger ? (
+                  <p className="text-sm" style={{ color: C.ok }}>
+                    Verlängerung läuft bereits: {nachfolger.id} · {STATUS[nachfolger.status].label}
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm mb-3" style={{ color: C.muted, maxWidth: "62ch" }}>
+                      Erzeugt eine neue Anfrage mit allen Lieferstellen, Zählernummern und
+                      Marktlokations-IDs dieses Kunden. Der Lieferbeginn wird auf den Tag nach
+                      Vertragsende gesetzt.
+                    </p>
+                    <Btn variante={faellig ? "primär" : "hell"} icon={RotateCcw}
+                      onClick={() => onVerlaengern && onVerlaengern(a)}>
+                      Verlängerung anfragen
+                    </Btn>
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Angaben aus dem Vorvertrag */}
+          {a.verlaengerungVon && (() => {
+            const alt = (alleAnfragen || []).find((x) => x.id === a.verlaengerungVon);
+            if (!alt) return null;
+            const v = aktiveVariante(alt);
+            return (
+              <div className="rounded p-4" style={{ background: "#F6F8FA", border: "1px solid " + C.strom }}>
+                <div className="text-sm mb-2" style={{ color: C.strom }}>
+                  Verlängerung von {alt.id}
+                </div>
+                <div className="grid sm:grid-cols-2 gap-x-8 text-sm">
+                  <Zeile k="Bisheriger Versorger"
+                    v={alt.bestaetigung ? alt.bestaetigung.versorger : "–"} />
+                  <Zeile k="Bisheriges Produkt" v={v ? v.produkt : alt.produkt} />
+                  <Zeile k="Bisheriger Aufschlag"
+                    v={num(alt.bestaetigung ? alt.bestaetigung.aufschlag : (v ? v.aufschlag : alt.aufschlag), 3) + " ct/kWh"} />
+                  <Zeile k="Bisherige Laufzeit" v={laufzeitVon(alt) + " Monate"} />
+                  <Zeile k="Bisheriges Vertragsende" v={datum(vertragsende(alt))} />
+                  <Zeile k="Bestätigte Menge"
+                    v={alt.bestaetigung ? num(bestaetigteMenge(alt)) + " kWh" : "–"} />
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Betreuung und Provisionsaufteilung */}
           {(istVM || user.rolle === "Geschäftsführung") && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
@@ -5232,6 +5317,16 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
       if (a.status === "klaerfall") zu("klaerfall", a.id, "Unterlagen fehlen: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
       if (a.status === "angefragt") zu("angefragt", a.id, "Angebot beim Versorger angefragt: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
       if (a.status === "bestaetigt") zu("bestaetigt", a.id, "Auftrag bestätigt: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
+      if (a.status === "abgeschlossen") {
+        const ende = vertragsende(a);
+        const rest = monateBis(ende);
+        if (rest != null && rest >= 0 && rest <= VERLAENGERUNG_VORLAUF[0] &&
+            !anfragen.some((x) => x.verlaengerungVon === a.id))
+          zu("verlaengerung", a.id,
+            "Vertrag läuft aus: " + a.kunde.firma + " am " + datum(ende) +
+            " · noch " + rest + " Monate",
+            { ansicht: "kunden", vorgang: a.id }, ende);
+      }
       if (a.absage && a.absage.wiedervorlage && a.absage.wiedervorlage <= heute())
         zu("wiedervorlage", a.id, "Wiedervorlage fällig: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.absage.wiedervorlage);
     });
@@ -6839,6 +6934,10 @@ function Kunden({ anfragen, leads, mitarbeiter, user, onOeffnen, onLead }) {
                   <tr key={a.id} onClick={() => onOeffnen(a.id)} style={{ cursor: "pointer" }}>
                     <Zelle>
                       {a.kunde.firma}
+                      {a.verlaengerungVon && (
+                        <span className="text-xs ml-2 px-1.5 py-0.5 rounded"
+                              style={{ border: "1px solid " + C.line, color: C.strom }}>Verlängerung</span>
+                      )}
                       <span className="block text-xs" style={{ color: C.muted }}>
                         {a.kunde.ort}{vollsicht || bereich === "team" ? " · " + a.partnerName : ""}
                       </span>
@@ -6848,7 +6947,22 @@ function Kunden({ anfragen, leads, mitarbeiter, user, onOeffnen, onLead }) {
                         {va && va.lieferbeginn ? "ab " + datum(va.lieferbeginn) : va ? va.produkt : ""}
                       </span>
                     </Zelle>
-                    <Zelle>{ende ? datum(ende) : "offen"}</Zelle>
+                    <Zelle>
+                      {ende ? datum(ende) : "offen"}
+                      {(() => {
+                        const rest = monateBis(ende);
+                        const laeuft = anfragen.some((x) => x.verlaengerungVon === a.id);
+                        if (laeuft) return (
+                          <span className="block text-xs" style={{ color: C.ok }}>Verlängerung läuft</span>
+                        );
+                        if (rest != null && rest >= 0 && rest <= VERLAENGERUNG_VORLAUF[0]) return (
+                          <span className="block text-xs" style={{ color: C.gas }}>
+                            in {rest} Monaten fällig
+                          </span>
+                        );
+                        return null;
+                      })()}
+                    </Zelle>
                     <Zelle rechts>{verbrauchMedium(a, "strom") ? num(verbrauchMedium(a, "strom")) : "–"}</Zelle>
                     <Zelle rechts>{verbrauchMedium(a, "gas") ? num(verbrauchMedium(a, "gas")) : "–"}</Zelle>
                     <Zelle rechts>{verbrauchMedium(a, "strom") ? eur(jeSparte(a, "strom")) : "–"}</Zelle>
@@ -7391,6 +7505,45 @@ export default function App() {
          p.betroffene.some((b) => b.id === user.id ||
            strukturUnter(user.id, mitarbeiter).some((m) => m.id === b.id)))).length : 0;
 
+  /* Verlängerung: übernimmt Kunde und Lieferstellen aus dem Altvertrag */
+  const verlaengern = (alt) => {
+    const n = leereAnfrage(user);
+    const v = aktiveVariante(alt);
+    const ende = vertragsende(alt);
+    const start = ende ? monateDazu(ende, 0) : "";
+    const naechsterTag = (() => {
+      if (!start) return "";
+      const d = new Date(start); d.setDate(d.getDate() + 1);
+      return d.toISOString().slice(0, 10);
+    })();
+
+    n.kunde = { ...alt.kunde };
+    n.beteiligte = alt.beteiligte ? [...alt.beteiligte] : null;
+    n.partnerId = alt.partnerId;
+    n.partnerName = alt.partnerName;
+    n.team = alt.team;
+    n.verlaengerungVon = alt.id;
+    n.produkt = v ? v.produkt : alt.produkt;
+    n.produktGas = alt.produktGas;
+    n.laufzeit = laufzeitVon(alt) || 24;
+    n.aufschlag = alt.bestaetigung ? parseFloat(alt.bestaetigung.aufschlag) || alt.aufschlag : alt.aufschlag;
+    n.wunschLieferbeginn = naechsterTag < fruehesterBeginn() ? fruehesterBeginn() : naechsterTag;
+    n.lieferstellen = alt.lieferstellen.map((l) => ({
+      ...l,
+      id: uid(),
+      abrechnung: null, lastgang: null, zaehlerfoto: null, zaehlerfotoVorhanden: false,
+      gewerbeanmeldung: null, pachtvertrag: null, preis: "", energiepreis: "",
+      versorger: alt.bestaetigung ? alt.bestaetigung.versorger : l.versorger,
+      verbrauch: alt.bestaetigung && (alt.bestaetigung.stellen[l.id] || {}).kwh
+        ? alt.bestaetigung.stellen[l.id].kwh : l.verbrauch,
+    }));
+    n.bemerkungVertrieb = "Verlängerung zu " + alt.id + ", bisheriges Vertragsende " +
+      (ende ? datum(ende) : "unbekannt") + ".";
+    setOffen(null);
+    setEntwurf(n);
+    setAnsicht("neu");
+  };
+
   const ausLead = (l) => {
     const a = leereAnfrage(user);
     a.kunde = {
@@ -7595,8 +7748,10 @@ export default function App() {
   } else if (aktuell) {
     inhalt = (
       <Detail a={aktuell} user={user} mitarbeiter={mitarbeiter} versorger={versorger}
+        alleAnfragen={anfragen}
         onZurueck={() => setOffen(null)} onUpdate={(a) => speichern(a)}
-        onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }} />
+        onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }}
+        onVerlaengern={verlaengern} />
     );
   } else if (ansicht === "neu" || entwurf) {
     inhalt = (
