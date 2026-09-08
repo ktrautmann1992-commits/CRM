@@ -214,7 +214,10 @@ function migriereAnfragen(liste) {
 }
 
 function migriereMitarbeiter(liste) {
-  return (liste || []).map((m) => ({
+  const vorhanden = (liste || []).map((m) => m.id);
+  /* Rollen, die es beim letzten Speichern noch nicht gab, kommen dazu */
+  const ergaenzt = [...(liste || []), ...USERS.filter((u) => !vorhanden.includes(u.id))];
+  return ergaenzt.map((m) => ({
     telefon: "", bild: null, status: "aktiv", satz: 0, upline: null,
     ...m,
     stammdaten: { ...leereStammdaten(), ...(m.stammdaten || {}) },
@@ -277,7 +280,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v3.8 · 07.09.2026 · Vertragsverlängerung";
+const VERSION = "v4.2 · 08.09.2026 · Kalender für alle Rollen";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -748,6 +751,174 @@ const leereAnfrage = (user) => ({
 const verbrauchGesamt = (a) =>
   a.lieferstellen.reduce((s, l) => s + (parseFloat(l.verbrauch) || 0), 0);
 
+/* Zahl aus Text lesen, deutsche und englische Schreibweise */
+function zahlLesen(roh) {
+  let t = String(roh === undefined || roh === null ? "" : roh).trim().replace(/\s/g, "");
+  if (!t) return NaN;
+  if (t.includes(",") && t.includes(".")) t = t.replace(/\./g, "").replace(",", ".");
+  else if (t.includes(",")) t = t.replace(",", ".");
+  return parseFloat(t);
+}
+
+const istDatum = (t) => /\d{1,4}[.\-/]\d{1,2}[.\-/]\d{1,4}/.test(String(t || ""));
+
+/* Lastgang auswerten: Menge, Spitzenlast, Benutzungsstunden, Monatsverlauf */
+async function lastgangAuswerten(datei) {
+  const zeilen = /\.xlsx?$/i.test(datei.name) ? await xlsxLesen(datei) : csvLesen(datei);
+  if (!zeilen.length) throw new Error("Die Datei ist leer.");
+
+  /* Spalte mit den meisten Zahlen suchen */
+  const proben = zeilen.slice(0, 200);
+  const breite = Math.max(...proben.map((z) => z.length));
+  let beste = -1, meiste = 0;
+  for (let i = 0; i < breite; i++) {
+    const gefuellt = proben.filter((z) => z[i] !== undefined && z[i] !== "");
+    /* Spalten mit Datumsangaben scheiden aus */
+    if (gefuellt.filter((z) => istDatum(z[i])).length > gefuellt.length / 2) continue;
+    const treffer = gefuellt.filter((z) => !isNaN(zahlLesen(z[i]))).length;
+    if (treffer > meiste) { meiste = treffer; beste = i; }
+  }
+  if (beste < 0) throw new Error("Keine Zahlenspalte gefunden.");
+
+  const werte = [];
+  const zeitpunkte = [];
+  zeilen.forEach((z) => {
+    const w = zahlLesen(z[beste]);
+    if (isNaN(w)) return;
+    werte.push(w);
+    zeitpunkte.push(z.find((f) => istDatum(f)) || null);
+  });
+  if (werte.length < 10) throw new Error("Zu wenige Messwerte gefunden.");
+
+  const summe = werte.reduce((x, y) => x + y, 0);
+  const max = Math.max(...werte);
+  const schnitt = summe / werte.length;
+  /* Viertelstundenwerte in kWh ergeben Leistung in kW mal vier */
+  const proStunde = werte.length > 30000 ? 4 : werte.length > 15000 ? 2 : 1;
+  const spitze = max * proStunde;
+  const benutzung = spitze > 0 ? summe / spitze : 0;
+
+  /* Monatsprofil, sonst gleichmäßige Abschnitte */
+  const monate = Array(12).fill(0);
+  let mitDatum = 0;
+  werte.forEach((w, i) => {
+    const t = zeitpunkte[i];
+    const m = t && String(t).match(/\d{1,2}[.\-/](\d{1,2})[.\-/]\d{2,4}/);
+    if (m) { monate[parseInt(m[1]) - 1] += w; mitDatum++; }
+  });
+  const profil = mitDatum > werte.length / 2 ? monate : (() => {
+    const teile = Array(12).fill(0);
+    werte.forEach((w, i) => { teile[Math.min(11, Math.floor((i / werte.length) * 12))] += w; });
+    return teile;
+  })();
+
+  return { anzahl: werte.length, summe, max, schnitt, spitze, benutzung, profil,
+           datiert: mitDatum > werte.length / 2 };
+}
+
+function Lastganganalyse({ datei }) {
+  const [stand, setStand] = useState(null);
+  const [fehler, setFehler] = useState("");
+  const [laedt, setLaedt] = useState(false);
+
+  const starten = async () => {
+    setLaedt(true); setFehler("");
+    try { setStand(await lastgangAuswerten(datei)); }
+    catch (e) { setFehler(e.message || "Auswertung nicht möglich."); }
+    setLaedt(false);
+  };
+
+  if (!stand)
+    return (
+      <div className="mt-2">
+        <button onClick={starten} disabled={laedt} className="text-xs px-2 py-1 rounded"
+          style={{ border: "1px solid " + C.line, color: C.strom }}>
+          {laedt ? "wird ausgewertet …" : "Lastgang auswerten"}
+        </button>
+        {fehler && <p className="text-xs mt-1" style={{ color: C.warn }}>{fehler}</p>}
+      </div>
+    );
+
+  const maxProfil = Math.max(...stand.profil, 1);
+  const monatsnamen = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+
+  return (
+    <div className="mt-3 p-3 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+      <div className="flex items-baseline justify-between mb-3">
+        <span className="text-sm">Auswertung des Lastgangs</span>
+        <button className="text-xs" style={{ color: C.muted }} onClick={() => setStand(null)}>schließen</button>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        {[["Jahresmenge", num(stand.summe) + " kWh"],
+          ["Spitzenlast", num(stand.spitze, 1) + " kW"],
+          ["Benutzungsstunden", num(stand.benutzung, 0) + " h"],
+          ["Messwerte", num(stand.anzahl)]].map(([k, v]) => (
+          <div key={k}>
+            <div className="text-xs mb-1" style={{ color: C.muted }}>{k}</div>
+            <div className="text-sm" style={{ fontVariantNumeric: "tabular-nums" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-end gap-1" style={{ height: 70 }}>
+        {stand.profil.map((w, i) => (
+          <div key={i} className="flex-1 rounded-t" title={num(w) + " kWh"}
+               style={{ height: Math.max(3, (w / maxProfil) * 70) + "px", background: C.strom }} />
+        ))}
+      </div>
+      <div className="flex justify-between text-xs mt-1" style={{ color: C.muted }}>
+        {monatsnamen.map((m, i) => <span key={i}>{m}</span>)}
+      </div>
+      <p className="text-xs mt-2" style={{ color: C.muted }}>
+        {stand.datiert ? "Monatsverlauf aus den Zeitstempeln der Datei."
+          : "Kein Datum erkannt, die Datei wurde in zwölf gleich große Abschnitte geteilt."}
+        {" "}Benutzungsstunden über 4.000 sprechen für gleichmäßigen Bezug.
+      </p>
+    </div>
+  );
+}
+
+/* Erzeugt ein Angebotsdokument aus den erfassten Daten */
+function angebotPdf(a, v) {
+  const z = [];
+  z.push({ text: a.kunde.firma, gross: true });
+  z.push([a.kunde.strasse, [a.kunde.plz, a.kunde.ort].filter(Boolean).join(" ")].filter(Boolean).join(", "));
+  if (a.kunde.ansprechpartner) z.push("Zu Händen " + a.kunde.ansprechpartner);
+  z.push(" ");
+  z.push({ text: "Angebot " + v.produkt, gross: true });
+  z.push("Vorgang " + a.id + "   ·   Angebotsdatum " + datum(heute()) +
+         (v.gueltigBis ? "   ·   gültig bis " + datum(v.gueltigBis) : ""));
+  z.push("Laufzeit " + (laufzeitMonate(v) || v.laufzeit) + " Monate" +
+         (v.lieferbeginn ? ", Lieferbeginn " + datum(v.lieferbeginn) : "") +
+         (enddatum(v) ? ", Lieferende " + datum(enddatum(v)) : ""));
+  z.push("Sparte: " + (v.sparte === "gas" ? "Erdgas" : v.sparte === "strom" ? "Strom" : "Strom und Erdgas"));
+  z.push(" ");
+  z.push({ text: "Lieferstellen und Preise", gross: true });
+  a.lieferstellen
+    .filter((l) => !v.sparte || v.sparte === "beide" || l.medium === v.sparte)
+    .forEach((l) => {
+      const pr = (v.preise || {})[l.id] || {};
+      z.push((l.bezeichnung || (l.medium === "strom" ? "Strom" : "Erdgas")) +
+        "  ·  " + [l.strasse, l.plz + " " + l.ort].filter(Boolean).join(", "));
+      z.push("     Zählernummer " + (l.zaehlernummer || "-") +
+             "   MaLo " + (l.maloId || "-") + "   " + l.zaehlerart +
+             "   " + num(parseFloat(l.verbrauch) || 0) + " kWh/Jahr");
+      if (pr.energie || pr.arbeit)
+        z.push("     " + [pr.energie && "Energiepreis " + pr.energie + " ct/kWh",
+                          pr.arbeit && "Arbeitspreis " + pr.arbeit + " ct/kWh"]
+                          .filter(Boolean).join("   "));
+    });
+  z.push(" ");
+  z.push("Gesamtmenge " + num(mengeSparte(a, v.sparte)) + " kWh je Lieferjahr");
+  if (v.bemerkung) { z.push(" "); z.push({ text: "Hinweise", gross: true }); z.push(v.bemerkung); }
+  z.push(" ");
+  z.push("Alle Preise netto zuzüglich Steuern, Abgaben, Umlagen und Netzentgelten,");
+  z.push("soweit nicht anders angegeben. Angebot freibleibend.");
+  z.push(" ");
+  z.push("EGC-Energie · Energate-Consulting");
+  return erzeugePdf("angebot_" + a.id + "_" + (v.produkt || "").toLowerCase().replace(/[^a-z]/g, "") + ".pdf",
+    "Angebot " + a.id, z);
+}
+
 /* Angebotsvarianten: die Kalkulation kann mehrere Angebote zurückgeben
    (z. B. Festpreis 24 Monate und Spotmarkt 12 Monate, oder je Sparte eines).
    Ältere Vorgänge ohne Varianten werden auf eine einzelne Variante umgerechnet. */
@@ -801,6 +972,53 @@ const monateBis = (iso) => {
   if (isNaN(d)) return null;
   return (d.getFullYear() - n.getFullYear()) * 12 + (d.getMonth() - n.getMonth());
 };
+
+/* Mögliche Doppelerfassung eines Kunden erkennen */
+function dubletten(a, alle, mitarbeiter) {
+  const norm = (t) => String(t || "").toLowerCase().replace(/[^a-zäöüß0-9]/g, "");
+  const maloIds = a.lieferstellen.map((l) => String(l.maloId || "").replace(/\s/g, "")).filter(Boolean);
+  const treffer = [];
+  (alle || []).forEach((x) => {
+    if (x.id === a.id || ["abgelehnt", "entwurf"].includes(x.status)) return;
+    const gruende = [];
+    const fremdeMalo = x.lieferstellen.map((l) => String(l.maloId || "").replace(/\s/g, "")).filter(Boolean);
+    if (maloIds.some((m) => fremdeMalo.includes(m))) gruende.push("gleiche Marktlokations-ID");
+    if (norm(a.kunde.firma) && norm(a.kunde.firma) === norm(x.kunde.firma)) gruende.push("gleicher Firmenname");
+    else if (norm(a.kunde.firma) && norm(a.kunde.strasse) &&
+             norm(a.kunde.strasse) === norm(x.kunde.strasse) && a.kunde.plz === x.kunde.plz)
+      gruende.push("gleiche Anschrift");
+    if (gruende.length) {
+      const inhaber = (mitarbeiter || []).find((m) => m.id === x.partnerId);
+      treffer.push({ vorgang: x, gruende, inhaber: inhaber ? inhaber.name : x.partnerName });
+    }
+  });
+  return treffer;
+}
+
+/* Liegezeiten aus dem Verlauf ableiten */
+const tageSeit = (iso) => tageZwischen(iso, heute());
+
+function liegezeit(a) {
+  const letzter = a.verlauf && a.verlauf.length ? a.verlauf[a.verlauf.length - 1] : null;
+  return letzter ? tageSeit(letzter.d) : null;
+}
+
+function phasenDauer(a) {
+  const finde = (teil) => {
+    const e = (a.verlauf || []).find((v) => v.t.toLowerCase().includes(teil));
+    return e ? e.d : null;
+  };
+  const eingereicht = finde("anfrage eingereicht");
+  const kalkuliert = finde("kalkuliert");
+  const abschluss = finde("abschluss an die kalkulation");
+  const bestaetigt = finde("beim versorger bestätigt");
+  return {
+    kalkulation: tageZwischen(eingereicht, kalkuliert),
+    kunde: tageZwischen(kalkuliert, abschluss),
+    versorger: tageZwischen(abschluss, bestaetigt),
+    gesamt: tageZwischen(eingereicht, bestaetigt),
+  };
+}
 
 const laufzeitVon = (a) => {
   const v = aktiveVariante(a);
@@ -1399,11 +1617,16 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
           <span className="text-right">
             <span className="block" style={{ fontVariantNumeric: "tabular-nums",
                   color: z.id === user.id ? C.ok : C.text }}>{eur(z.betrag)}</span>
-            {(a.ausgezahlt || {})[z.id] && (
-              <span className="text-xs" style={{ color: C.ok }}>
-                ausgezahlt {datum(a.ausgezahlt[z.id].datum)}
-              </span>
-            )}
+            {(() => {
+              const aus = a.ausgezahlt || {};
+              const bezahlt = Object.keys(aus).filter((k) =>
+                k === z.id || k.startsWith(z.id + ":")).length;
+              return bezahlt ? (
+                <span className="text-xs" style={{ color: C.ok }}>
+                  {bezahlt} von {faelligkeiten(a).length} Lieferjahren ausgezahlt
+                </span>
+              ) : null;
+            })()}
           </span>
         </div>
       ))}
@@ -1438,7 +1661,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
 /* ------------------------------------------------------------------ */
 /*  Anfrage-Assistent                                                  */
 /* ------------------------------------------------------------------ */
-function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrechen }) {
+function Assistent({ user, mitarbeiter, alleAnfragen, entwurf, onSpeichern, onSenden, onAbbrechen }) {
   const [a, setA] = useState(entwurf || leereAnfrage(user));
   const [schritt, setSchritt] = useState(1);
   const [geprueft, setGeprueft] = useState(false);
@@ -1978,6 +2201,31 @@ function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrec
               </label>
             </div>
 
+            {(() => {
+              const treffer = dubletten(a, alleAnfragen, mitarbeiter);
+              if (!treffer.length) return null;
+              return (
+                <div className="p-4 rounded mb-5" style={{ background: "#FDF6EE", border: "1px solid " + C.gas }}>
+                  <div className="flex items-center gap-2 mb-2" style={{ color: C.gas }}>
+                    <AlertTriangle size={15} />
+                    <span className="text-sm">Dieser Kunde ist möglicherweise schon erfasst</span>
+                  </div>
+                  {treffer.map((t) => (
+                    <div key={t.vorgang.id} className="text-sm py-1">
+                      {t.vorgang.kunde.firma} · {t.vorgang.id} · {STATUS[t.vorgang.status].label}
+                      <span className="block text-xs" style={{ color: C.muted }}>
+                        betreut von {t.inhaber} · {t.gruende.join(", ")}
+                      </span>
+                    </div>
+                  ))}
+                  <p className="text-xs mt-2" style={{ color: C.muted }}>
+                    Kläre vor dem Senden, ob es sich wirklich um denselben Kunden handelt. Senden ist
+                    weiterhin möglich.
+                  </p>
+                </div>
+              );
+            })()}
+
             <label className="block mb-5">
               <span className="block text-xs mb-1" style={{ color: C.muted }}>
                 Bemerkung an das Team Kalkulation
@@ -2350,6 +2598,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       </div>
       <p className="text-sm mb-5 ml-8" style={{ color: C.muted }}>
         {a.id} · angelegt {datum(a.angelegt)} ·{" "}
+        {liegezeit(a) != null && !["abgeschlossen", "abgelehnt"].includes(a.status) &&
+          "seit " + num(liegezeit(a)) + " Tagen in diesem Status · "}
         {beteiligte(a).length > 1
           ? beteiligte(a).map((b) => {
               const m = mitarbeiter.find((x) => x.id === b.id);
@@ -2629,7 +2879,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                       </span>
                     )}
                   {l.zaehlerart === "RLM" && (l.lastgang
-                    ? <DateiChip datei={l.lastgang} label="Lastgang" />
+                    ? <><DateiChip datei={l.lastgang} label="Lastgang" />
+                        <Lastganganalyse datei={l.lastgang} /></>
                     : <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: C.warn }}>
                         <X size={13} /> kein Lastgang
                       </span>)}
@@ -2785,6 +3036,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
                         <Datei label="Angebot als PDF – erforderlich" datei={v.angebot}
                           onSet={(f) => setVar(v.id, "angebot", f)} hinweis="Angebot anhängen" />
+                        <button className="text-xs px-2 py-1 rounded"
+                          style={{ border: "1px solid " + C.line, color: C.strom }}
+                          onClick={() => setVar(v.id, "angebot", angebotPdf(a, v))}>
+                          Angebot aus den Daten erzeugen
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -3582,6 +3838,12 @@ function Liste({ anfragen, onOeffnen, leerText }) {
           </div>
           <div className="w-40">
             <StatusPunkt status={a.status} />
+            {liegezeit(a) > 3 && !["abgeschlossen", "abgelehnt"].includes(a.status) && (
+              <span className="block text-xs"
+                    style={{ color: liegezeit(a) > 10 ? C.warn : C.muted }}>
+                seit {num(liegezeit(a))} Tagen
+              </span>
+            )}
             {a.einreichung && (
               <span className="block text-xs" style={{ color: C.gold }}>in Einreichung</span>
             )}
@@ -3640,11 +3902,18 @@ function Provisionen({ anfragen, mitarbeiter, user }) {
             ) : (
               <span className="text-right">
                 <span className="block" style={{ fontVariantNumeric: "tabular-nums" }}>{eur(eigen(a))}</span>
-                {(a.ausgezahlt || {})[user.id] && (
-                  <span className="text-xs" style={{ color: C.ok }}>
-                    ausgezahlt {datum(a.ausgezahlt[user.id].datum)}
-                  </span>
-                )}
+                {(() => {
+                  const aus = a.ausgezahlt || {};
+                  const jahre = faelligkeiten(a).length;
+                  const bezahlt = Object.keys(aus).filter((k) =>
+                    k === user.id || k.startsWith(user.id + ":")).length;
+                  if (!bezahlt) return null;
+                  return (
+                    <span className="text-xs" style={{ color: C.ok }}>
+                      {bezahlt} von {jahre} Lieferjahren ausgezahlt
+                    </span>
+                  );
+                })()}
               </span>
             )}
           </div>
@@ -3924,6 +4193,31 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
                 </span>
               </label>
             </div>
+
+            {(() => {
+              const treffer = dubletten(a, alleAnfragen, mitarbeiter);
+              if (!treffer.length) return null;
+              return (
+                <div className="p-4 rounded mb-5" style={{ background: "#FDF6EE", border: "1px solid " + C.gas }}>
+                  <div className="flex items-center gap-2 mb-2" style={{ color: C.gas }}>
+                    <AlertTriangle size={15} />
+                    <span className="text-sm">Dieser Kunde ist möglicherweise schon erfasst</span>
+                  </div>
+                  {treffer.map((t) => (
+                    <div key={t.vorgang.id} className="text-sm py-1">
+                      {t.vorgang.kunde.firma} · {t.vorgang.id} · {STATUS[t.vorgang.status].label}
+                      <span className="block text-xs" style={{ color: C.muted }}>
+                        betreut von {t.inhaber} · {t.gruende.join(", ")}
+                      </span>
+                    </div>
+                  ))}
+                  <p className="text-xs mt-2" style={{ color: C.muted }}>
+                    Kläre vor dem Senden, ob es sich wirklich um denselben Kunden handelt. Senden ist
+                    weiterhin möglich.
+                  </p>
+                </div>
+              );
+            })()}
 
             <label className="block mb-5">
               <span className="block text-xs mb-1" style={{ color: C.muted }}>
@@ -6776,86 +7070,129 @@ function Tickets({ tickets, setTickets, user, mitarbeiter }) {
   );
 }
 
-/* Punkt 6: Provisionsabrechnung der Finanzbuchhaltung */
+/* Provisionsabrechnung mit Fälligkeiten je Lieferjahr */
+function faelligkeiten(a) {
+  const v = aktiveVariante(a);
+  const monate = laufzeitVon(a) || 12;
+  const jahre = Math.max(1, Math.round(monate / 12));
+  const beginn = (v && v.lieferbeginn) || a.angelegt;
+  return Array.from({ length: jahre }, (_, i) => ({
+    jahr: i + 1,
+    faellig: monateDazu(beginn, i * 12) || beginn,
+  }));
+}
+
 function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen }) {
   const [wer, setWer] = useState("alle");
+  const [nurOffen, setNurOffen] = useState(false);
   const abg = anfragen.filter((a) => a.status === "abgeschlossen" && a.kalkulation);
 
   const zeilen = [];
   abg.forEach((a) => {
     const v = gesamtverteilung(a, mitarbeiter);
+    const plan = faelligkeiten(a);
     v.anteile.forEach((x) => {
       if (wer !== "alle" && x.id !== wer) return;
-      zeilen.push({
-        key: a.id + "-" + x.id, anfrage: a, person: x,
-        bezahlt: !!(a.ausgezahlt || {})[x.id],
-        datum: ((a.ausgezahlt || {})[x.id] || {}).datum,
+      plan.forEach((f) => {
+        const schluessel = x.id + ":" + f.jahr;
+        const alt = (a.ausgezahlt || {})[x.id];
+        const eintrag = (a.ausgezahlt || {})[schluessel] || (f.jahr === 1 ? alt : null);
+        zeilen.push({
+          key: a.id + "-" + schluessel, anfrage: a, person: x, jahr: f.jahr, faellig: f.faellig,
+          schluessel, bezahlt: !!eintrag, datum: (eintrag || {}).datum,
+          ueberfaellig: !eintrag && f.faellig <= heute(),
+        });
       });
     });
   });
+
+  const gefiltert = nurOffen ? zeilen.filter((z) => !z.bezahlt) : zeilen;
 
   const umschalten = (z) => {
     setAnfragen((alt) => alt.map((a) => {
       if (a.id !== z.anfrage.id) return a;
       const aus = { ...(a.ausgezahlt || {}) };
-      if (aus[z.person.id]) delete aus[z.person.id];
-      else aus[z.person.id] = { datum: heute(), von: user.name };
+      if (aus[z.schluessel]) delete aus[z.schluessel];
+      else aus[z.schluessel] = { datum: heute(), von: user.name, jahr: z.jahr };
+      if (z.jahr === 1 && aus[z.person.id]) delete aus[z.person.id];
       return { ...a, ausgezahlt: aus };
     }));
   };
 
-  const offen = zeilen.filter((z) => !z.bezahlt);
   const summe = (l) => l.reduce((t, z) => t + z.person.betrag, 0);
+  const offen = zeilen.filter((z) => !z.bezahlt);
+  const faellig = offen.filter((z) => z.ueberfaellig);
 
   return (
     <div>
-      <div className="grid sm:grid-cols-3 gap-3 mb-5">
-        {[["Offen", summe(offen), C.warn], ["Ausgezahlt", summe(zeilen.filter((z) => z.bezahlt)), C.ok],
-          ["Gesamt", summe(zeilen), C.text]].map(([k, w, f]) => (
+      <div className="grid sm:grid-cols-4 gap-3 mb-5">
+        {[["Fällig und offen", summe(faellig), C.warn], ["Offen gesamt", summe(offen), C.gas],
+          ["Ausgezahlt", summe(zeilen.filter((z) => z.bezahlt)), C.ok],
+          ["Gesamtvolumen", summe(zeilen), C.text]].map(([k, w, f]) => (
           <div key={k} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
-            <div className="text-xs mb-2" style={{ color: C.muted }}>{k} (€/Lieferjahr)</div>
+            <div className="text-xs mb-2" style={{ color: C.muted }}>{k} (€)</div>
             <div className="text-2xl" style={{ color: f, fontVariantNumeric: "tabular-nums" }}>{num(w, 2)}</div>
           </div>
         ))}
       </div>
 
-      <div className="rounded p-3 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+      <div className="rounded p-3 mb-5 grid sm:grid-cols-2 gap-3 items-end"
+           style={{ background: C.card, border: "1px solid " + C.line }}>
         <Select label="Empfänger" value={wer} onChange={setWer}
           options={[{ value: "alle", label: "Alle Empfänger" },
             ...mitarbeiter.filter((m) => ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle))
               .map((m) => ({ value: m.id, label: m.name + " · " + m.rolle }))]} />
+        <label className="flex items-center gap-2 text-sm pb-2">
+          <input type="checkbox" checked={nurOffen} onChange={(e) => setNurOffen(e.target.checked)}
+            style={{ accentColor: C.ink }} />
+          Nur offene Fälligkeiten
+        </label>
       </div>
 
-      {zeilen.length === 0 ? (
+      {gefiltert.length === 0 ? (
         <div className="rounded p-8 text-center text-sm"
              style={{ border: "1px dashed " + C.line, color: C.muted }}>
-          Keine abgerechneten Vorgänge.
+          Keine Fälligkeiten in dieser Auswahl.
         </div>
       ) : (
         <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
-          {zeilen.map((z, i) => (
+          {gefiltert
+            .sort((x, y) => (x.faellig || "").localeCompare(y.faellig || ""))
+            .map((z, i) => (
             <div key={z.key} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3"
                  style={{ borderTop: i ? "1px solid " + C.line : "none",
-                          background: z.bezahlt ? "#F4F8F2" : "transparent" }}>
+                          background: z.bezahlt ? "#F4F8F2" : z.ueberfaellig ? "#FCF3F0" : "transparent" }}>
               <div className="flex-1 min-w-40">
-                <div className="text-sm">{z.anfrage.kunde.firma}</div>
+                <div className="text-sm">{z.anfrage.kunde.firma}
+                  <span className="text-xs ml-2 px-1.5 py-0.5 rounded"
+                        style={{ border: "1px solid " + C.line, color: C.muted }}>
+                    Lieferjahr {z.jahr}
+                  </span>
+                </div>
                 <div className="text-xs" style={{ color: C.muted }}>
                   {z.anfrage.id} · {z.person.name} ({z.person.rolle}
-                  {z.person.overhead ? ", Overhead" : ""}) · {num(z.person.satz, 0)} Prozentpunkte
+                  {z.person.overhead ? ", Overhead" : ""}) · fällig {datum(z.faellig)}
                 </div>
               </div>
               <span className="text-sm w-28 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
                 {eur(z.person.betrag)}
               </span>
-              <label className="flex items-center gap-2 text-xs w-40" style={{ color: z.bezahlt ? C.ok : C.muted }}>
+              <label className="flex items-center gap-2 text-xs w-44"
+                     style={{ color: z.bezahlt ? C.ok : z.ueberfaellig ? C.warn : C.muted }}>
                 <input type="checkbox" checked={z.bezahlt} onChange={() => umschalten(z)}
                   style={{ accentColor: C.ok }} />
-                {z.bezahlt ? "ausgezahlt " + datum(z.datum) : "als ausgezahlt markieren"}
+                {z.bezahlt ? "ausgezahlt " + datum(z.datum)
+                  : z.ueberfaellig ? "fällig, noch offen" : "noch nicht fällig"}
               </label>
             </div>
           ))}
         </div>
       )}
+
+      <p className="text-xs mt-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+        Je Lieferjahr entsteht eine eigene Fälligkeit, berechnet ab dem Lieferbeginn. Bei einem
+        Vertrag über 24 Monate sind das zwei Zahlungen je Empfänger.
+      </p>
     </div>
   );
 }
@@ -7349,6 +7686,50 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, l
         );
       })()}
 
+      {zeigt("listen") && (vollsicht || user.rolle === "Kalkulation" || user.rolle === "Leitung Vertrieb") && (() => {
+        const fertige = menge_.filter((a) => ["bestaetigt", "abgeschlossen"].includes(a.status));
+        const mittel = (feld) => {
+          const w = fertige.map((a) => phasenDauer(a)[feld]).filter((x) => x != null);
+          return w.length ? w.reduce((x, y) => x + y, 0) / w.length : null;
+        };
+        const langlieger = menge_
+          .filter((a) => !["abgeschlossen", "abgelehnt"].includes(a.status) && liegezeit(a) > 7)
+          .sort((x, y) => liegezeit(y) - liegezeit(x))
+          .slice(0, 6);
+        return (
+          <Karte titel="Liegezeiten"
+            rechts={<span className="text-xs" style={{ color: C.muted }}>
+              Durchschnitt in Tagen, {fertige.length} abgeschlossene Vorgänge
+            </span>}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4">
+              {[["Bei der Kalkulation", mittel("kalkulation")],
+                ["Beim Kunden", mittel("kunde")],
+                ["Beim Versorger", mittel("versorger")],
+                ["Gesamt bis Abschluss", mittel("gesamt")]].map(([k, w]) => (
+                <div key={k}>
+                  <div className="text-xs mb-1" style={{ color: C.muted }}>{k}</div>
+                  <div className="text-xl" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {w == null ? "–" : num(w, 1)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {langlieger.length > 0 && (
+              <>
+                <div className="px-4 py-2 text-xs" style={{ color: C.muted, borderTop: "1px solid " + C.line }}>
+                  Vorgänge, die am längsten unbewegt sind
+                </div>
+                {langlieger.map((a, i) => (
+                  <Reihe key={a.id} i={i + 1} links={a.kunde.firma}
+                    unten={a.id + " · " + STATUS[a.status].label + " · " + a.partnerName}
+                    rechts={num(liegezeit(a)) + " Tage"} klick={() => onOeffnen(a.id)} />
+                ))}
+              </>
+            )}
+          </Karte>
+        );
+      })()}
+
       {zeigt("listen") && user.rolle === "Kalkulation" && (
         <Karte titel="Wartet auf Kalkulation">
           {wartend.length === 0 && <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>Nichts offen.</div>}
@@ -7580,53 +7961,39 @@ export default function App() {
   const meine = user ? anfragen.filter((a) => istBeteiligt(a, user.id)) : [];
   const rolle = user ? user.rolle : "Vertriebspartner";
 
+  /* Jede Rolle sieht nur, was sie für ihre Arbeit braucht.
+     Ziele, Provisionen und Akquise gibt es nur im Vertrieb. */
   const NAV = {
     Vertriebspartner: [
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "neu", label: "Neue Anfrage", icon: Plus },
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
+      { id: "kunden", label: "Meine Kunden", icon: FileSignature },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
-      { id: "kunden", label: "Meine Kunden", icon: FileSignature },
-      { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
-      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "smartmeter", label: "Smartmeter", icon: Zap },
+      { id: "provisionen", label: "Meine Provisionen", icon: Wallet },
       { id: "ziele", label: "Meine Ziele", icon: Target },
-      { id: "kalender", label: "Kalender", icon: Calendar },
-      { id: "smartmeter", label: "Smartmeter", icon: Zap },
-      { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
-      { id: "provisionen", label: "Provisionen", icon: Wallet },
-      { id: "smartmeter", label: "Smartmeter", icon: Zap },
       { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
       { id: "stornos", label: "Stornierungen", icon: X },
-      { id: "ziele", label: "Ziele", icon: Target },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
       { id: "meine-daten", label: "Meine Stammdaten", icon: Users },
-    ],
-    Kalkulation: [
-      { id: "dashboard", label: "Übersicht", icon: BarChart3 },
-      { id: "eingang", label: "Eingang", icon: Calculator },
-      { id: "versorger", label: "Versorgerbestätigung ausstehend", icon: FileSignature },
-      { id: "alle", label: "Alle Vorgänge", icon: Inbox },
-      { id: "auftraege", label: "Neue Aufträge", icon: FileSignature, badge: neueAuftraege },
-      { id: "smartmeter", label: "Smartmeter", icon: Zap },
-      { id: "kalender", label: "Kalender", icon: Calendar },
-      { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
-      { id: "versorgerliste", label: "Versorger", icon: Zap },
-      { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
     Teamleiter: [
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "neu", label: "Neue Anfrage", icon: Plus },
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "alle", label: "Team-Vorgänge", icon: Users },
-      { id: "leads", label: "Meine Leads", icon: Inbox, badge: neueLeads },
-      { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "kunden", label: "Kunden im Team", icon: FileSignature },
+      { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
+      { id: "akquise", label: "Akquise-Tool", icon: Target },
+      { id: "smartmeter", label: "Smartmeter", icon: Zap },
       { id: "provisionen", label: "Meine Provisionen", icon: Wallet },
+      { id: "ziele", label: "Ziele im Team", icon: Target },
+      { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
       { id: "stornos", label: "Stornierungen", icon: X },
-      { id: "ziele", label: "Ziele", icon: Target },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
@@ -7634,47 +8001,50 @@ export default function App() {
     ],
     "Leitung Vertrieb": [
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
+      { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "kunden", label: "Alle Kunden", icon: FileSignature },
       { id: "neu", label: "Neue Anfrage", icon: Plus },
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
-      { id: "alle", label: "Alle Vorgänge", icon: Inbox },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
-      { id: "kunden", label: "Alle Kunden", icon: FileSignature },
-      { id: "provisionen", label: "Provisionen", icon: Wallet },
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
-      { id: "versorgerliste", label: "Versorger", icon: Zap },
+      { id: "ziele", label: "Ziele", icon: Target },
+      { id: "provisionen", label: "Meine Provisionen", icon: Wallet },
+      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
       { id: "meine-daten", label: "Meine Stammdaten", icon: FileSignature },
     ],
+
+    /* Kalkulation rechnet und reicht beim Versorger ein. Kein Vertrieb, keine Provisionen. */
+    Kalkulation: [
+      { id: "dashboard", label: "Übersicht", icon: BarChart3 },
+      { id: "eingang", label: "Eingang", icon: Calculator },
+      { id: "versorger", label: "Versorgerbestätigung", icon: FileSignature },
+      { id: "auftraege", label: "Neue Aufträge", icon: FileSignature, badge: neueAuftraege },
+      { id: "smartmeter", label: "Smartmeter", icon: Zap },
+      { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "versorgerliste", label: "Versorger", icon: Zap },
+      { id: "kalender", label: "Kalender", icon: Calendar },
+      { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
+      { id: "unterlagen", label: "Unterlagen", icon: FileText },
+    ],
+
+    /* Vertragsmanagement betreut Verträge und Bestandskunden. */
     Vertragsmanagement: [
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "vertraege", label: "Verträge", icon: FileSignature },
-      { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "kunden", label: "Bestandskunden", icon: FileSignature },
       { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
       { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "alle", label: "Alle Vorgänge", icon: Inbox },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
-    Geschäftsführung: [
-      { id: "dashboard", label: "Übersicht", icon: BarChart3 },
-      { id: "alle", label: "Alle Vorgänge", icon: Inbox },
-      { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
-      { id: "akquise", label: "Akquise-Tool", icon: Target },
-      { id: "ruecksprachen", label: "Rücksprachen", icon: AlertTriangle },
-      { id: "kunden", label: "Alle Kunden", icon: FileSignature },
-      { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
-      { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
-      { id: "versorgerliste", label: "Versorger", icon: Zap },
-      { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
-      { id: "stornos", label: "Stornierungen", icon: X },
-      { id: "ziele", label: "Ziele", icon: Target },
-      { id: "kalender", label: "Kalender", icon: Calendar },
-      { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
-      { id: "export", label: "Export und Sicherung", icon: Upload },
-      { id: "unterlagen", label: "Unterlagen", icon: FileText },
-    ],
+
+    /* Leadmanagement beschafft und verteilt, verkauft aber nicht selbst. */
     Leadmanagement: [
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
@@ -7683,17 +8053,38 @@ export default function App() {
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
+
+    /* Finanzbuchhaltung rechnet Provisionen ab. */
     Finanzbuchhaltung: [
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "abrechnung", label: "Provisionsabrechnung", icon: Wallet },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
-      { id: "kunden", label: "Alle Kunden", icon: FileSignature },
       { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "kunden", label: "Alle Kunden", icon: FileSignature },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
-  }[rolle];
+
+    "Geschäftsführung": [
+      { id: "dashboard", label: "Übersicht", icon: BarChart3 },
+      { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "kunden", label: "Alle Kunden", icon: FileSignature },
+      { id: "ruecksprachen", label: "Rücksprachen", icon: AlertTriangle },
+      { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
+      { id: "akquise", label: "Akquise-Tool", icon: Target },
+      { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
+      { id: "versorgerliste", label: "Versorger", icon: Zap },
+      { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
+      { id: "ziele", label: "Ziele", icon: Target },
+      { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
+      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "kalender", label: "Kalender", icon: Calendar },
+      { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
+      { id: "export", label: "Export und Sicherung", icon: Upload },
+      { id: "unterlagen", label: "Unterlagen", icon: FileText },
+    ],
+  }[rolle] || [{ id: "dashboard", label: "Übersicht", icon: BarChart3 }];
 
   useEffect(() => {
     setOffen(null); setEntwurf(null);
@@ -7753,9 +8144,22 @@ export default function App() {
         onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }}
         onVerlaengern={verlaengern} />
     );
+  } else if (listenAnsicht) {
+    inhalt = (
+      <div>
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={() => setListenAnsicht(null)} style={{ color: C.muted }}>
+            <ArrowLeft size={18} />
+          </button>
+          <h2 className="text-lg">{listenAnsicht.titel}</h2>
+        </div>
+        <Liste anfragen={listenAnsicht.liste} leerText="Keine Vorgänge in dieser Auswahl."
+          onOeffnen={setOffen} />
+      </div>
+    );
   } else if (ansicht === "neu" || entwurf) {
     inhalt = (
-      <Assistent user={user} mitarbeiter={mitarbeiter} entwurf={entwurf}
+      <Assistent user={user} mitarbeiter={mitarbeiter} alleAnfragen={anfragen} entwurf={entwurf}
         onSpeichern={(a) => { speichern(a); setEntwurf(null); setAnsicht("anfragen"); setTab("offen"); }}
         onSenden={einreichen}
         onAbbrechen={() => { setEntwurf(null); setAnsicht("anfragen"); }} />
@@ -7835,19 +8239,6 @@ export default function App() {
       <Leads leads={leads} setLeads={setLeads} mitarbeiter={mitarbeiter} user={user}
         onUebernehmen={ausLead}
         onGelesen={(id) => setLeads(leads.map((l) => (l.id === id ? { ...l, gelesen: true } : l)))} />
-    );
-  } else if (listenAnsicht) {
-    inhalt = (
-      <div>
-        <div className="flex items-center gap-3 mb-5">
-          <button onClick={() => setListenAnsicht(null)} style={{ color: C.muted }}>
-            <ArrowLeft size={18} />
-          </button>
-          <h2 className="text-lg">{listenAnsicht.titel}</h2>
-        </div>
-        <Liste anfragen={listenAnsicht.liste} leerText="Keine Vorgänge in dieser Auswahl."
-          onOeffnen={setOffen} />
-      </div>
     );
   } else if (ansicht === "auftraege") {
     inhalt = (
