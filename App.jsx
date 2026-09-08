@@ -280,7 +280,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v4.3 · 08.09.2026 · Suche, Aufgaben, Pipeline, Import, Protokoll";
+const VERSION = "v4.4 · 08.09.2026 · Alles anklickbar";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -3860,7 +3860,7 @@ function Liste({ anfragen, onOeffnen, leerText }) {
   );
 }
 
-function Provisionen({ anfragen, mitarbeiter, user }) {
+function Provisionen({ anfragen, mitarbeiter, user, onOeffnen, onListe }) {
   const vollsicht = ["Geschäftsführung", "Finanzbuchhaltung"].includes(user.rolle);
   const sichtFirma = user.rolle === "Geschäftsführung";
   const rel = anfragen.filter((a) => {
@@ -3878,16 +3878,19 @@ function Provisionen({ anfragen, mitarbeiter, user }) {
 
   const Block = ({ titel, liste, farbe }) => (
     <div className="rounded overflow-hidden mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
-      <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid " + C.line }}>
+      <button onClick={() => onListe && onListe(titel, liste)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left"
+        style={{ borderBottom: "1px solid " + C.line }}>
         <span className="text-sm">{titel}</span>
         <span className="text-lg" style={{ color: farbe, fontVariantNumeric: "tabular-nums" }}>{eur(kopf(liste))}</span>
-      </div>
+      </button>
       {liste.length === 0 && <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>Keine Einträge.</div>}
       {liste.map((a, i) => {
         const v = gesamtverteilung(a, mitarbeiter);
         const meins = v.anteile.find((x) => x.id === user.id);
         return (
-          <div key={a.id} className="flex items-center gap-4 px-4 py-2.5 text-sm"
+          <button key={a.id} onClick={() => onOeffnen && onOeffnen(a.id)}
+               className="w-full text-left flex items-center gap-4 px-4 py-2.5 text-sm"
                style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
             <span className="flex-1">{a.kunde.firma}
               <span className="block text-xs" style={{ color: C.muted }}>
@@ -3921,7 +3924,7 @@ function Provisionen({ anfragen, mitarbeiter, user }) {
                 })()}
               </span>
             )}
-          </div>
+          </button>
         );
       })}
       {vollsicht && liste.length > 0 && (
@@ -3936,7 +3939,8 @@ function Provisionen({ anfragen, mitarbeiter, user }) {
 
   return (
     <div>
-      <div className="mb-6 p-5 rounded" style={{ background: C.ink, color: "#fff" }}>
+      <button onClick={() => onListe && onListe("Abgeschlossene Verträge", fix)}
+        className="w-full text-left mb-6 p-5 rounded" style={{ background: C.ink, color: "#fff" }}>
         <div className="text-xs mb-1" style={{ color: "#8B9BB0" }}>
           {vollsicht
             ? "Gesamtprovision aus abgeschlossenen Verträgen, je Lieferjahr"
@@ -3956,7 +3960,7 @@ function Provisionen({ anfragen, mitarbeiter, user }) {
             Differenz zu deinem Satz von {num(user.satz || 0, 0)} % aus der eigenen Struktur
           </div>
         )}
-      </div>
+      </button>
       <Block titel="Abgeschlossen" liste={fix} farbe={C.ok} />
       <Block titel="In Aussicht (Angebot liegt beim Kunden)" liste={offen} farbe={C.muted} />
     </div>
@@ -6251,7 +6255,7 @@ const PIPELINE = [
   { id: "bestaetigt", label: "Bestätigt", chance: 1, f: (a) => a.status === "bestaetigt" },
 ];
 
-function Pipeline({ anfragen, mitarbeiter, user, onOeffnen }) {
+function Pipeline({ anfragen, mitarbeiter, user, onOeffnen, onListe }) {
   const vollsicht = ["Geschäftsführung", "Finanzbuchhaltung", "Leitung Vertrieb"].includes(user.rolle);
   const meineIds = user.rolle === "Teamleiter"
     ? [user.id, ...strukturUnter(user.id, mitarbeiter).map((m) => m.id)]
@@ -6274,10 +6278,12 @@ function Pipeline({ anfragen, mitarbeiter, user, onOeffnen }) {
         {[["Vorgänge in der Pipeline", spalten.reduce((t, sp) => t + sp.drin.length, 0), C.text],
           ["Provision unverrechnet", eur(gesamt), C.text],
           ["Erwartet nach Gewichtung", eur(forecast), C.ok]].map(([k, v, f]) => (
-          <div key={k} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <button key={k} onClick={() => onListe && onListe("Pipeline gesamt",
+            spalten.flatMap((sp) => sp.drin))}
+            className="rounded p-4 text-left w-full" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="text-xs mb-2" style={{ color: C.muted }}>{k}</div>
             <div className="text-2xl" style={{ color: f, fontVariantNumeric: "tabular-nums" }}>{v}</div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -6286,7 +6292,8 @@ function Pipeline({ anfragen, mitarbeiter, user, onOeffnen }) {
           {spalten.map((sp) => (
             <div key={sp.id} className="flex-1 rounded p-2"
                  style={{ minWidth: 224, background: "#F6F8FA", border: "1px solid " + C.line }}>
-              <div className="px-2 py-2 mb-1">
+              <button className="px-2 py-2 mb-1 w-full text-left"
+                onClick={() => onListe && onListe(sp.label, sp.drin)}>
                 <div className="flex items-center gap-2">
                   <span className="text-sm flex-1">{sp.label}</span>
                   <span className="text-xs" style={{ color: C.muted }}>{sp.drin.length}</span>
@@ -6295,7 +6302,7 @@ function Pipeline({ anfragen, mitarbeiter, user, onOeffnen }) {
                   {eur(sp.summe)} · {num(sp.chance * 100)} % Chance
                 </div>
                 <div className="mt-2"><Balken anteil={sp.chance} farbe={C.strom} /></div>
-              </div>
+              </button>
 
               {sp.drin.length === 0 && (
                 <div className="rounded px-2 py-5 text-center text-xs"
@@ -7496,7 +7503,7 @@ function faelligkeiten(a) {
   }));
 }
 
-function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren }) {
+function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeffnen }) {
   const [wer, setWer] = useState("alle");
   const [nurOffen, setNurOffen] = useState(false);
   const abg = anfragen.filter((a) => a.status === "abgeschlossen" && a.kalkulation);
@@ -7547,13 +7554,14 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren }) {
   return (
     <div>
       <div className="grid sm:grid-cols-4 gap-3 mb-5">
-        {[["Fällig und offen", summe(faellig), C.warn], ["Offen gesamt", summe(offen), C.gas],
-          ["Ausgezahlt", summe(zeilen.filter((z) => z.bezahlt)), C.ok],
-          ["Gesamtvolumen", summe(zeilen), C.text]].map(([k, w, f]) => (
-          <div key={k} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+        {[["Fällig und offen", summe(faellig), C.warn, true], ["Offen gesamt", summe(offen), C.gas, true],
+          ["Ausgezahlt", summe(zeilen.filter((z) => z.bezahlt)), C.ok, false],
+          ["Gesamtvolumen", summe(zeilen), C.text, false]].map(([k, w, f, nurO]) => (
+          <button key={k} onClick={() => setNurOffen(nurO)}
+            className="rounded p-4 text-left w-full" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="text-xs mb-2" style={{ color: C.muted }}>{k} (€)</div>
             <div className="text-2xl" style={{ color: f, fontVariantNumeric: "tabular-nums" }}>{num(w, 2)}</div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -7583,7 +7591,8 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren }) {
             <div key={z.key} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3"
                  style={{ borderTop: i ? "1px solid " + C.line : "none",
                           background: z.bezahlt ? "#F4F8F2" : z.ueberfaellig ? "#FCF3F0" : "transparent" }}>
-              <div className="flex-1 min-w-40">
+              <button className="flex-1 min-w-40 text-left"
+                onClick={() => onOeffnen && onOeffnen(z.anfrage.id)}>
                 <div className="text-sm">{z.anfrage.kunde.firma}
                   <span className="text-xs ml-2 px-1.5 py-0.5 rounded"
                         style={{ border: "1px solid " + C.line, color: C.muted }}>
@@ -7594,7 +7603,7 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren }) {
                   {z.anfrage.id} · {z.person.name} ({z.person.rolle}
                   {z.person.overhead ? ", Overhead" : ""}) · fällig {datum(z.faellig)}
                 </div>
-              </div>
+              </button>
               <span className="text-sm w-28 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
                 {eur(z.person.betrag)}
               </span>
@@ -7908,12 +7917,17 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, l
     { id: "auftrag", k: "Aufträge beim Versorger", v: z.auftrag, farbe: C.strom, f: (a) => a.status === "uebermittelt" },
     { id: "fix", k: "Abschlüsse", v: z.fix, f: (a) => ["bestaetigt", "abgeschlossen"].includes(a.status) },
   ];
+  const abgeschlosseneListe = menge_.filter((a) => a.status === "abgeschlossen");
   const ZAHLEN = [
-    { id: "menge", k: "Vermittelte Menge (kWh/Jahr)", v: num(kwh) },
+    { id: "menge", k: "Vermittelte Menge (kWh/Jahr)", v: num(kwh),
+      liste: abgeschlosseneListe, titel: "Abgeschlossene Verträge" },
     ...(geld ? [{ id: "prov", k: vollsicht ? "Gesamtprovision (€/Jahr)" : "Deine Provision (€/Jahr)",
-                  v: num(prov, 2), farbe: vollsicht ? C.text : C.ok }] : []),
-    ...(geld && sichtFirma ? [{ id: "firma", k: "davon Firma (€/Jahr)", v: num(beiFirma, 2), farbe: C.ok }] : []),
-    { id: "quote", k: "Abschlussquote", v: num(quote, 0) + " %" },
+                  v: num(prov, 2), farbe: vollsicht ? C.text : C.ok, ziel: "provisionen" }] : []),
+    ...(geld && sichtFirma ? [{ id: "firma", k: "davon Firma (€/Jahr)", v: num(beiFirma, 2),
+                  farbe: C.ok, ziel: "provisionen" }] : []),
+    { id: "quote", k: "Abschlussquote", v: num(quote, 0) + " %",
+      liste: menge_.filter((a) => ["angebot", "bestaetigt", "abgeschlossen"].includes(a.status)),
+      titel: "Angebote und Abschlüsse" },
   ];
 
   const Kachel = ({ k, v, farbe, klick }) => (
@@ -8015,7 +8029,8 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, l
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {ZAHLEN.filter((x) => zeigt(x.id)).map((x) => (
           <Kachel key={x.id} k={x.k} v={x.v} farbe={x.farbe}
-            klick={x.id === "prov" || x.id === "firma" ? () => onOeffnen(null, "provisionen") : null} />
+            klick={x.ziel ? () => onOeffnen(null, x.ziel)
+                   : x.liste ? () => onListe(x.titel, x.liste) : null} />
         ))}
       </div>
 
@@ -8770,7 +8785,9 @@ export default function App() {
         leerText="Noch keine Verträge zu bearbeiten." onOeffnen={setOffen} />
     );
   } else if (ansicht === "provisionen") {
-    inhalt = <Provisionen anfragen={sichtbar} mitarbeiter={mitarbeiter} user={user} />;
+    inhalt = <Provisionen anfragen={sichtbar} mitarbeiter={mitarbeiter} user={user}
+               onOeffnen={(id) => setOffen(id)}
+               onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />;
   } else if (ansicht === "dashboard") {
     inhalt = (
       <Dashboard anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
@@ -8843,7 +8860,8 @@ export default function App() {
                mitarbeiter={mitarbeiter} onOeffnen={(id) => setOffen(id)} />;
   } else if (ansicht === "pipeline") {
     inhalt = <Pipeline anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
-               onOeffnen={(id) => setOffen(id)} />;
+               onOeffnen={(id) => setOffen(id)}
+               onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />;
   } else if (ansicht === "protokoll") {
     inhalt = <Protokoll protokoll={protokoll} mitarbeiter={mitarbeiter} />;
   } else if (ansicht === "export") {
@@ -8868,7 +8886,7 @@ export default function App() {
                anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "abrechnung") {
     inhalt = <Abrechnung anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
-               setAnfragen={setAnfragen} notieren={notieren} />;
+               setAnfragen={setAnfragen} notieren={notieren} onOeffnen={(id) => setOffen(id)} />;
   } else if (ansicht === "versorgerliste") {
     inhalt = <Versorgerliste versorger={versorger} setVersorger={setVersorger} user={user} />;
   } else if (ansicht === "unterlagen") {
