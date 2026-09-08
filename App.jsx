@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Zap, Flame, Plus, Send, ArrowLeft, Upload, FileText, Check, X,
   AlertTriangle, Users, Calculator, FileSignature, BarChart3,
-  Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw, Menu,
+  Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw, Menu, Bell, Target, Calendar,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -34,6 +34,7 @@ const STATUS = {
   eingereicht: { label: "Bei Kalkulation", color: C.strom },
   klaerfall: { label: "Daten fehlen", color: C.warn },
   ruecksprache: { label: "Rücksprache Geschäftsführung", color: C.gruen },
+  angefragt: { label: "Angebot beim Versorger angefragt", color: "#BE6A16" },
   angebot: { label: "Angebot liegt vor", color: C.ok },
   uebermittelt: { label: "Auftrag an Versorger übermittelt", color: "#2F5FE0" },
   bestaetigt: { label: "Bestätigter Kunde", color: C.ok },
@@ -162,13 +163,16 @@ function seedAblage() {
 }
 
 const VERSORGER = [
-  { id: "v-eon", name: "E.ON Energie", notiz: "Rahmenvertrag, Abrechnung monatlich" },
+  { id: "v-eon", name: "E.ON Energie", notiz: "Rahmenvertrag, Abrechnung monatlich",
+    branchen: "breites Spektrum, keine Gastronomie unter 100.000 kWh" },
   { id: "v-enbw", name: "EnBW", notiz: "" },
   { id: "v-vattenfall", name: "Vattenfall", notiz: "" },
   { id: "v-rwe", name: "RWE", notiz: "" },
-  { id: "v-swsb", name: "Stadtwerke Saarbrücken", notiz: "regionaler Schwerpunkt Saarland" },
+  { id: "v-swsb", name: "Stadtwerke Saarbrücken", notiz: "regionaler Schwerpunkt Saarland",
+    branchen: "Hotellerie, Gastronomie, Handel, öffentliche Einrichtungen" },
   { id: "v-swt", name: "SWT Trier", notiz: "" },
-  { id: "v-pfalz", name: "Pfalzwerke", notiz: "gute Konditionen bei RLM" },
+  { id: "v-pfalz", name: "Pfalzwerke", notiz: "gute Konditionen bei RLM",
+    branchen: "Produktion und Industrie, kein Bauträgergewerbe" },
   { id: "v-rhein", name: "Rheinenergie", notiz: "" },
   { id: "v-mvv", name: "MVV Energie", notiz: "" },
   { id: "v-entega", name: "Entega", notiz: "" },
@@ -184,12 +188,13 @@ function migriereAnfragen(liste) {
     dienstleistungsvertrag: false, zielpreis: "", zielpreisNotiz: "",
     fehlend: [], fehlendText: "", nachrichten: [], verlauf: [], ausgezahlt: {},
     annahme: null, einreichung: false, bestaetigung: null, klaerung: null,
-    provisionErhalten: null, vertragsStatus: null, ruecksprache: null,
+    provisionErhalten: null, vertragsStatus: null, ruecksprache: null, absage: null,
     ...a,
     kunde: { firma: "", strasse: "", plz: "", ort: "", branche: "",
              ansprechpartner: "", email: "", telefon: "", ...(a.kunde || {}) },
     lieferstellen: (a.lieferstellen || []).map((l) => ({
-      adresseVon: "manuell", neueinzug: false, gewerbeanmeldung: null, pachtvertrag: null,
+      adresseVon: "manuell", kundennummer: "", versorgerVon: "manuell",
+      neueinzug: false, gewerbeanmeldung: null, pachtvertrag: null,
       zaehlerfotoVorhanden: false, zaehlerfoto: null, energiepreis: "", preis: "",
       ...l,
     })),
@@ -209,6 +214,13 @@ function migriereLeads(liste) {
     dateien: [], abschlussAm: "", quelleDetail: "", ...l,
   }));
 }
+
+const ABLEHNUNGSGRUENDE = [
+  "Falsches Zeitfenster",
+  "Kunde hat sich für anderes Angebot entschieden",
+  "Kunde hat kein Interesse",
+  "Sonstiges",
+];
 
 const FEHLGRUENDE = [
   "Versorgerabrechnung fehlt",
@@ -253,7 +265,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v2.2 · 06.09.2026 · Export, Sicherung, Mehrfachbetreuung";
+const VERSION = "v3.0 · 07.09.2026 · Benachrichtigungen, Ziele, Kalender, Problemfälle";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -540,6 +552,8 @@ const leereLieferstelle = (medium) => ({
   preis: "",
   energiepreis: "",
   adresseVon: "kunde",
+  kundennummer: "",
+  versorgerVon: "manuell",
   neueinzug: false,
   gewerbeanmeldung: null,
   pachtvertrag: null,
@@ -582,6 +596,7 @@ const leereAnfrage = (user) => ({
   bestaetigung: null,
   klaerung: null,
   provisionErhalten: null,
+  absage: null,
   ausgezahlt: {},
   verlauf: [],
 });
@@ -1234,7 +1249,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         </div>
       ))}
 
-      {a.bestaetigung && parseFloat(a.bestaetigung.bonus) > 0 && (
+      {a.bestaetigung && a.bestaetigung.bonusArt !== "keine" && parseFloat(a.bestaetigung.bonus) > 0 && (
         <div className="flex items-center gap-3 py-1.5 text-sm" style={{ borderTop: "1px solid " + C.line }}>
           <span className="flex-1">Bonuszahlung Versorger
             <span className="block text-xs" style={{ color: C.muted }}>
@@ -1293,6 +1308,19 @@ function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrec
     }));
   };
 
+  const versorgerSetzen = (id, quelle) => {
+    setA((v) => ({
+      ...v,
+      lieferstellen: v.lieferstellen.map((l) => {
+        if (l.id !== id) return l;
+        if (quelle === "manuell") return { ...l, versorgerVon: "manuell" };
+        const q = v.lieferstellen.find((x) => x.id === quelle);
+        if (!q) return { ...l, versorgerVon: "manuell" };
+        return { ...l, versorgerVon: quelle, versorger: q.versorger || "", kundennummer: q.kundennummer || "" };
+      }),
+    }));
+  };
+
   const addL = (medium) =>
     setA((z) => ({
       ...z,
@@ -1308,7 +1336,6 @@ function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrec
     if (!a.kunde.firma) f.push("Firmenname");
     if (!a.kunde.plz || !a.kunde.ort) f.push("Kundenanschrift");
     if (!a.kunde.ansprechpartner) f.push("Ansprechpartner");
-    if (!a.kunde.branche) f.push("Branche");
     a.lieferstellen.forEach((l, i) => {
       const n = (l.bezeichnung || "Lieferstelle " + (i + 1)) + ": ";
       if (!l.neueinzug && !l.versorger) f.push(n + "Versorger");
@@ -1406,8 +1433,13 @@ function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrec
               onChange={(v) => setK("ansprechpartner", v)} fehler={geprueft && !a.kunde.ansprechpartner} />
             <Feld label="Telefon" value={a.kunde.telefon} onChange={(v) => setK("telefon", v)} />
             <Feld label="E-Mail" value={a.kunde.email} onChange={(v) => setK("email", v)} breit />
-            <Feld label="Branche" value={a.kunde.branche || ""} onChange={(v) => setK("branche", v)}
-              placeholder="z. B. Hotellerie, Metallverarbeitung, Pflege" breit />
+            <div className="sm:col-span-2">
+              <Feld label="Branche" value={a.kunde.branche || ""} onChange={(v) => setK("branche", v)}
+                placeholder="z. B. Hotellerie, Metallverarbeitung, Pflege" breit />
+              <p className="text-xs mt-1" style={{ color: C.muted }}>
+                Freiwillig, hilft der Kalkulation aber sehr: nicht jeder Versorger nimmt jede Branche.
+              </p>
+            </div>
           </div>
         )}
 
@@ -1511,12 +1543,35 @@ function Assistent({ user, mitarbeiter, entwurf, onSpeichern, onSenden, onAbbrec
                           )}
                         </div>
 
+                        {!l.neueinzug && a.lieferstellen.indexOf(l) > 0 &&
+                          a.lieferstellen.some((x) => x.id !== l.id && x.versorger) && (
+                          <div className="sm:col-span-2 p-3 rounded"
+                               style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                            <Select label="Versorger und Kundennummer übernehmen von"
+                              value={l.versorgerVon || "manuell"}
+                              onChange={(v) => versorgerSetzen(l.id, v)}
+                              options={[
+                                ...a.lieferstellen
+                                  .filter((x) => x.id !== l.id && x.versorger)
+                                  .map((x, i) => ({
+                                    value: x.id,
+                                    label: (x.bezeichnung || "Lieferstelle " + (i + 1)) + ": " + x.versorger +
+                                           (x.kundennummer ? " · " + x.kundennummer : ""),
+                                  })),
+                                { value: "manuell", label: "Neu eintragen" },
+                              ]} />
+                          </div>
+                        )}
+
                         <Feld label="Aktueller Versorger" value={l.neueinzug ? "" : l.versorger}
-                          onChange={(v) => setL(l.id, "versorger", v)}
+                          onChange={(v) => { setL(l.id, "versorger", v); setL(l.id, "versorgerVon", "manuell"); }}
                           gesperrt={!!l.neueinzug}
                           placeholder={l.neueinzug ? "entfällt bei Neueinzug" : ""}
                           fehler={geprueft && !l.neueinzug && !l.versorger} />
-                        <div />
+                        <Feld label="Kundennummer beim Versorger" value={l.neueinzug ? "" : (l.kundennummer || "")}
+                          onChange={(v) => { setL(l.id, "kundennummer", v); setL(l.id, "versorgerVon", "manuell"); }}
+                          gesperrt={!!l.neueinzug}
+                          placeholder={l.neueinzug ? "entfällt bei Neueinzug" : ""} />
                         <Feld label="Zählernummer" value={l.zaehlernummer}
                           onChange={(v) => setL(l.id, "zaehlernummer", v)} fehler={geprueft && !l.zaehlernummer} />
                         <Feld label="Marktlokations-ID (MaLo)" value={l.maloId}
@@ -1892,6 +1947,8 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
     onZurueck();
   };
 
+  const [ablehnung, setAblehnung] = useState({ offen: false, grund: "Kunde hat kein Interesse", wiedervorlage: "", notiz: "" });
+
   const [teilhaber, setTeilhaber] = useState(
     beteiligte(a).map((b) => ({ id: b.id, anteil: String(b.anteil ?? 100) }))
   );
@@ -1965,7 +2022,7 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
   const [best, setBest] = useState(
     a.bestaetigung || {
       versorger: "", stellen: {}, aufschlag: (aktiveVariante(a) || {}).aufschlag || a.aufschlag,
-      bonus: "", bonusArt: "einmalig",
+      bonus: "", bonusArt: "keine",
     }
   );
   const [vKlaer, setVKlaer] = useState({ text: "", dateien: [] });
@@ -2092,9 +2149,15 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-1">
+      <div className="flex items-center flex-wrap gap-3 mb-1">
         <button onClick={onZurueck} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
         <h2 className="text-lg" style={{ letterSpacing: "-0.01em" }}>{a.kunde.firma}</h2>
+        {a.kunde.branche && (
+          <span className="text-xs px-2 py-0.5 rounded"
+                style={{ border: "1px solid " + C.line, color: C.gas, background: "#FDF6EE" }}>
+            {a.kunde.branche}
+          </span>
+        )}
         <StatusPunkt status={a.status} />
       </div>
       <p className="text-sm mb-5 ml-8" style={{ color: C.muted }}>
@@ -2297,6 +2360,7 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
                 </div>
                 <div className="grid sm:grid-cols-2 gap-x-8">
                   <Zeile k="Versorger" v={l.versorger} />
+                  <Zeile k="Kundennummer" v={l.kundennummer} />
                   <Zeile k="Jahresverbrauch" v={num(parseFloat(l.verbrauch) || 0) + " kWh"} />
                   <Zeile k="Zählernummer" v={l.zaehlernummer} />
                   <Zeile k="Marktlokations-ID" v={l.maloId} />
@@ -2340,8 +2404,23 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
           </div>
 
           {/* Kalkulationsbereich */}
-          {istKalk && a.status !== "abgeschlossen" && (
+          {istKalk && ["eingereicht", "angefragt", "ruecksprache"].includes(a.status) && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+              <label className="flex items-center gap-3 text-sm mb-4 p-3 rounded"
+                     style={{ background: a.status === "angefragt" ? "#FDF6EE" : "#F6F8FA",
+                              border: "1px solid " + (a.status === "angefragt" ? C.gas : C.line) }}>
+                <input type="checkbox" checked={a.status === "angefragt"}
+                  onChange={(e) => onUpdate({
+                    ...a,
+                    status: e.target.checked ? "angefragt" : "eingereicht",
+                    verlauf: [...a.verlauf, { d: heute(),
+                      t: e.target.checked ? "Angebot beim Versorger angefragt" : "Anfrage zurück in Bearbeitung",
+                      w: user.name }],
+                  })}
+                  style={{ accentColor: C.gas }} />
+                Angebot in Bearbeitung, beim Versorger angefragt
+              </label>
+
               <div className="flex flex-wrap gap-2 mb-5">
                 <Btn variante={modus === "kalk" ? "primär" : "hell"} onClick={() => setModus("kalk")} icon={Calculator}>
                   Angebot kalkulieren
@@ -2541,6 +2620,46 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
             </div>
           )}
 
+          {istKalk && ["eingereicht", "angefragt", "ruecksprache", "uebermittelt"].includes(a.status) && (
+            <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+              <div className="flex flex-wrap items-baseline gap-2 mb-3">
+                <span className="text-sm">Branche und Versorger</span>
+                <span className="text-sm px-2 py-0.5 rounded"
+                      style={{ background: "#FDF6EE", color: C.gas, border: "1px solid " + C.line }}>
+                  {a.kunde.branche || "keine Branche angegeben"}
+                </span>
+              </div>
+              {(versorger || []).filter((v) => v.branchen).length === 0 ? (
+                <p className="text-sm" style={{ color: C.muted }}>
+                  Bei den Versorgern sind noch keine Branchenangaben hinterlegt. Die Geschäftsführung
+                  kann sie unter Versorger ergänzen.
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {(versorger || []).filter((v) => v.branchen).map((v) => (
+                    <div key={v.id} className="flex flex-wrap gap-x-2 text-sm py-1"
+                         style={{ borderTop: "1px solid " + C.line }}>
+                      <span>{v.name}</span>
+                      <span style={{ color: C.muted }}>{v.branchen}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {a.absage && (
+            <div className="rounded p-4" style={{ background: "#F6F8FA", border: "1px solid " + C.muted }}>
+              <div className="text-sm mb-1">Absage: {a.absage.grund}</div>
+              {a.absage.wiedervorlage && (
+                <p className="text-sm" style={{ color: C.gas }}>
+                  Wiedervorlage am {datum(a.absage.wiedervorlage)}
+                </p>
+              )}
+              {a.absage.notiz && <p className="text-sm mt-1" style={{ color: C.muted }}>{a.absage.notiz}</p>}
+            </div>
+          )}
+
           {a.dienstleistungsvertrag && (
             <div className="rounded p-4" style={{ background: "#F6F8FA", border: "1px solid " + C.strom }}>
               <div className="text-sm" style={{ color: C.strom }}>Dienstleistungsvertrag gewünscht</div>
@@ -2693,12 +2812,15 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
                   <div className="grid sm:grid-cols-3 gap-4">
                     <Feld label="Gesamtaufschlag (ct/kWh)" value={best.aufschlag}
                       onChange={(v) => setBest({ ...best, aufschlag: v })} />
-                    <Feld label="Bonuszahlung (€)" value={best.bonus}
-                      onChange={(v) => setBest({ ...best, bonus: v })} />
-                    <Select label="Bonus wird gezahlt" value={best.bonusArt}
-                      onChange={(v) => setBest({ ...best, bonusArt: v })}
-                      options={[{ value: "einmalig", label: "einmalig" },
+                    <Select label="Bonuszahlung" value={best.bonusArt}
+                      onChange={(v) => setBest({ ...best, bonusArt: v, bonus: v === "keine" ? "" : best.bonus })}
+                      options={[{ value: "keine", label: "Keine" },
+                                { value: "einmalig", label: "einmalig" },
                                 { value: "jaehrlich", label: "pro Lieferjahr" }]} />
+                    {best.bonusArt !== "keine" && (
+                      <Feld label="Bonus in €" value={best.bonus}
+                        onChange={(v) => setBest({ ...best, bonus: v })} />
+                    )}
                   </div>
 
                   <Provisionsblock a={{ ...a, bestaetigung: { ...best,
@@ -3049,13 +3171,53 @@ function Detail({ a, user, mitarbeiter, versorger, onZurueck, onUpdate, onBearbe
                 )}
               </div>
 
-              {istPartner && a.status === "angebot" && (
+              {istPartner && a.status === "angebot" && !ablehnung.offen && (
                 <div className="mt-4">
-                  <Btn variante="hell" icon={X}
-                    onClick={() => { onUpdate({ ...a, status: "abgelehnt",
-                      verlauf: [...a.verlauf, { d: heute(), t: "Alle Angebote abgelehnt", w: user.name }] }); onZurueck(); }}>
+                  <Btn variante="hell" icon={X} onClick={() => setAblehnung({ ...ablehnung, offen: true })}>
                     Kein Angebot angenommen
                   </Btn>
+                </div>
+              )}
+
+              {istPartner && ablehnung.offen && (
+                <div className="mt-4 p-4 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                  <div className="text-sm mb-3">Warum kam es nicht zum Abschluss?</div>
+                  <Select label="Grund" value={ablehnung.grund}
+                    onChange={(v) => setAblehnung({ ...ablehnung, grund: v })}
+                    options={ABLEHNUNGSGRUENDE} />
+                  {ablehnung.grund === "Falsches Zeitfenster" && (
+                    <div className="mt-4 p-3 rounded" style={{ background: "#fff", border: "1px solid " + C.gas }}>
+                      <Feld label="Kunden erneut kontaktieren am" type="date" value={ablehnung.wiedervorlage}
+                        onChange={(v) => setAblehnung({ ...ablehnung, wiedervorlage: v })} />
+                      <p className="text-xs mt-2" style={{ color: C.muted }}>
+                        Der Vorgang erscheint an diesem Tag in deiner Übersicht zur Wiedervorlage.
+                      </p>
+                    </div>
+                  )}
+                  <label className="block mt-4">
+                    <span className="block text-xs mb-1" style={{ color: C.muted }}>Notiz</span>
+                    <textarea rows={2} value={ablehnung.notiz}
+                      onChange={(e) => setAblehnung({ ...ablehnung, notiz: e.target.value })}
+                      className="w-full px-3 py-2 text-sm rounded outline-none"
+                      style={{ border: "1px solid " + C.line }} />
+                  </label>
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    <Btn icon={Check}
+                      disabled={ablehnung.grund === "Falsches Zeitfenster" && !ablehnung.wiedervorlage}
+                      onClick={() => {
+                        onUpdate({ ...a, status: "abgelehnt",
+                          absage: { grund: ablehnung.grund, wiedervorlage: ablehnung.wiedervorlage,
+                                    notiz: ablehnung.notiz, von: user.name, datum: heute() },
+                          verlauf: [...a.verlauf, { d: heute(),
+                            t: "Nicht abgeschlossen: " + ablehnung.grund +
+                               (ablehnung.wiedervorlage ? ", Wiedervorlage " + datum(ablehnung.wiedervorlage) : ""),
+                            w: user.name }] });
+                        onZurueck();
+                      }}>
+                      Absage speichern
+                    </Btn>
+                    <Btn variante="hell" onClick={() => setAblehnung({ ...ablehnung, offen: false })}>Abbrechen</Btn>
+                  </div>
                 </div>
               )}
             </div>
@@ -3149,6 +3311,7 @@ function Liste({ anfragen, onOeffnen, leerText }) {
           <div className="flex-1 min-w-40">
             <div className="text-sm">{a.kunde.firma || "Neue Anfrage"}</div>
             <div className="text-xs" style={{ color: C.muted }}>
+              {a.kunde.branche ? a.kunde.branche + " · " : ""}
               {a.id} · {aktiveVariante(a) ? aktiveVariante(a).produkt : a.produkt} · {laufzeitVon(a)} Mon. · {a.partnerName}
             </div>
           </div>
@@ -3903,11 +4066,25 @@ function Login({ mitarbeiter, onLogin, onCode }) {
 
           {fehler && <p className="text-sm mt-4" style={{ color: C.warn }}>{fehler}</p>}
 
-          <p className="text-xs mt-6 pt-4" style={{ color: C.muted, borderTop: "1px solid " + C.line }}>
-            {VERSION}<br /><br />
-            Demo-Zugänge: karsten@egc-energie.de (Geschäftsführung), m.weber@egc-energie.de
-            (Vertriebspartner), kalkulation@egc-energie.de. Passwort für alle: {DEMO_PASSWORT}
-          </p>
+          <div className="mt-6 pt-4" style={{ borderTop: "1px solid " + C.line }}>
+            <p className="text-xs mb-2" style={{ color: C.muted }}>{VERSION}</p>
+            <p className="text-xs mb-2" style={{ color: C.muted }}>
+              Zugänge, Passwort für alle: {DEMO_PASSWORT}
+            </p>
+            <div className="space-y-1">
+              {mitarbeiter.filter((m) => m.email && m.status === "aktiv").map((m) => (
+                <button key={m.id} onClick={() => { setEmail(m.email); setPw(DEMO_PASSWORT); setModus("login"); }}
+                  className="w-full flex items-center gap-2 text-xs px-2 py-1 rounded text-left"
+                  style={{ border: "1px solid " + C.line, background: "#F6F8FA" }}>
+                  <span className="flex-1 truncate" style={{ color: C.text }}>{m.email}</span>
+                  <span style={{ color: ROLLENFARBE[m.rolle] || C.muted }}>{m.rolle}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs mt-2" style={{ color: C.muted }}>
+              Tippen füllt die Felder aus.
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -4519,14 +4696,15 @@ function LeadAuswertung({ leads, mitarbeiter, user, darfAlles }) {
 function Versorgerliste({ versorger, setVersorger, user }) {
   const [name, setName] = useState("");
   const [notiz, setNotiz] = useState("");
+  const [branchen, setBranchen] = useState("");
   const darfAendern = user.rolle === "Geschäftsführung";
 
   const anlegen = () => {
     const sauber = name.trim();
     if (!sauber) return;
     if (versorger.some((v) => v.name.toLowerCase() === sauber.toLowerCase())) return;
-    setVersorger([...versorger, { id: "v-" + uid(), name: sauber, notiz: notiz.trim() }]);
-    setName(""); setNotiz("");
+    setVersorger([...versorger, { id: "v-" + uid(), name: sauber, notiz: notiz.trim(), branchen: branchen.trim() }]);
+    setName(""); setNotiz(""); setBranchen("");
   };
 
   return (
@@ -4542,6 +4720,8 @@ function Versorgerliste({ versorger, setVersorger, user }) {
             <Feld label="Versorger" value={name} onChange={setName} placeholder="Name des Versorgers" />
             <Feld label="Notiz" value={notiz} onChange={setNotiz}
               placeholder="Konditionen, Ansprechpartner, Besonderheiten" />
+            <Feld label="Branchen und Ausschlüsse" value={branchen} onChange={setBranchen}
+              placeholder="welche Branchen werden angenommen, welche nicht" breit />
           </div>
           <div className="mt-4">
             <Btn icon={Plus} onClick={anlegen} disabled={!name.trim()}>Versorger anlegen</Btn>
@@ -4562,6 +4742,9 @@ function Versorgerliste({ versorger, setVersorger, user }) {
             <div className="flex-1 min-w-0">
               <div className="text-sm">{v.name}</div>
               {v.notiz && <div className="text-xs" style={{ color: C.muted }}>{v.notiz}</div>}
+              {v.branchen && (
+                <div className="text-xs mt-0.5" style={{ color: C.gas }}>Branchen: {v.branchen}</div>
+              )}
             </div>
             {darfAendern && (
               <button onClick={() => setVersorger(versorger.filter((x) => x.id !== v.id))}
@@ -4852,6 +5035,635 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
           Sicherung ziehen.
         </p>
       </div>
+    </div>
+  );
+}
+
+/* Punkt 4: Benachrichtigungen werden aus dem Datenbestand abgeleitet.
+   Gelesenes merkt sich der Mitarbeiter über die Schlüssel der Meldungen. */
+function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter) {
+  const m = [];
+  const zu = (art, id, text, ziel, datum) => m.push({ id: art + ":" + id, art, text, ziel, datum });
+  const meineIds = user.rolle === "Teamleiter"
+    ? [user.id, ...strukturUnter(user.id, mitarbeiter).map((x) => x.id)]
+    : [user.id];
+
+  if (["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(user.rolle)) {
+    anfragen.filter((a) => istBeteiligt(a, user.id)).forEach((a) => {
+      if (a.status === "angebot") zu("angebot", a.id, "Angebot liegt vor: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
+      if (a.status === "klaerfall") zu("klaerfall", a.id, "Unterlagen fehlen: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
+      if (a.status === "angefragt") zu("angefragt", a.id, "Angebot beim Versorger angefragt: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
+      if (a.status === "bestaetigt") zu("bestaetigt", a.id, "Auftrag bestätigt: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
+      if (a.absage && a.absage.wiedervorlage && a.absage.wiedervorlage <= heute())
+        zu("wiedervorlage", a.id, "Wiedervorlage fällig: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.absage.wiedervorlage);
+    });
+    (leads || []).filter((l) => l.zugewiesen === user.id && !l.gelesen)
+      .forEach((l) => zu("lead", l.id, "Neuer Lead: " + l.firma, { ansicht: "leads" }, l.angelegt));
+  }
+
+  if (user.rolle === "Kalkulation") {
+    anfragen.filter((a) => a.status === "eingereicht")
+      .forEach((a) => zu("eingang", a.id, "Neue Anfrage: " + a.kunde.firma, { ansicht: "eingang", vorgang: a.id }, a.angelegt));
+    anfragen.filter((a) => a.status === "uebermittelt")
+      .forEach((a) => zu("auftrag", a.id, "Neuer Auftrag einzureichen: " + a.kunde.firma, { ansicht: "auftraege", vorgang: a.id }, a.angelegt));
+    (smartmeter || []).filter((v) => v.status === "eingereicht")
+      .forEach((v) => zu("sm", v.id, "Smartmeter-Anfrage: " + v.kunde, { ansicht: "smartmeter" }, v.angelegt));
+  }
+
+  if (user.rolle === "Geschäftsführung") {
+    anfragen.filter((a) => a.status === "ruecksprache")
+      .forEach((a) => zu("ruecksprache", a.id, "Rücksprache erbeten: " + a.kunde.firma, { ansicht: "ruecksprachen", vorgang: a.id }, a.angelegt));
+    mitarbeiter.filter((x) => x.status === "pruefung")
+      .forEach((x) => zu("stammdaten", x.id, "Stammdaten zur Freigabe: " + x.name, { ansicht: "partner" }, heute()));
+  }
+
+  if (user.rolle === "Vertragsmanagement") {
+    anfragen.filter((a) => a.status === "bestaetigt")
+      .forEach((a) => zu("vertrag", a.id, "Vertrag zu prüfen: " + a.kunde.firma, { ansicht: "vertraege", vorgang: a.id }, a.angelegt));
+  }
+
+  (tickets || []).forEach((t) => {
+    if (t.empfaenger === user.rolle && t.status !== "abgeschlossen")
+      zu("ticket", t.id, "Ticket " + t.nummer + ": " + t.betreff, { ansicht: "tickets" }, t.datum);
+    const letzter = t.beitraege[t.beitraege.length - 1];
+    if (t.vonId === user.id && letzter && letzter.von !== user.name)
+      zu("ticketantwort", t.id + ":" + letzter.id, "Antwort auf Ticket " + t.nummer, { ansicht: "tickets" }, letzter.datum);
+  });
+
+  (probleme || []).forEach((p) => {
+    if (p.status !== "erledigt" && p.betroffene.some((b) => meineIds.includes(b.id)))
+      zu("problem", p.id, p.art + ": " + p.kunde, { ansicht: p.art === "Storno" ? "stornos" : "probleme" }, p.angelegt);
+  });
+
+  return m.sort((a, b) => (b.datum || "").localeCompare(a.datum || ""));
+}
+
+function Glocke({ meldungen, gelesen, aufGelesen, aufSpringen }) {
+  const [offen, setOffen] = useState(false);
+  const neue = meldungen.filter((m) => !gelesen.includes(m.id));
+  return (
+    <div className="relative">
+      <button onClick={() => setOffen(!offen)}
+        className="flex items-center gap-2 px-3 py-2 rounded text-sm w-full"
+        style={{ background: offen ? C.inkSoft : "transparent", color: "#93A4B8" }}>
+        <Bell size={15} />
+        <span className="flex-1 text-left">Benachrichtigungen</span>
+        {neue.length > 0 && (
+          <span className="text-xs px-1.5 rounded-full" style={{ background: C.warn, color: "#fff" }}>
+            {neue.length}
+          </span>
+        )}
+      </button>
+
+      {offen && (
+        <div className="mt-2 rounded overflow-hidden" style={{ background: "#fff", border: "1px solid " + C.line }}>
+          <div className="flex items-center justify-between px-3 py-2"
+               style={{ borderBottom: "1px solid " + C.line }}>
+            <span className="text-xs" style={{ color: C.muted }}>{meldungen.length} Meldungen</span>
+            <button className="text-xs" style={{ color: C.strom }}
+              onClick={() => aufGelesen(meldungen.map((m) => m.id))}>
+              alle gelesen
+            </button>
+          </div>
+          <div style={{ maxHeight: 300, overflowY: "auto" }}>
+            {meldungen.length === 0 && (
+              <p className="text-sm px-3 py-4" style={{ color: C.muted }}>Nichts Neues.</p>
+            )}
+            {meldungen.map((m) => {
+              const istNeu = !gelesen.includes(m.id);
+              return (
+                <button key={m.id}
+                  onClick={() => { aufSpringen(m); aufGelesen([m.id]); setOffen(false); }}
+                  className="w-full text-left px-3 py-2 flex items-start gap-2"
+                  style={{ borderTop: "1px solid " + C.line,
+                           background: istNeu ? "#F1F7F0" : "#fff", color: C.text }}>
+                  <span className="w-2 h-2 rounded-full mt-1.5"
+                        style={{ background: istNeu ? C.ok : "transparent" }} />
+                  <span className="flex-1 text-sm">{m.text}
+                    <span className="block text-xs" style={{ color: C.muted }}>{datum(m.datum)}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Ringdiagramm für Zielerreichung und Kennzahlen */
+function Ring({ anteil, gross = 120, farbe = "#4A9130", beschriftung, wert }) {
+  const r = gross / 2 - 10;
+  const umfang = 2 * Math.PI * r;
+  const gefuellt = Math.min(1, Math.max(0, anteil)) * umfang;
+  return (
+    <div className="flex flex-col items-center">
+      <svg width={gross} height={gross}>
+        <circle cx={gross / 2} cy={gross / 2} r={r} fill="none" stroke="#E6EAF0" strokeWidth="10" />
+        <circle cx={gross / 2} cy={gross / 2} r={r} fill="none" stroke={farbe} strokeWidth="10"
+          strokeDasharray={gefuellt + " " + umfang} strokeLinecap="round"
+          transform={"rotate(-90 " + gross / 2 + " " + gross / 2 + ")"} />
+        <text x="50%" y="50%" textAnchor="middle" dy="0.35em"
+              style={{ fontSize: gross / 5, fontVariantNumeric: "tabular-nums", fill: C.text }}>
+          {num(Math.round(anteil * 100))} %
+        </text>
+      </svg>
+      {beschriftung && <div className="text-xs mt-1" style={{ color: C.muted }}>{beschriftung}</div>}
+      {wert && <div className="text-sm" style={{ fontVariantNumeric: "tabular-nums" }}>{wert}</div>}
+    </div>
+  );
+}
+
+function Balken({ anteil, farbe = "#4A9130" }) {
+  return (
+    <div className="h-2 rounded" style={{ background: "#E6EAF0" }}>
+      <div className="h-2 rounded"
+           style={{ width: Math.min(100, Math.max(2, anteil * 100)) + "%", background: farbe }} />
+    </div>
+  );
+}
+
+/* Punkt 7: Monats- und Quartalsziele in kWh */
+function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user }) {
+  const darfSetzen = ["Teamleiter", "Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
+  const kandidaten = darfSetzen
+    ? (user.rolle === "Teamleiter"
+        ? [user, ...strukturUnter(user.id, mitarbeiter)]
+        : mitarbeiter.filter((m) => ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle)))
+    : [user];
+
+  const setz = (id, k, v) =>
+    setMitarbeiter(mitarbeiter.map((m) => (m.id === id ? { ...m, [k]: v.replace(/\D/g, "") } : m)));
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm" style={{ color: C.muted, maxWidth: "62ch" }}>
+        Ziele in Kilowattstunden je Monat und Quartal. Gezählt wird die Menge aus abgeschlossenen
+        Verträgen im laufenden Zeitraum.
+      </p>
+      {kandidaten.map((m) => {
+        const z = zielstand(m, anfragen, mitarbeiter);
+        return (
+          <div key={m.id} className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="flex items-center gap-3 mb-4">
+              <Avatar m={m} size={34} />
+              <div className="flex-1">
+                <div className="text-sm">{m.name}</div>
+                <div className="text-xs" style={{ color: C.muted }}>{m.rolle} · Team {m.team}</div>
+              </div>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-6">
+              {[["Monat", z.monat, m.zielMonat, "zielMonat"], ["Quartal", z.quartal, m.zielQuartal, "zielQuartal"]]
+                .map(([titel, stand, ziel, feld]) => (
+                <div key={titel} className="flex items-center gap-4">
+                  <Ring anteil={stand.anteil} gross={96}
+                        farbe={stand.anteil >= 1 ? C.ok : C.strom} />
+                  <div className="flex-1">
+                    <div className="text-sm mb-1">{titel}</div>
+                    <div className="text-xs mb-2" style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                      {num(stand.ist)} von {num(stand.ziel)} kWh
+                      <span className="block">
+                        {stand.ziel > stand.ist
+                          ? "noch " + num(stand.ziel - stand.ist) + " kWh"
+                          : "Ziel erreicht"}
+                      </span>
+                    </div>
+                    {(darfSetzen || m.id === user.id) && (
+                      <Feld label={"Ziel " + titel + " in kWh"} value={ziel || ""} zahl
+                        onChange={(v) => setz(m.id, feld, v)} />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Zielstand berechnen */
+function zielstand(m, anfragen, mitarbeiter) {
+  const n = new Date();
+  const eigen = anfragen.filter((a) =>
+    a.status === "abgeschlossen" && istBeteiligt(a, m.id) && a.kalkulation);
+  const menge = (pruef) => eigen.reduce((t, a) => {
+    const v = aktiveVariante(a);
+    const tag = (v && v.lieferbeginn) || a.angelegt;
+    const d = new Date(tag);
+    if (isNaN(d) || !pruef(d)) return t;
+    const anteil = beteiligte(a).find((b) => b.id === m.id);
+    const q = anteil ? (parseFloat(anteil.anteil) || 100) / 100 : 1;
+    return t + verbrauchGesamt(a) * q;
+  }, 0);
+
+  const istMonat = menge((d) => d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth());
+  const istQuartal = menge((d) => d.getFullYear() === n.getFullYear() &&
+    Math.floor(d.getMonth() / 3) === Math.floor(n.getMonth() / 3));
+  const zm = parseFloat(m.zielMonat) || 0;
+  const zq = parseFloat(m.zielQuartal) || 0;
+  return {
+    monat: { ist: istMonat, ziel: zm, anteil: zm > 0 ? istMonat / zm : 0 },
+    quartal: { ist: istQuartal, ziel: zq, anteil: zq > 0 ? istQuartal / zq : 0 },
+  };
+}
+
+/* Punkt 11: Kalender mit Terminen */
+function Kalender({ termine, setTermine, user, leads }) {
+  const [neuOffen, setNeuOffen] = useState(false);
+  const [f, setF] = useState({ titel: "", datum: heute(), zeit: "09:00", dauer: "60", ort: "", notiz: "" });
+
+  const meine = termine.filter((t) => t.fuerId === user.id)
+    .sort((a, b) => (a.datum + a.zeit).localeCompare(b.datum + b.zeit));
+
+  /* Termine aus Leads mit Termindatum ergänzen */
+  const ausLeads = (leads || [])
+    .filter((l) => l.zugewiesen === user.id && l.terminDatum)
+    .map((l) => ({ id: "lead-" + l.id, titel: "Termin " + l.firma, datum: l.terminDatum,
+                   zeit: l.terminZeit || "", ort: l.terminArt, notiz: "", ausLead: true, fuerId: user.id }));
+
+  const alle = [...meine, ...ausLeads].sort((a, b) => (a.datum + a.zeit).localeCompare(b.datum + b.zeit));
+
+  const anlegen = () => {
+    setTermine([...termine, { id: "TE" + uid(), fuerId: user.id, ...f }]);
+    setF({ titel: "", datum: heute(), zeit: "09:00", dauer: "60", ort: "", notiz: "" });
+    setNeuOffen(false);
+  };
+
+  const googleLink = (t) => {
+    const start = (t.datum || heute()).replace(/-/g, "") + "T" +
+      (t.zeit || "09:00").replace(":", "") + "00";
+    const endeMin = (parseInt(t.zeit) || 9) * 60 + (parseInt((t.zeit || "").split(":")[1]) || 0) +
+      (parseInt(t.dauer) || 60);
+    const eh = String(Math.floor(endeMin / 60) % 24).padStart(2, "0");
+    const em = String(endeMin % 60).padStart(2, "0");
+    const ende = (t.datum || heute()).replace(/-/g, "") + "T" + eh + em + "00";
+    return "https://calendar.google.com/calendar/render?action=TEMPLATE&text=" +
+      encodeURIComponent(t.titel) + "&dates=" + start + "/" + ende +
+      "&location=" + encodeURIComponent(t.ort || "") +
+      "&details=" + encodeURIComponent(t.notiz || "");
+  };
+
+  const icsLaden = () => {
+    const zeilen = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//EGC-Energie//Vertriebsportal//DE"];
+    alle.forEach((t) => {
+      const start = t.datum.replace(/-/g, "") + "T" + (t.zeit || "09:00").replace(":", "") + "00";
+      zeilen.push("BEGIN:VEVENT", "UID:" + t.id + "@egc-energie", "DTSTART:" + start,
+        "SUMMARY:" + t.titel, "LOCATION:" + (t.ort || ""), "DESCRIPTION:" + (t.notiz || ""), "END:VEVENT");
+    });
+    zeilen.push("END:VCALENDAR");
+    const url = "data:text/calendar;base64," + btoa(utf8Binaer(zeilen.join("\r\n")));
+    dateiLaden({ name: "egc-termine.ics", url });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm" style={{ color: C.muted, maxWidth: "50ch" }}>
+          Deine Termine, ergänzt um die Termine aus deinen Leads.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Btn icon={Plus} onClick={() => setNeuOffen(!neuOffen)}>Termin anlegen</Btn>
+          <Btn variante="hell" icon={Upload} onClick={icsLaden}>Alle exportieren</Btn>
+        </div>
+      </div>
+
+      {neuOffen && (
+        <div className="rounded p-5 space-y-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Feld label="Titel" value={f.titel} onChange={(v) => setF({ ...f, titel: v })} breit />
+            <Feld label="Datum" type="date" value={f.datum} onChange={(v) => setF({ ...f, datum: v })} />
+            <Feld label="Uhrzeit" value={f.zeit} onChange={(v) => setF({ ...f, zeit: v })} placeholder="09:00" />
+            <Feld label="Dauer in Minuten" value={f.dauer} onChange={(v) => setF({ ...f, dauer: v })} />
+            <Feld label="Ort oder Form" value={f.ort} onChange={(v) => setF({ ...f, ort: v })}
+              placeholder="Vor Ort, Teams, Telefon" />
+            <Feld label="Notiz" value={f.notiz} onChange={(v) => setF({ ...f, notiz: v })} breit />
+          </div>
+          <Btn icon={Check} onClick={anlegen} disabled={!f.titel.trim()}>Termin speichern</Btn>
+        </div>
+      )}
+
+      {alle.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm"
+             style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          Keine Termine eingetragen.
+        </div>
+      ) : (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {alle.map((t, i) => (
+            <div key={t.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3"
+                 style={{ borderTop: i ? "1px solid " + C.line : "none",
+                          background: t.datum === heute() ? "#F1F7F0" : "transparent" }}>
+              <span className="text-sm w-32" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {datum(t.datum)}
+                <span className="block text-xs" style={{ color: C.muted }}>{t.zeit} Uhr</span>
+              </span>
+              <div className="flex-1 min-w-40">
+                <div className="text-sm">{t.titel}</div>
+                <div className="text-xs" style={{ color: C.muted }}>
+                  {t.ort}{t.ausLead ? " · aus Lead" : ""}{t.notiz ? " · " + t.notiz : ""}
+                </div>
+              </div>
+              <a href={googleLink(t)} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 rounded"
+                 style={{ border: "1px solid " + C.line, color: C.strom }}>in Google Kalender</a>
+              {!t.ausLead && (
+                <button onClick={() => setTermine(termine.filter((x) => x.id !== t.id))}
+                  style={{ color: C.muted }}><Trash2 size={15} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs" style={{ color: C.muted, maxWidth: "62ch" }}>
+        Termine lassen sich einzeln in den Google Kalender übernehmen oder gemeinsam als
+        ICS-Datei exportieren, die jeder Kalender einlesen kann. Eine dauerhafte Verknüpfung mit
+        Google erfordert eine Anmeldung über Google und kommt mit dem Backend.
+      </p>
+    </div>
+  );
+}
+
+/* Problemfälle und Stornierungen */
+const PROBLEM_ARTEN = ["Mahnung", "Problem", "Storno", "Sonstiges"];
+const PROBLEM_STATUS = {
+  offen: { label: "Offen", color: "#B24328" },
+  bearbeitung: { label: "In Bearbeitung", color: "#2F5FE0" },
+  erledigt: { label: "Erledigt", color: "#4A9130" },
+};
+
+function Problemfaelle({ probleme, setProbleme, anfragen, mitarbeiter, user, nurStorno }) {
+  const [neuOffen, setNeuOffen] = useState(false);
+  const [auswahl, setAuswahl] = useState(null);
+  const [antwort, setAntwort] = useState("");
+  const [f, setF] = useState({ anfrageId: "", art: "Mahnung", text: "", dateien: [], rueck: {} });
+
+  const istVM = ["Vertragsmanagement", "Geschäftsführung"].includes(user.rolle);
+  const alleSehen = ["Vertragsmanagement", "Geschäftsführung", "Leitung Vertrieb", "Finanzbuchhaltung"]
+    .includes(user.rolle);
+  const meineIds = user.rolle === "Teamleiter"
+    ? [user.id, ...strukturUnter(user.id, mitarbeiter).map((m) => m.id)]
+    : [user.id];
+
+  const sichtbar = probleme
+    .filter((p) => (nurStorno ? p.art === "Storno" : true))
+    .filter((p) => alleSehen || p.betroffene.some((b) => meineIds.includes(b.id)));
+
+  const kunden = anfragen.filter((a) =>
+    ["bestaetigt", "abgeschlossen", "uebermittelt"].includes(a.status));
+  const gewaehlterKunde = anfragen.find((a) => a.id === f.anfrageId);
+  const problem = probleme.find((p) => p.id === auswahl);
+
+  /* Wer ist betroffen? Der Partner und alle Stufen darüber */
+  const betroffeneVon = (a) => {
+    if (!a) return [];
+    const v = gesamtverteilung(a, mitarbeiter);
+    return v.anteile.map((x) => ({ id: x.id, name: x.name, rolle: x.rolle, provision: x.betrag }));
+  };
+
+  const anlegen = () => {
+    const a = gewaehlterKunde;
+    const betroffene = betroffeneVon(a).map((b) => ({
+      ...b, rueckzahlung: f.art === "Storno" ? (parseFloat(f.rueck[b.id]) || b.provision) : 0,
+    }));
+    const p = {
+      id: "P-" + new Date().getFullYear() + "-" + Math.floor(100 + Math.random() * 899),
+      anfrageId: a.id, kunde: a.kunde.firma, art: f.art, text: f.text, dateien: f.dateien,
+      betroffene, angelegt: heute(), zeit: jetzt(), von: user.name, status: "offen",
+      beitraege: [],
+    };
+    setProbleme([p, ...probleme]);
+    setF({ anfrageId: "", art: "Mahnung", text: "", dateien: [], rueck: {} });
+    setNeuOffen(false);
+  };
+
+  const setz = (id, aend) => setProbleme(probleme.map((p) => (p.id === id ? { ...p, ...aend } : p)));
+
+  if (problem) {
+    const st = PROBLEM_STATUS[problem.status];
+    return (
+      <div>
+        <div className="flex items-center flex-wrap gap-3 mb-1">
+          <button onClick={() => setAuswahl(null)} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
+          <h2 className="text-lg">{problem.kunde}</h2>
+          <span className="text-xs px-2 py-0.5 rounded"
+                style={{ border: "1px solid " + C.line, color: problem.art === "Storno" ? C.warn : C.gas }}>
+            {problem.art}
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: st.color }}>
+            <span className="w-2 h-2 rounded-full" style={{ background: st.color }} />{st.label}
+          </span>
+        </div>
+        <p className="text-sm mb-5 ml-8" style={{ color: C.muted }}>
+          {problem.id} · {problem.anfrageId} · gemeldet von {problem.von} am {datum(problem.angelegt)}
+        </p>
+
+        <div className="space-y-5">
+          <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <p className="text-sm" style={{ whiteSpace: "pre-wrap" }}>{problem.text}</p>
+            {problem.dateien.length > 0 && (
+              <div className="space-y-2 mt-4">
+                {problem.dateien.map((d, i) => <DateiChip key={i} datei={d} />)}
+              </div>
+            )}
+          </div>
+
+          {problem.art === "Storno" && (
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.warn }}>
+              <div className="text-sm mb-1" style={{ color: C.warn }}>Rückzahlung der Provision</div>
+              <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+                Die Rechnung über den zurückzuzahlenden Betrag wird gesondert per E-Mail zugestellt.
+              </p>
+              {problem.betroffene.map((b) => (
+                <div key={b.id} className="flex items-center gap-4 py-2 text-sm"
+                     style={{ borderTop: "1px solid " + C.line }}>
+                  <span className="flex-1">{b.name}
+                    <span className="block text-xs" style={{ color: C.muted }}>{b.rolle}</span>
+                  </span>
+                  <span style={{ fontVariantNumeric: "tabular-nums", color: C.warn }}>
+                    {eur(b.rueckzahlung)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="px-4 py-3 text-sm" style={{ borderBottom: "1px solid " + C.line }}>
+              Rückmeldungen
+            </div>
+            <div className="px-4 py-3 space-y-3">
+              {problem.beitraege.length === 0 && (
+                <p className="text-sm" style={{ color: C.muted }}>Noch keine Rückmeldung.</p>
+              )}
+              {problem.beitraege.map((b) => (
+                <div key={b.id} className="rounded p-3" style={{ background: "#F6F8FA",
+                     borderLeft: "3px solid " + (ROLLENFARBE[b.rolle] || C.muted) }}>
+                  <div className="flex flex-wrap items-baseline gap-x-2 mb-1">
+                    <span className="text-sm">{b.von}</span>
+                    <span className="text-xs" style={{ color: ROLLENFARBE[b.rolle] || C.muted }}>{b.rolle}</span>
+                    <span className="flex-1" />
+                    <span className="text-xs" style={{ color: C.muted }}>{datum(b.datum)}, {b.zeit} Uhr</span>
+                  </div>
+                  <p className="text-sm" style={{ whiteSpace: "pre-wrap" }}>{b.text}</p>
+                </div>
+              ))}
+            </div>
+            {problem.status !== "erledigt" && (
+              <div className="px-4 py-3" style={{ borderTop: "1px solid " + C.line }}>
+                <textarea rows={2} value={antwort} onChange={(e) => setAntwort(e.target.value)}
+                  placeholder="Rückmeldung schreiben"
+                  className="w-full px-3 py-2 text-sm rounded outline-none"
+                  style={{ border: "1px solid " + C.line }} />
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <Btn icon={Send} disabled={!antwort.trim()}
+                    onClick={() => {
+                      setz(problem.id, { status: "bearbeitung",
+                        beitraege: [...problem.beitraege, { id: uid(), text: antwort.trim(),
+                          von: user.name, rolle: user.rolle, datum: heute(), zeit: jetzt() }] });
+                      setAntwort("");
+                    }}>Antworten</Btn>
+                  {istVM && (
+                    <Btn variante="ok" icon={Check}
+                      onClick={() => { setz(problem.id, { status: "erledigt" }); setAuswahl(null); }}>
+                      Als erledigt schließen
+                    </Btn>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (neuOffen) {
+    const betroffene = betroffeneVon(gewaehlterKunde);
+    return (
+      <div>
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={() => setNeuOffen(false)} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
+          <h2 className="text-lg">Problemfall melden</h2>
+        </div>
+        <div className="rounded p-5 space-y-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <Select label="Kunde" value={f.anfrageId} onChange={(v) => setF({ ...f, anfrageId: v })}
+            options={[{ value: "", label: "Bitte wählen" },
+              ...kunden.map((a) => ({ value: a.id, label: a.kunde.firma + " · " + a.partnerName }))]} />
+          <Select label="Worum geht es?" value={f.art} onChange={(v) => setF({ ...f, art: v })}
+            options={PROBLEM_ARTEN} />
+          <label className="block">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>Beschreibung</span>
+            <textarea rows={4} value={f.text} onChange={(e) => setF({ ...f, text: e.target.value })}
+              className="w-full px-3 py-2 text-sm rounded outline-none"
+              style={{ border: "1px solid " + C.line }} />
+          </label>
+
+          <div>
+            <span className="block text-xs mb-2" style={{ color: C.muted }}>Dateien</span>
+            <div className="space-y-2 mb-2">
+              {f.dateien.map((d, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0"><DateiChip datei={d} /></div>
+                  <button onClick={() => setF({ ...f, dateien: f.dateien.filter((_, x) => x !== i) })}
+                    style={{ color: C.muted }}><X size={15} /></button>
+                </div>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 px-3 py-2 rounded text-sm cursor-pointer"
+                   style={{ border: "1px dashed " + C.line, color: C.muted, background: "#fff" }}>
+              <Upload size={14} /> Dateien hinzufügen
+              <input type="file" multiple className="hidden"
+                onChange={(e) => Array.from(e.target.files || []).forEach((x) =>
+                  dateiLesen(x, (d) => setF((v) => ({ ...v, dateien: [...v.dateien, d] }))))} />
+            </label>
+          </div>
+
+          {f.art === "Storno" && gewaehlterKunde && (
+            <div className="p-4 rounded" style={{ background: "#FCF3F0", border: "1px solid " + C.warn }}>
+              <div className="text-sm mb-3" style={{ color: C.warn }}>Zurückzuzahlende Provision</div>
+              {betroffene.map((b) => (
+                <div key={b.id} className="grid sm:grid-cols-2 gap-3 items-end mb-3">
+                  <div className="text-sm">{b.name}
+                    <span className="block text-xs" style={{ color: C.muted }}>
+                      {b.rolle} · erhalten {eur(b.provision)}
+                    </span>
+                  </div>
+                  <Feld label="Rückzahlung in €"
+                    value={f.rueck[b.id] != null ? f.rueck[b.id] : String(Math.round(b.provision * 100) / 100)}
+                    onChange={(v) => setF({ ...f, rueck: { ...f.rueck, [b.id]: v } })} />
+                </div>
+              ))}
+              <p className="text-xs" style={{ color: C.muted }}>
+                Alle Betroffenen erhalten den Hinweis, dass die Rechnung gesondert per E-Mail zugeht.
+              </p>
+            </div>
+          )}
+
+          <Btn icon={Send} onClick={anlegen} disabled={!f.anfrageId || !f.text.trim()}>
+            Melden und Beteiligte informieren
+          </Btn>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <p className="text-sm" style={{ color: C.muted, maxWidth: "54ch" }}>
+          {nurStorno
+            ? "Vom Versorger stornierte Kunden."
+            : istVM
+            ? "Mahnungen, Probleme und Stornierungen. Der zuständige Partner und sein Teamleiter werden informiert."
+            : "Fälle, um die du dich kümmern musst."}
+        </p>
+        {istVM && !nurStorno && (
+          <Btn icon={Plus} onClick={() => setNeuOffen(true)}>Problemfall melden</Btn>
+        )}
+      </div>
+
+      {sichtbar.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm"
+             style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          {nurStorno ? "Keine Stornierungen." : "Keine offenen Problemfälle."}
+        </div>
+      ) : (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {sichtbar.map((p, i) => {
+            const st = PROBLEM_STATUS[p.status];
+            const meins = p.betroffene.find((b) => b.id === user.id);
+            return (
+              <button key={p.id} onClick={() => setAuswahl(p.id)}
+                className="w-full text-left px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1"
+                style={{ borderTop: i ? "1px solid " + C.line : "none",
+                         background: p.status === "offen" && meins ? "#FCF3F0" : "transparent" }}>
+                <div className="flex-1 min-w-40">
+                  <div className="text-sm">{p.kunde}</div>
+                  <div className="text-xs" style={{ color: C.muted }}>
+                    {p.id} · {datum(p.angelegt)} · {p.betroffene.map((b) => b.name).join(", ")}
+                  </div>
+                </div>
+                <span className="text-xs px-2 py-0.5 rounded w-24 text-center"
+                      style={{ border: "1px solid " + C.line,
+                               color: p.art === "Storno" ? C.warn : C.gas }}>{p.art}</span>
+                {meins && meins.rueckzahlung > 0 && (
+                  <span className="text-sm w-28 text-right" style={{ color: C.warn, fontVariantNumeric: "tabular-nums" }}>
+                    -{eur(meins.rueckzahlung)}
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5 text-xs w-32" style={{ color: st.color }}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: st.color }} />{st.label}
+                </span>
+                <ChevronRight size={15} style={{ color: C.muted }} />
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -5626,8 +6438,10 @@ function Rangliste({ titel, zeilen, hinweis, geld = true }) {
   );
 }
 
-function Dashboard({ anfragen, mitarbeiter, user, onOeffnen }) {
+function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, leads,
+                    setMitarbeiter }) {
   const [bereich, setBereich] = useState("meine");
+  const [anpassen, setAnpassen] = useState(false);
   const istTL = user.rolle === "Teamleiter";
   const ids = bereichIds(user, mitarbeiter, bereich);
   const menge_ = imBereich(anfragen, ids);
@@ -5636,12 +6450,25 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen }) {
   const sichtFirma = user.rolle === "Geschäftsführung";
   const geld = !["Kalkulation", "Vertragsmanagement"].includes(user.rolle);
   const struktur = vollsicht || user.rolle === "Leitung Vertrieb" || (istTL && bereich === "team");
+  const vertrieb = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(user.rolle);
+
+  /* Punkt 6: eigene Auswahl der Kacheln und der Darstellung */
+  const stil = user.dashboardStil || "liste";
+  const aus = user.dashboardAus || [];
+  const zeigt = (id) => !aus.includes(id);
+  const umschalten = (id) =>
+    setMitarbeiter((alt) => alt.map((m) => m.id === user.id
+      ? { ...m, dashboardAus: aus.includes(id) ? aus.filter((x) => x !== id) : [...aus, id] } : m));
+  const stilSetzen = (v) =>
+    setMitarbeiter((alt) => alt.map((m) => (m.id === user.id ? { ...m, dashboardStil: v } : m)));
 
   const z = {
     eingang: menge_.filter((a) => a.status === "eingereicht").length,
+    angefragt: menge_.filter((a) => a.status === "angefragt").length,
     klaer: menge_.filter((a) => a.status === "klaerfall").length,
     angebot: menge_.filter((a) => a.status === "angebot").length,
-    fix: menge_.filter((a) => a.status === "abgeschlossen").length,
+    auftrag: menge_.filter((a) => a.status === "uebermittelt").length,
+    fix: menge_.filter((a) => ["bestaetigt", "abgeschlossen"].includes(a.status)).length,
   };
   const fixe = menge_.filter((a) => a.status === "abgeschlossen" && a.kalkulation);
   const kwh = fixe.reduce((t, a) => t + verbrauchGesamt(a), 0);
@@ -5650,56 +6477,175 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen }) {
   const beiFirma = fixe.reduce((t, a) => t + gesamtverteilung(a, mitarbeiter).firma, 0);
   const quote = z.angebot + z.fix > 0 ? (z.fix / (z.angebot + z.fix)) * 100 : 0;
 
-  const Kachel = ({ k, v, farbe }) => (
-    <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+  const KACHELN = [
+    { id: "eingang", k: "Neue Anfragen", v: z.eingang, farbe: C.strom, f: (a) => a.status === "eingereicht" },
+    { id: "angefragt", k: "Angebot in Bearbeitung", v: z.angefragt, farbe: C.gas, f: (a) => a.status === "angefragt" },
+    { id: "klaer", k: "Klärfälle", v: z.klaer, farbe: z.klaer ? C.warn : C.text, f: (a) => a.status === "klaerfall" },
+    { id: "angebot", k: "Angebote beim Kunden", v: z.angebot, farbe: C.ok, f: (a) => a.status === "angebot" },
+    { id: "auftrag", k: "Aufträge beim Versorger", v: z.auftrag, farbe: C.strom, f: (a) => a.status === "uebermittelt" },
+    { id: "fix", k: "Abschlüsse", v: z.fix, f: (a) => ["bestaetigt", "abgeschlossen"].includes(a.status) },
+  ];
+  const ZAHLEN = [
+    { id: "menge", k: "Vermittelte Menge (kWh/Jahr)", v: num(kwh) },
+    ...(geld ? [{ id: "prov", k: vollsicht ? "Gesamtprovision (€/Jahr)" : "Deine Provision (€/Jahr)",
+                  v: num(prov, 2), farbe: vollsicht ? C.text : C.ok }] : []),
+    ...(geld && sichtFirma ? [{ id: "firma", k: "davon Firma (€/Jahr)", v: num(beiFirma, 2), farbe: C.ok }] : []),
+    { id: "quote", k: "Abschlussquote", v: num(quote, 0) + " %" },
+  ];
+
+  const Kachel = ({ k, v, farbe, klick }) => (
+    <button onClick={klick} disabled={!klick}
+      className="rounded p-4 text-left w-full"
+      style={{ background: C.card, border: "1px solid " + C.line, cursor: klick ? "pointer" : "default" }}>
       <div className="text-xs mb-2" style={{ color: C.muted }}>{k}</div>
       <div className="text-2xl" style={{ color: farbe || C.text, fontVariantNumeric: "tabular-nums" }}>{v}</div>
-    </div>
+    </button>
   );
 
-  const Karte = ({ titel, children }) => (
+  const Karte = ({ titel, rechts, children }) => (
     <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
-      <div className="px-4 py-3 text-sm" style={{ borderBottom: "1px solid " + C.line }}>{titel}</div>
+      <div className="flex items-baseline justify-between px-4 py-3" style={{ borderBottom: "1px solid " + C.line }}>
+        <span className="text-sm">{titel}</span>{rechts}
+      </div>
       {children}
     </div>
   );
 
   const Reihe = ({ i, links, unten, rechts, klick }) => (
-    <div onClick={klick} className="flex items-center gap-4 px-4 py-3 text-sm"
-         style={{ borderTop: i ? "1px solid " + C.line : "none", cursor: klick ? "pointer" : "default" }}>
+    <button onClick={klick} disabled={!klick}
+      className="w-full text-left flex items-center gap-4 px-4 py-3 text-sm"
+      style={{ borderTop: i ? "1px solid " + C.line : "none", cursor: klick ? "pointer" : "default" }}>
       <span className="flex-1">{links}
         {unten && <span className="block text-xs" style={{ color: C.muted }}>{unten}</span>}
       </span>
       <span style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{rechts}</span>
-    </div>
+    </button>
   );
 
-  const wartend = menge_.filter((a) => a.status === "eingereicht")
+  const wartend = menge_.filter((a) => ["eingereicht", "angefragt"].includes(a.status))
     .sort((x, y) => x.angelegt.localeCompare(y.angelegt));
-  const meineOffen = menge_.filter((a) => ["klaerfall", "angebot"].includes(a.status));
+  const meineOffen = menge_.filter((a) => ["klaerfall", "angebot", "uebermittelt", "bestaetigt"].includes(a.status));
+  const heutigeTermine = (termine || []).filter((t) => t.fuerId === user.id && t.datum === heute());
+  const wocheEnde = (() => { const d = new Date(); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+  const wocheTermine = (termine || []).filter((t) => t.fuerId === user.id && t.datum > heute() && t.datum <= wocheEnde);
+  const leadTermine = (leads || []).filter((l) => l.zugewiesen === user.id && l.terminDatum &&
+    l.terminDatum >= heute() && l.terminDatum <= wocheEnde);
+  const stand = zielstand(user, anfragen, mitarbeiter);
 
   return (
     <div className="space-y-5">
-      {istTL && <Umschalter bereich={bereich} setBereich={setBereich} />}
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kachel k="Bei Kalkulation" v={z.eingang} farbe={C.strom} />
-        <Kachel k="Klärfälle" v={z.klaer} farbe={z.klaer ? C.warn : C.text} />
-        <Kachel k="Angebote beim Kunden" v={z.angebot} farbe={C.ok} />
-        <Kachel k="Abschlüsse" v={z.fix} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {istTL ? <Umschalter bereich={bereich} setBereich={setBereich} /> : <span />}
+        <button className="text-xs px-2 py-1 rounded" style={{ border: "1px solid " + C.line, color: C.muted }}
+          onClick={() => setAnpassen(!anpassen)}>
+          {anpassen ? "Anpassen beenden" : "Übersicht anpassen"}
+        </button>
       </div>
 
-      <div className={"grid gap-3 " + (geld ? (sichtFirma ? "sm:grid-cols-4" : "sm:grid-cols-3") : "sm:grid-cols-2")}>
-        <Kachel k="Vermittelte Menge (kWh/Jahr)" v={num(kwh)} />
-        {geld && (
-          <Kachel k={vollsicht ? "Gesamtprovision (€/Jahr)" : "Deine Provision (€/Jahr)"}
-            v={num(prov, 2)} farbe={vollsicht ? C.text : C.ok} />
-        )}
-        {geld && sichtFirma && <Kachel k="davon Firma (€/Jahr)" v={num(beiFirma, 2)} farbe={C.ok} />}
-        <Kachel k="Abschlussquote" v={num(quote, 0) + " %"} />
+      {anpassen && (
+        <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.strom }}>
+          <div className="text-sm mb-3">Was möchtest du sehen?</div>
+          <div className="grid sm:grid-cols-2 gap-2 mb-4">
+            {[...KACHELN, ...ZAHLEN, { id: "ziele", k: "Zielerreichung" },
+              { id: "termine", k: "Termine" }, { id: "listen", k: "Listen und Ranglisten" }].map((x) => (
+              <label key={x.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={zeigt(x.id)} onChange={() => umschalten(x.id)}
+                  style={{ accentColor: C.ink }} />
+                {x.k}
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-1">
+            {[["liste", "Als Liste"], ["ring", "Als Ringdiagramm"]].map(([id, label]) => (
+              <button key={id} onClick={() => stilSetzen(id)} className="px-3 py-1.5 text-sm rounded"
+                style={{ background: stil === id ? C.ink : "transparent",
+                         color: stil === id ? "#fff" : C.muted,
+                         border: "1px solid " + (stil === id ? C.ink : C.line) }}>{label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {stil === "ring" ? (
+        <div className="rounded p-5 flex flex-wrap gap-6 justify-around"
+             style={{ background: C.card, border: "1px solid " + C.line }}>
+          {KACHELN.filter((x) => zeigt(x.id)).map((x) => {
+            const gesamt = KACHELN.reduce((t, y) => t + y.v, 0) || 1;
+            return (
+              <button key={x.id} onClick={() => onListe(x.k, menge_.filter(x.f))}>
+                <Ring anteil={x.v / gesamt} gross={96} farbe={x.farbe || C.inkSoft}
+                  beschriftung={x.k} wert={x.v + " Vorgänge"} />
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          {KACHELN.filter((x) => zeigt(x.id)).map((x) => (
+            <Kachel key={x.id} k={x.k} v={x.v} farbe={x.farbe}
+              klick={() => onListe(x.k, menge_.filter(x.f))} />
+          ))}
+        </div>
+      )}
+
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {ZAHLEN.filter((x) => zeigt(x.id)).map((x) => (
+          <Kachel key={x.id} k={x.k} v={x.v} farbe={x.farbe}
+            klick={x.id === "prov" || x.id === "firma" ? () => onOeffnen(null, "provisionen") : null} />
+        ))}
       </div>
 
-      {struktur && (() => {
+      {vertrieb && zeigt("ziele") && (stand.monat.ziel > 0 || stand.quartal.ziel > 0) && (
+        <Karte titel="Zielerreichung"
+          rechts={<button className="text-xs" style={{ color: C.strom }}
+                    onClick={() => onOeffnen(null, "ziele")}>Ziele ändern</button>}>
+          <div className="p-4 grid sm:grid-cols-2 gap-6">
+            {[["Monat", stand.monat], ["Quartal", stand.quartal]].map(([titel, w]) => (
+              <div key={titel} className="flex items-center gap-4">
+                <Ring anteil={w.anteil} gross={90} farbe={w.anteil >= 1 ? C.ok : C.strom} />
+                <div className="flex-1">
+                  <div className="text-sm mb-1">{titel}</div>
+                  <div className="text-xs mb-2" style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                    {num(w.ist)} von {num(w.ziel)} kWh
+                  </div>
+                  <Balken anteil={w.anteil} farbe={w.anteil >= 1 ? C.ok : C.strom} />
+                  <div className="text-xs mt-1" style={{ color: C.muted }}>
+                    {w.ziel > w.ist ? "noch " + num(w.ziel - w.ist) + " kWh" : "Ziel erreicht"}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Karte>
+      )}
+
+      {zeigt("termine") && (
+        <Karte titel="Termine"
+          rechts={<button className="text-xs" style={{ color: C.strom }}
+                    onClick={() => onOeffnen(null, "kalender")}>Kalender öffnen</button>}>
+          {heutigeTermine.length + wocheTermine.length + leadTermine.length === 0 ? (
+            <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>Diese Woche steht nichts an.</div>
+          ) : (
+            <>
+              {heutigeTermine.map((t, i) => (
+                <Reihe key={t.id} i={i} links={t.titel} unten={"heute · " + t.zeit + " Uhr · " + (t.ort || "")}
+                  rechts="heute" klick={() => onOeffnen(null, "kalender")} />
+              ))}
+              {[...wocheTermine, ...leadTermine.map((l) => ({
+                id: "l" + l.id, titel: "Termin " + l.firma, datum: l.terminDatum,
+                zeit: l.terminZeit, ort: l.terminArt }))]
+                .sort((a, b) => (a.datum + a.zeit).localeCompare(b.datum + b.zeit))
+                .map((t, i) => (
+                <Reihe key={t.id} i={i + heutigeTermine.length} links={t.titel}
+                  unten={(t.zeit ? t.zeit + " Uhr · " : "") + (t.ort || "")}
+                  rechts={datum(t.datum)} klick={() => onOeffnen(null, "kalender")} />
+              ))}
+            </>
+          )}
+        </Karte>
+      )}
+
+      {zeigt("listen") && struktur && (() => {
         const kandidaten = mitarbeiter.filter((u) =>
           ids ? ids.includes(u.id) : ["Vertriebspartner", "Teamleiter"].includes(u.rolle));
         const personen = kandidaten.map((u) => {
@@ -5711,18 +6657,18 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen }) {
             wert: vollsicht ? abg.reduce((t, a) => t + gesamtprovision(a), 0) : menge,
             menge, abschluesse: abg.length, team: u.team,
           };
-        }).map((z) => ({ ...z, unten: z.abschluesse + " Abschlüsse" }))
+        }).map((x) => ({ ...x, unten: x.abschluesse + " Abschlüsse" }))
           .sort((a, b) => b.wert - a.wert);
 
         const teams = {};
-        personen.forEach((z) => {
-          const t = z.team || "-";
+        personen.forEach((x) => {
+          const t = x.team || "-";
           if (!teams[t]) teams[t] = { id: t, name: "Team " + t, wert: 0, menge: 0, abschluesse: 0, koepfe: 0 };
-          teams[t].wert += z.wert; teams[t].menge += z.menge;
-          teams[t].abschluesse += z.abschluesse; teams[t].koepfe += 1;
+          teams[t].wert += x.wert; teams[t].menge += x.menge;
+          teams[t].abschluesse += x.abschluesse; teams[t].koepfe += 1;
         });
         const teamZeilen = Object.values(teams)
-          .map((t) => ({ ...t, unten: t.koepfe + " Mitarbeiter · " + t.abschluesse + " Abschlüsse · " + num(t.menge) + " kWh" }))
+          .map((t) => ({ ...t, unten: t.koepfe + " Mitarbeiter · " + t.abschluesse + " Abschlüsse" }))
           .sort((a, b) => b.wert - a.wert);
 
         return (
@@ -5731,45 +6677,43 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen }) {
               <Rangliste titel="Ranking Vertriebsteams" zeilen={teamZeilen} geld={vollsicht}
                 hinweis={vollsicht ? "Gesamtprovision je Lieferjahr" : "vermittelte Menge je Jahr"} />
             )}
-            <Rangliste
-              titel={istTL ? "Ranking meiner Vertriebspartner" : "Ranking Vertriebsmitarbeiter"}
+            <Rangliste titel={istTL ? "Ranking meiner Vertriebspartner" : "Ranking Vertriebsmitarbeiter"}
               zeilen={personen} geld={vollsicht}
               hinweis={vollsicht ? "Gesamtprovision je Lieferjahr" : "vermittelte Menge je Jahr"} />
           </div>
         );
       })()}
 
-      {user.rolle === "Kalkulation" && (
+      {zeigt("listen") && user.rolle === "Kalkulation" && (
         <Karte titel="Wartet auf Kalkulation">
           {wartend.length === 0 && <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>Nichts offen.</div>}
           {wartend.map((a, i) => (
             <Reihe key={a.id} i={i} links={a.kunde.firma}
-              unten={a.id + " · " + a.partnerName + " · " + num(verbrauchGesamt(a)) + " kWh"}
+              unten={a.id + " · " + a.partnerName + " · " + STATUS[a.status].label}
               rechts={"seit " + datum(a.angelegt)} klick={() => onOeffnen(a.id)} />
           ))}
         </Karte>
       )}
 
-      {user.rolle === "Vertragsmanagement" && (
+      {zeigt("listen") && user.rolle === "Vertragsmanagement" && (
         <Karte titel="Verträge nach Status">
-          {["Vertrag zu erstellen", "Vertrag versendet", "Vertrag unterschrieben",
+          {["Provision offen", "Vertrag zu erstellen", "Vertrag versendet", "Vertrag unterschrieben",
             "Beim Versorger eingereicht", "Lieferung aktiv"].map((st, i) => (
             <Reihe key={st} i={i} links={st}
-              rechts={anfragen.filter((a) => a.status === "abgeschlossen" && (a.vertragsStatus || "Vertrag zu erstellen") === st).length} />
+              rechts={anfragen.filter((a) => ["bestaetigt", "abgeschlossen"].includes(a.status) &&
+                (a.vertragsStatus || "Vertrag zu erstellen") === st).length} />
           ))}
         </Karte>
       )}
 
-      {!struktur && geld && (
+      {zeigt("listen") && !struktur && geld && (
         <Karte titel="Was gerade offen ist">
           {meineOffen.length === 0 && (
-            <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>
-              Nichts offen. Alle Vorgänge sind entweder in Kalkulation oder abgeschlossen.
-            </div>
+            <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>Nichts offen.</div>
           )}
           {meineOffen.map((a, i) => (
             <Reihe key={a.id} i={i} links={a.kunde.firma}
-              unten={a.id + " · " + (a.status === "klaerfall" ? "Daten fehlen" : "Angebot liegt beim Kunden")}
+              unten={a.id + " · " + STATUS[a.status].label}
               rechts={a.status === "angebot" ? eur(anteilVon(a, user.id, mitarbeiter)) : ""}
               klick={() => onOeffnen(a.id)} />
           ))}
@@ -5790,6 +6734,9 @@ export default function App() {
   const [versorger, setVersorger] = useState(VERSORGER);
   const [tickets, setTickets] = useState([]);
   const [smartmeter, setSmartmeter] = useState([]);
+  const [probleme, setProbleme] = useState([]);
+  const [termine, setTermine] = useState([]);
+  const [listenAnsicht, setListenAnsicht] = useState(null);
   const [userId, setUserId] = useState(null);
   const [registriert, setRegistriert] = useState(null);
   const [ansicht, setAnsicht] = useState("anfragen");
@@ -5830,6 +6777,14 @@ export default function App() {
           const sm = await window.storage.get("egc-crm:smartmeter");
           if (sm && sm.value) setSmartmeter(JSON.parse(sm.value));
         } catch (e7) { /* noch keine Smartmeter-Vorgänge */ }
+        try {
+          const pr = await window.storage.get("egc-crm:probleme");
+          if (pr && pr.value) setProbleme(JSON.parse(pr.value));
+        } catch (e8) { /* noch keine Problemfälle */ }
+        try {
+          const te = await window.storage.get("egc-crm:termine");
+          if (te && te.value) setTermine(JSON.parse(te.value));
+        } catch (e9) { /* noch keine Termine */ }
       } catch (e) { /* erster Start: Demodaten */ }
       setGeladen(true);
     })();
@@ -5846,9 +6801,11 @@ export default function App() {
         await window.storage.set("egc-crm:versorger", JSON.stringify(versorger));
         await window.storage.set("egc-crm:tickets", JSON.stringify(tickets));
         await window.storage.set("egc-crm:smartmeter", JSON.stringify(smartmeter));
+        await window.storage.set("egc-crm:probleme", JSON.stringify(probleme));
+        await window.storage.set("egc-crm:termine", JSON.stringify(termine));
       } catch (e) { /* Speichern nicht verfügbar */ }
     })();
-  }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, geladen]);
+  }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine, geladen]);
 
   const speichern = (a) =>
     setAnfragen((prev) => (prev.some((x) => x.id === a.id)
@@ -5869,6 +6826,12 @@ export default function App() {
   const neueLeads = user ? leads.filter((l) => l.zugewiesen === user.id && !l.gelesen).length : 0;
   const offeneTickets = user
     ? tickets.filter((t) => t.empfaenger === user.rolle && t.status !== "abgeschlossen").length : 0;
+  const neueAuftraege = anfragen.filter((a) => a.status === "uebermittelt").length;
+  const offeneProbleme = user
+    ? probleme.filter((p) => p.status !== "erledigt" &&
+        (["Vertragsmanagement", "Geschäftsführung"].includes(user.rolle) ||
+         p.betroffene.some((b) => b.id === user.id ||
+           strukturUnter(user.id, mitarbeiter).some((m) => m.id === b.id)))).length : 0;
 
   const ausLead = (l) => {
     const a = leereAnfrage(user);
@@ -5890,6 +6853,19 @@ export default function App() {
     setAnsicht("neu");
   };
 
+  const meldungen = user
+    ? meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter) : [];
+  const gelesen = (user && user.gelesen) || [];
+  const alsGelesen = (schluessel) =>
+    setMitarbeiter((alt) => alt.map((m) => m.id === (user && user.id)
+      ? { ...m, gelesen: [...new Set([...(m.gelesen || []), ...schluessel])] } : m));
+  const springen = (m) => {
+    setListenAnsicht(null);
+    if (m.ziel.vorgang) { setAnsicht(m.ziel.ansicht); setOffen(m.ziel.vorgang); }
+    else { setOffen(null); setAnsicht(m.ziel.ansicht); }
+    setMenu(false);
+  };
+
   const meine = user ? anfragen.filter((a) => istBeteiligt(a, user.id)) : [];
   const rolle = user ? user.rolle : "Vertriebspartner";
 
@@ -5900,10 +6876,18 @@ export default function App() {
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
       { id: "kunden", label: "Meine Kunden", icon: FileSignature },
+      { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
+      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "ziele", label: "Meine Ziele", icon: Target },
+      { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "smartmeter", label: "Smartmeter", icon: Zap },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "provisionen", label: "Provisionen", icon: Wallet },
       { id: "smartmeter", label: "Smartmeter", icon: Zap },
+      { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
+      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "ziele", label: "Ziele", icon: Target },
+      { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
       { id: "meine-daten", label: "Meine Stammdaten", icon: Users },
@@ -5913,7 +6897,9 @@ export default function App() {
       { id: "eingang", label: "Eingang", icon: Calculator },
       { id: "versorger", label: "Versorgerbestätigung ausstehend", icon: FileSignature },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "auftraege", label: "Neue Aufträge", icon: FileSignature, badge: neueAuftraege },
       { id: "smartmeter", label: "Smartmeter", icon: Zap },
+      { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
@@ -5926,6 +6912,9 @@ export default function App() {
       { id: "leads", label: "Meine Leads", icon: Inbox, badge: neueLeads },
       { id: "kunden", label: "Kunden im Team", icon: FileSignature },
       { id: "provisionen", label: "Meine Provisionen", icon: Wallet },
+      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "ziele", label: "Ziele", icon: Target },
+      { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
       { id: "meine-daten", label: "Meine Stammdaten", icon: Users },
@@ -5948,6 +6937,9 @@ export default function App() {
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "vertraege", label: "Verträge", icon: FileSignature },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
+      { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
+      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
@@ -5960,6 +6952,10 @@ export default function App() {
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
+      { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
+      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "ziele", label: "Ziele", icon: Target },
+      { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "export", label: "Export und Sicherung", icon: Upload },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
@@ -5969,6 +6965,8 @@ export default function App() {
       { id: "abrechnung", label: "Provisionsabrechnung", icon: Wallet },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
+      { id: "stornos", label: "Stornierungen", icon: X },
+      { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
       { id: "unterlagen", label: "Unterlagen", icon: FileText },
     ],
@@ -5984,7 +6982,7 @@ export default function App() {
   const aktuell = anfragen.find((a) => a.id === offen);
 
   const TABS = [
-    { id: "offen", label: "Offene Anfragen", f: (a) => ["entwurf", "eingereicht", "ruecksprache"].includes(a.status) },
+    { id: "offen", label: "Offene Anfragen", f: (a) => ["entwurf", "eingereicht", "ruecksprache", "angefragt"].includes(a.status) },
     { id: "angebote", label: "Angebote", f: (a) => a.status === "angebot" },
     { id: "klaer", label: "Klärfälle", f: (a) => a.status === "klaerfall" },
     { id: "uebermittelt", label: "Auftrag an Versorger übermittelt", f: (a) => a.status === "uebermittelt" },
@@ -6077,7 +7075,7 @@ export default function App() {
     );
   } else if (ansicht === "eingang") {
     inhalt = (
-      <Liste anfragen={anfragen.filter((a) => a.status === "eingereicht")}
+      <Liste anfragen={anfragen.filter((a) => ["eingereicht", "angefragt"].includes(a.status))}
         leerText="Keine neuen Anfragen im Eingang." onOeffnen={setOffen} />
     );
   } else if (ansicht === "versorger") {
@@ -6093,7 +7091,12 @@ export default function App() {
   } else if (ansicht === "provisionen") {
     inhalt = <Provisionen anfragen={sichtbar} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "dashboard") {
-    inhalt = <Dashboard anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} onOeffnen={setOffen} />;
+    inhalt = (
+      <Dashboard anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
+        termine={termine} leads={leads} setMitarbeiter={setMitarbeiter}
+        onOeffnen={(id, ziel) => { if (ziel) { setOffen(null); setAnsicht(ziel); } else setOffen(id); }}
+        onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />
+    );
   } else if (ansicht === "ruecksprachen") {
     inhalt = (
       <Liste anfragen={anfragen.filter((a) => a.status === "ruecksprache")}
@@ -6108,6 +7111,35 @@ export default function App() {
         onUebernehmen={ausLead}
         onGelesen={(id) => setLeads(leads.map((l) => (l.id === id ? { ...l, gelesen: true } : l)))} />
     );
+  } else if (listenAnsicht) {
+    inhalt = (
+      <div>
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={() => setListenAnsicht(null)} style={{ color: C.muted }}>
+            <ArrowLeft size={18} />
+          </button>
+          <h2 className="text-lg">{listenAnsicht.titel}</h2>
+        </div>
+        <Liste anfragen={listenAnsicht.liste} leerText="Keine Vorgänge in dieser Auswahl."
+          onOeffnen={setOffen} />
+      </div>
+    );
+  } else if (ansicht === "auftraege") {
+    inhalt = (
+      <Liste anfragen={anfragen.filter((a) => a.status === "uebermittelt")}
+        leerText="Keine neuen Aufträge." onOeffnen={setOffen} />
+    );
+  } else if (ansicht === "probleme") {
+    inhalt = <Problemfaelle probleme={probleme} setProbleme={setProbleme} anfragen={anfragen}
+               mitarbeiter={mitarbeiter} user={user} />;
+  } else if (ansicht === "stornos") {
+    inhalt = <Problemfaelle probleme={probleme} setProbleme={setProbleme} anfragen={anfragen}
+               mitarbeiter={mitarbeiter} user={user} nurStorno />;
+  } else if (ansicht === "ziele") {
+    inhalt = <Ziele mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
+               anfragen={anfragen} user={user} />;
+  } else if (ansicht === "kalender") {
+    inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} />;
   } else if (ansicht === "export") {
     inhalt = (
       <Datenexport anfragen={anfragen} mitarbeiter={mitarbeiter} leads={leads} ablage={ablage}
@@ -6157,9 +7189,11 @@ export default function App() {
             style={{ background: C.inkSoft, color: "#fff" }}>
             {menu ? <X size={18} /> : <Menu size={18} />}
             <span className="text-sm">{menu ? "Schließen" : "Menü"}</span>
-            {!menu && neueLeads > 0 && (
+            {!menu && meldungen.filter((m) => !gelesen.includes(m.id)).length > 0 && (
               <span className="text-xs px-1.5 rounded-full"
-                    style={{ background: C.gruen, color: "#0A1626" }}>{neueLeads}</span>
+                    style={{ background: C.warn, color: "#fff" }}>
+                {meldungen.filter((m) => !gelesen.includes(m.id)).length}
+              </span>
             )}
           </button>
         </div>
@@ -6177,10 +7211,16 @@ export default function App() {
             </button>
           </div>
 
+          <div className="mb-2">
+            <Glocke meldungen={meldungen} gelesen={gelesen}
+              aufGelesen={alsGelesen} aufSpringen={springen} />
+          </div>
+
           <nav className="lg:block">
             {(gesperrt ? [] : NAV).map((n) => (
               <button key={n.id}
-                onClick={() => { setAnsicht(n.id); setOffen(null); setEntwurf(null); setMenu(false); }}
+                onClick={() => { setAnsicht(n.id); setOffen(null); setEntwurf(null);
+                                 setListenAnsicht(null); setMenu(false); }}
                 className="flex items-center gap-2.5 px-3 py-2 rounded text-sm w-full"
                 style={{
                   background: ansicht === n.id && !offen ? C.inkSoft : "transparent",
