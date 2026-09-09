@@ -280,7 +280,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v4.4 · 08.09.2026 · Alles anklickbar";
+const VERSION = "v4.6 · 08.09.2026 · Akquise ohne Doppelarbeit";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -5805,14 +5805,18 @@ const zugewiesenAn = (l) =>
 
 const AKQ_STATUS = {
   offen: { label: "Offen", color: "#6B7787" },
+  kontakt: { label: "In Kontakt", color: "#2F5FE0" },
   termin: { label: "Termin ausgemacht", color: "#4A9130" },
   wiedervorlage: { label: "Wiedervorlage", color: "#BE6A16" },
   kein: { label: "Kein Interesse", color: "#B24328" },
+  kunde: { label: "Als Kunde übernommen", color: "#0A1626" },
 };
 const TERMINFORM = ["Telefonisch", "Vor Ort", "Video"];
 
 function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
   const [branche, setBranche] = useState("");
+  const [zeigeUebernommene, setZeigeUebernommene] = useState(false);
+  const [trotzdem, setTrotzdem] = useState([]);
   const [maske, setMaske] = useState(null);
   const [neuOffen, setNeuOffen] = useState(false);
   const [datei, setDatei] = useState(null);
@@ -5831,8 +5835,11 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
     : listen.filter((l) => zugewiesenAn(l).some((id) => meineIds.includes(id)));
   const branchen = [...new Set(sichtbareListen.map((l) => l.branche))].sort();
   const aktuelle = sichtbareListen.filter((l) => !branche || l.branche === branche);
-  const eintraege = aktuelle.flatMap((l) =>
+  const alleEintraege = aktuelle.flatMap((l) =>
     l.eintraege.map((e) => ({ ...e, listeId: l.id, branche: l.branche })));
+  const uebernommen = alleEintraege.filter((e) => e.status === "kunde");
+  const eintraege = zeigeUebernommene ? alleEintraege
+    : alleEintraege.filter((e) => e.status !== "kunde");
   const empfaenger = mitarbeiter.filter((m) =>
     ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle) && m.status === "aktiv");
 
@@ -6019,11 +6026,20 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
            style={{ background: C.card, border: "1px solid " + C.line }}>
         <Select label="Branche" value={branche} onChange={setBranche}
           options={[{ value: "", label: "Alle Branchen" }, ...branchen]} />
-        <div className="flex items-end gap-4 text-xs" style={{ color: C.muted }}>
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2 text-xs" style={{ color: C.muted }}>
           <span>{eintraege.length} Kontakte</span>
+          <span style={{ color: C.strom }}>{zahl("kontakt")} in Kontakt</span>
           <span style={{ color: C.ok }}>{zahl("termin")} Termine</span>
           <span style={{ color: C.gas }}>{zahl("wiedervorlage")} Wiedervorlagen</span>
           <span>{zahl("offen")} offen</span>
+          {uebernommen.length > 0 && (
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={zeigeUebernommene}
+                onChange={(e) => setZeigeUebernommene(e.target.checked)}
+                style={{ accentColor: C.ink }} />
+              {uebernommen.length} übernommene anzeigen
+            </label>
+          )}
         </div>
       </div>
 
@@ -6040,10 +6056,14 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
       ) : (
         <div className="space-y-2">
           {eintraege.map((e) => {
-            const st = AKQ_STATUS[e.status];
+            const st = AKQ_STATUS[e.status] || AKQ_STATUS.offen;
+            const fremd = e.bearbeiterId && e.bearbeiterId !== user.id;
+            const offenLegen = trotzdem.includes(e.id);
             return (
               <div key={e.id} className="rounded p-4"
-                   style={{ background: C.card, border: "1px solid " + (e.status === "offen" ? C.line : st.color) }}>
+                   style={{ background: e.status === "kunde" ? "#F4F6F8" : C.card,
+                            opacity: fremd ? 0.85 : 1,
+                            border: "1px solid " + (e.status === "offen" ? C.line : st.color) }}>
                 <div className="flex flex-wrap items-start gap-3">
                   <div className="flex-1 min-w-48">
                     <button onClick={() => onKunde(e)} className="text-left">
@@ -6069,8 +6089,15 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
                       )}
                     </div>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: st.color }}>
-                    <span className="w-2 h-2 rounded-full" style={{ background: st.color }} />{st.label}
+                  <span className="text-right">
+                    <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: st.color }}>
+                      <span className="w-2 h-2 rounded-full" style={{ background: st.color }} />{st.label}
+                    </span>
+                    {e.bearbeiter && (
+                      <span className="block text-xs mt-0.5" style={{ color: C.muted }}>
+                        {e.bearbeiterId === user.id ? "von dir" : e.bearbeiter}
+                      </span>
+                    )}
                   </span>
                 </div>
 
@@ -6082,27 +6109,65 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
                 )}
                 {e.notiz && <p className="text-sm mt-2" style={{ color: C.muted }}>{e.notiz}</p>}
 
+                {fremd && (
+                  <div className="mt-3 p-2 rounded text-xs"
+                       style={{ background: "#FDF6EE", border: "1px solid " + C.gas, color: C.gas }}>
+                    {e.status === "kunde"
+                      ? e.bearbeiter + " hat diesen Kontakt bereits als Kunden übernommen."
+                      : e.bearbeiter + " ist bereits mit diesem Kontakt befasst"
+                        + (e.bearbeitetAm ? " seit " + datum(e.bearbeitetAm) : "") + "."}
+                    {" "}Bitte nicht doppelt anrufen.
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-2 mt-3 pt-3" style={{ borderTop: "1px solid " + C.line }}>
-                  <button onClick={() => setMaske({ art: "termin", eintrag: e, listeId: e.listeId })}
-                    className="text-xs px-2 py-1 rounded"
-                    style={{ border: "1px solid " + C.line, color: C.ok }}>Termin ausgemacht</button>
-                  <button onClick={() => setMaske({ art: "wiedervorlage", eintrag: e, listeId: e.listeId })}
-                    className="text-xs px-2 py-1 rounded"
-                    style={{ border: "1px solid " + C.line, color: C.gas }}>Wiedervorlage</button>
-                  <button onClick={() => setzEintrag(e.listeId, e.id, {
-                      status: "kein", bearbeiterId: user.id, bearbeiter: user.name })}
-                    className="text-xs px-2 py-1 rounded"
-                    style={{ border: "1px solid " + C.line, color: C.warn }}>Kein Interesse</button>
-                  <span className="flex-1" />
-                  <button onClick={() => onKunde(e)} className="text-xs px-2 py-1 rounded"
-                    style={{ border: "1px solid " + C.line, color: C.strom }}>
-                    Als Kunde übernehmen
-                  </button>
-                  {e.status !== "offen" && (
-                    <button onClick={() => setzEintrag(e.listeId, e.id, {
-                        status: "offen", termin: null, bearbeiterId: null, bearbeiter: "" })}
+                  {fremd && !offenLegen ? (
+                    <button onClick={() => setTrotzdem([...trotzdem, e.id])}
                       className="text-xs px-2 py-1 rounded"
-                      style={{ border: "1px solid " + C.line, color: C.muted }}>zurücksetzen</button>
+                      style={{ border: "1px solid " + C.line, color: C.muted }}>
+                      trotzdem bearbeiten
+                    </button>
+                  ) : (
+                    <>
+                      {e.status === "offen" && (
+                        <button onClick={() => setzEintrag(e.listeId, e.id, {
+                            status: "kontakt", bearbeiterId: user.id, bearbeiter: user.name,
+                            bearbeitetAm: heute() })}
+                          className="text-xs px-2 py-1 rounded"
+                          style={{ border: "1px solid " + C.strom, color: C.strom }}>
+                          Ich kümmere mich
+                        </button>
+                      )}
+                      <button onClick={() => setMaske({ art: "termin", eintrag: e, listeId: e.listeId })}
+                        className="text-xs px-2 py-1 rounded"
+                        style={{ border: "1px solid " + C.line, color: C.ok }}>Termin ausgemacht</button>
+                      <button onClick={() => setMaske({ art: "wiedervorlage", eintrag: e, listeId: e.listeId })}
+                        className="text-xs px-2 py-1 rounded"
+                        style={{ border: "1px solid " + C.line, color: C.gas }}>Wiedervorlage</button>
+                      <button onClick={() => setzEintrag(e.listeId, e.id, {
+                          status: "kein", bearbeiterId: user.id, bearbeiter: user.name,
+                          bearbeitetAm: heute() })}
+                        className="text-xs px-2 py-1 rounded"
+                        style={{ border: "1px solid " + C.line, color: C.warn }}>Kein Interesse</button>
+                      <span className="flex-1" />
+                      {e.status !== "kunde" && (
+                        <button onClick={() => {
+                            setzEintrag(e.listeId, e.id, { status: "kunde", bearbeiterId: user.id,
+                              bearbeiter: user.name, bearbeitetAm: heute() });
+                            onKunde(e);
+                          }} className="text-xs px-2 py-1 rounded"
+                          style={{ border: "1px solid " + C.strom, color: C.strom }}>
+                          Als Kunde übernehmen
+                        </button>
+                      )}
+                      {e.status !== "offen" && (
+                        <button onClick={() => setzEintrag(e.listeId, e.id, {
+                            status: "offen", termin: null, bearbeiterId: null, bearbeiter: "",
+                            bearbeitetAm: "" })}
+                          className="text-xs px-2 py-1 rounded"
+                          style={{ border: "1px solid " + C.line, color: C.muted }}>freigeben</button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -6336,6 +6401,129 @@ function Pipeline({ anfragen, mitarbeiter, user, onOeffnen, onListe }) {
         Die Prognose gewichtet die Provision jeder Phase mit ihrer Abschlusswahrscheinlichkeit.
         Die Werte sind Erfahrungswerte und lassen sich anpassen, sobald genug eigene Abschlüsse
         vorliegen.
+      </p>
+    </div>
+  );
+}
+
+/* Kundenprüfung: zeigt nur, ob eine Firma schon im Bestand ist */
+function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
+  const [name, setName] = useState("");
+  const [plz, setPlz] = useState("");
+  const [malo, setMalo] = useState("");
+  const [ergebnis, setErgebnis] = useState(null);
+
+  const norm = (t) => String(t || "").toLowerCase().replace(/[^a-zäöüß0-9]/g, "");
+  const kurz = (t) => {
+    /* Rechtsformen abschneiden, damit "Muster GmbH" und "Muster" zusammenfinden */
+    let n = norm(t);
+    ["gmbhcokg", "gmbhco", "gmbh", "ohg", "kgaa", "kg", "ag", "ek", "ev", "gbr", "ug", "mbh"]
+      .forEach((r) => { if (n.endsWith(r)) n = n.slice(0, -r.length); });
+    return n;
+  };
+
+  const pruefen = () => {
+    const gesucht = kurz(name);
+    if (gesucht.length < 3) { setErgebnis({ art: "kurz" }); return; }
+    const maloSauber = malo.replace(/\s/g, "");
+
+    const passt = (a) => {
+      const n = kurz(a.kunde.firma);
+      const nameTreffer = n && (n === gesucht || n.includes(gesucht) || gesucht.includes(n));
+      const plzTreffer = !plz || a.kunde.plz === plz.trim();
+      const maloTreffer = maloSauber &&
+        a.lieferstellen.some((l) => String(l.maloId || "").replace(/\s/g, "") === maloSauber);
+      return maloTreffer || (nameTreffer && plzTreffer);
+    };
+
+    const treffer = anfragen.filter((a) => a.status !== "abgelehnt" && passt(a));
+    const leadTreffer = (leads || []).filter((l) => {
+      const n = kurz(l.firma);
+      return n && (n === gesucht || n.includes(gesucht) || gesucht.includes(n)) &&
+        (!plz || l.plz === plz.trim());
+    });
+
+    if (treffer.length === 0 && leadTreffer.length === 0) { setErgebnis({ art: "frei" }); return; }
+
+    const bestand = treffer.filter((a) => ["bestaetigt", "abgeschlossen"].includes(a.status));
+    const laufend = treffer.filter((a) => !["bestaetigt", "abgeschlossen"].includes(a.status));
+    const eigene = treffer.filter((a) => istBeteiligt(a, user.id));
+
+    setErgebnis({
+      art: bestand.length ? "kunde" : laufend.length ? "bearbeitung" : "lead",
+      eigene, anzahl: treffer.length + leadTreffer.length,
+    });
+  };
+
+  const Antwort = () => {
+    if (!ergebnis) return null;
+    if (ergebnis.art === "kurz")
+      return <p className="text-sm" style={{ color: C.muted }}>Bitte mindestens drei Zeichen eingeben.</p>;
+
+    const bilder = {
+      frei: { farbe: C.ok, hg: "#F1F7F0", titel: "Noch nicht im Bestand",
+        text: "Zu dieser Firma ist bei uns nichts erfasst. Du kannst sie ohne Rücksprache angehen." },
+      kunde: { farbe: C.warn, hg: "#FCF3F0", titel: "Bereits Kunde",
+        text: "Diese Firma ist bereits Kunde bei uns. Bitte kläre vor einem Kontakt mit deinem Teamleiter, wie weiter vorzugehen ist." },
+      bearbeitung: { farbe: C.gas, hg: "#FDF6EE", titel: "Wird bereits bearbeitet",
+        text: "Zu dieser Firma läuft bereits ein Vorgang. Bitte kläre vor einem Kontakt mit deinem Teamleiter, wie weiter vorzugehen ist." },
+      lead: { farbe: C.gas, hg: "#FDF6EE", titel: "Als Lead erfasst",
+        text: "Diese Firma ist bereits als Lead im System. Bitte kläre vor einem Kontakt mit deinem Teamleiter, wie weiter vorzugehen ist." },
+    };
+    const b = bilder[ergebnis.art];
+
+    return (
+      <div className="rounded p-5 mt-5" style={{ background: b.hg, border: "1px solid " + b.farbe }}>
+        <div className="flex items-center gap-2 mb-2" style={{ color: b.farbe }}>
+          {ergebnis.art === "frei" ? <Check size={18} /> : <AlertTriangle size={18} />}
+          <span className="text-lg">{b.titel}</span>
+        </div>
+        <p className="text-sm" style={{ maxWidth: "60ch" }}>{b.text}</p>
+
+        {ergebnis.eigene && ergebnis.eigene.length > 0 && (
+          <div className="mt-4 pt-4" style={{ borderTop: "1px solid " + C.line }}>
+            <div className="text-sm mb-2">Davon betreust du selbst:</div>
+            {ergebnis.eigene.map((a) => (
+              <div key={a.id} className="text-sm py-1">
+                {a.kunde.firma} · {a.id} · {STATUS[a.status].label}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "62ch" }}>
+        Prüfe vor der Ansprache, ob eine Firma schon bei uns geführt wird. Du erfährst nur, ob sie
+        im Bestand ist — nicht, wer sie betreut.
+      </p>
+
+      <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <div className="grid sm:grid-cols-3 gap-4">
+          <div className="sm:col-span-2">
+            <Feld label="Firmenname" value={name} onChange={(v) => { setName(v); setErgebnis(null); }}
+              placeholder="z. B. Hotel Saarblick" />
+          </div>
+          <Feld label="PLZ, freiwillig" value={plz} onChange={(v) => { setPlz(v); setErgebnis(null); }} />
+          <div className="sm:col-span-3">
+            <Feld label="Marktlokations-ID, freiwillig und am sichersten" value={malo}
+              onChange={(v) => { setMalo(v); setErgebnis(null); }} placeholder="11-stellig" />
+          </div>
+        </div>
+        <div className="mt-4">
+          <Btn icon={Check} onClick={pruefen} disabled={!name.trim()}>Prüfen</Btn>
+        </div>
+      </div>
+
+      <Antwort />
+
+      <p className="text-xs mt-5" style={{ color: C.muted, maxWidth: "62ch" }}>
+        Geprüft werden alle Vorgänge und Leads im Haus. Rechtsformen wie GmbH oder e.K. werden beim
+        Vergleich ausgeblendet. Die sicherste Prüfung ist die Marktlokations-ID, weil Firmennamen sich
+        ähneln oder ändern können.
       </p>
     </div>
   );
@@ -8523,6 +8711,7 @@ export default function App() {
       { id: "neu", label: "Neue Anfrage", icon: Plus },
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "kunden", label: "Meine Kunden", icon: FileSignature },
+      { id: "pruefung", label: "Kunde prüfen", icon: Check },
       { id: "pipeline", label: "Pipeline", icon: BarChart3 },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
@@ -8543,6 +8732,7 @@ export default function App() {
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "alle", label: "Team-Vorgänge", icon: Users },
       { id: "kunden", label: "Kunden im Team", icon: FileSignature },
+      { id: "pruefung", label: "Kunde prüfen", icon: Check },
       { id: "pipeline", label: "Pipeline", icon: BarChart3 },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
@@ -8611,6 +8801,7 @@ export default function App() {
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
+      { id: "pruefung", label: "Kunde prüfen", icon: Check },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
@@ -8855,6 +9046,8 @@ export default function App() {
     );
   } else if (ansicht === "kalender") {
     inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} />;
+  } else if (ansicht === "pruefung") {
+    inhalt = <Kundenpruefung anfragen={anfragen} leads={leads} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "aufgaben") {
     inhalt = <Aufgaben aufgaben={aufgaben} setAufgaben={setAufgaben} user={user}
                mitarbeiter={mitarbeiter} onOeffnen={(id) => setOffen(id)} />;
