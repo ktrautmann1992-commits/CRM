@@ -280,7 +280,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v4.6 · 08.09.2026 · Akquise ohne Doppelarbeit";
+const VERSION = "v4.7 · 08.09.2026 · Logo führt zur Übersicht";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -9100,8 +9100,15 @@ export default function App() {
       <aside className="lg:w-64 shrink-0 lg:px-4 lg:py-5" style={{ background: C.ink, color: "#fff" }}>
         {/* Kopfzeile mobil */}
         <div className="flex items-center gap-3 px-4 py-3 lg:px-0 lg:py-0 lg:block lg:mb-6">
-          <img src={LOGO} alt="EGC Energie" className="w-28 lg:w-48" />
-          <div className="hidden lg:block text-xs mt-2" style={{ color: "#8B9BB0" }}>Vertriebsportal</div>
+          <button title="Zur Übersicht"
+            onClick={() => {
+              setAnsicht("dashboard");
+              setOffen(null); setEntwurf(null); setListenAnsicht(null); setMenu(false);
+            }}
+            className="text-left">
+            <img src={LOGO} alt="EGC Energie" className="w-28 lg:w-48" />
+            <div className="hidden lg:block text-xs mt-2" style={{ color: "#8B9BB0" }}>Vertriebsportal</div>
+          </button>
 
           <span className="flex-1 lg:hidden" />
 
