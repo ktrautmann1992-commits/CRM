@@ -52,6 +52,16 @@ const SPARTEN = [
   { value: "gas", label: "nur Erdgas" },
 ];
 
+const AKQUISE_ART = [
+  { value: "eigen", label: "Eigenakquise", text: "Vom Vertriebspartner selbst gewonnen" },
+  { value: "unternehmen", label: "Unternehmenslead", text: "Vom Unternehmen zugewiesen" },
+];
+
+const HERKUNFT = [
+  "Tippgeber", "Netzwerk", "Veranstaltung", "Eigenes Netzwerk",
+  "Kaltakquise", "Social Media", "Bestandskunde", "Sonstiges",
+];
+
 const LEAD_QUELLEN = ["Tippgeber", "Social Media", "Kaltakquise", "Eigenakquise", "Sonstiges"];
 
 const ZEITRAEUME = [
@@ -196,6 +206,7 @@ function migriereAnfragen(liste) {
     laufzeitArt: "monate", wunschLieferbeginn: "", wunschLieferende: "",
     produktGas: a.produkt || "Festpreis", beratungHinweis: "", bemerkungVertrieb: "",
     dienstleistungsvertrag: false, lieferstellenListe: false, lieferstellenDatei: null,
+    akquiseArt: "eigen", herkunft: "Eigenes Netzwerk", herkunftDetail: "", tippgeberId: null,
     zielpreis: "", zielpreisNotiz: "",
     fehlend: [], fehlendText: "", nachrichten: [], verlauf: [], ausgezahlt: {},
     annahme: null, einreichung: false, bestaetigung: null, klaerung: null,
@@ -280,7 +291,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v4.7 · 08.09.2026 · Logo führt zur Übersicht";
+const VERSION = "v5.3 · 09.09.2026 · Individuelle Bonusziele";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -583,10 +594,26 @@ function erzeugeXlsx(dateiname, blatt, zeilen) {
   };
 }
 
-/* Erzeugt ein mehrseitiges PDF aus Textzeilen */
+/* Logo als JPEG für die Einbettung in PDF-Dokumente */
+const LOGO_PDF = "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";
+const LOGO_PDF_BREITE = 420;
+const LOGO_PDF_HOEHE = 196;
+
+/* Erzeugt ein mehrseitiges PDF im EGC-Design aus Textzeilen */
 function erzeugePdf(dateiname, titel, zeilen) {
+  /* Zeichen auf die Schriftbelegung des Dokuments abbilden.
+     Das Eurozeichen liegt dort auf Position 128. */
   const sauber = (t) =>
-    String(t).replace(/[\\()]/g, "").split("").filter((z) => z.charCodeAt(0) < 256).join("");
+    String(t)
+      .replace(/[\\()]/g, "")
+      .replace(/€/g, String.fromCharCode(128))
+      .replace(/[„""]/g, '"')
+      .replace(/[–—]/g, "-")
+      .replace(/[‚'']/g, "'")
+      .replace(/…/g, "...")
+      .split("")
+      .filter((z) => z.charCodeAt(0) < 256)
+      .join("");
   const umbrechen = (t, breite) => {
     const worte = sauber(t).split(" ");
     const raus = [];
@@ -603,34 +630,67 @@ function erzeugePdf(dateiname, titel, zeilen) {
   zeilen.forEach((z) => {
     const text = typeof z === "string" ? z : z.text;
     const gross = typeof z === "object" && z.gross;
-    umbrechen(text, gross ? 60 : 92).forEach((t, i) => alle.push({ text: t, gross: gross && i === 0 }));
+    umbrechen(text, gross ? 58 : 88).forEach((t, i) => alle.push({ text: t, gross: gross && i === 0 }));
   });
 
-  const proSeite = 46;
+  const proSeite = 38;
   const seiten = [];
   for (let i = 0; i < alle.length; i += proSeite) seiten.push(alle.slice(i, i + proSeite));
   if (!seiten.length) seiten.push([]);
 
+  /* Farben: Navy #0A1626, Grün #6CB43B, Grau #6B7787 */
+  const navy = "0.039 0.086 0.149";
+  const gruen = "0.424 0.706 0.231";
+  const grau = "0.42 0.467 0.529";
+
   const inhalte = seiten.map((zs, nr) => {
-    let y = 790;
-    let str = "BT /F1 16 Tf 55 812 Td (" + sauber(titel) + ") Tj ET\n";
+    let c = "";
+    /* Kopfbereich in Navy */
+    c += "q " + navy + " rg 0 752 595 90 re f Q\n";
+    /* Logo, Höhe 26 Punkt */
+    const h = 26, b = (LOGO_PDF_BREITE / LOGO_PDF_HOEHE) * h;
+    c += "q " + b.toFixed(2) + " 0 0 " + h + " 48 796 cm /Im0 Do Q\n";
+    /* Titel in Weiß */
+    c += "BT 1 1 1 rg /F1 15 Tf 48 770 Td (" + sauber(titel) + ") Tj ET\n";
+    /* Grüne Linie unter dem Kopf */
+    c += "q " + gruen + " rg 0 748 595 4 re f Q\n";
+
+    let y = 712;
     zs.forEach((z) => {
-      y -= z.gross ? 22 : 15;
-      str += "BT /F1 " + (z.gross ? 12 : 9.5) + " Tf 55 " + y + " Td (" + z.text + ") Tj ET\n";
+      if (z.gross) {
+        y -= 12;
+        c += "q " + gruen + " rg 48 " + (y + 15) + " 52 2 re f Q\n";
+        c += "BT 0.086 0.129 0.173 rg /F1 12.5 Tf 48 " + y + " Td (" + sauber(z.text) + ") Tj ET\n";
+        y -= 6;
+      } else {
+        c += "BT 0.086 0.129 0.173 rg /F1 9.5 Tf 48 " + y + " Td (" + sauber(z.text) + ") Tj ET\n";
+      }
+      y -= 15;
     });
-    str += "BT /F1 8 Tf 55 40 Td (Seite " + (nr + 1) + " von " + seiten.length + ") Tj ET\n";
-    return str;
+
+    /* Fußzeile */
+    c += "q 0.85 0.87 0.89 rg 48 52 499 0.8 re f Q\n";
+    c += "BT " + grau + " rg /F1 8 Tf 48 38 Td (EGC-Energie  ·  Energate-Consulting) Tj ET\n";
+    c += "BT " + grau + " rg /F1 8 Tf 470 38 Td (Seite " + (nr + 1) + " von " + seiten.length + ") Tj ET\n";
+    return c;
   });
 
-  const kids = seiten.map((_, i) => 4 + i * 2 + " 0 R").join(" ");
+  /* Objekte: 1 Katalog, 2 Seitenbaum, 3 Schrift, 4 Bild, danach je Seite zwei */
+  const bildRoh = atob(LOGO_PDF);
   const objekte = [
     "<</Type/Catalog/Pages 2 0 R>>",
-    "<</Type/Pages/Kids[" + kids + "]/Count " + seiten.length + ">>",
+    null,   // wird unten gesetzt, sobald die Seitenkennungen feststehen
     "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>",
+    "<</Type/XObject/Subtype/Image/Width " + LOGO_PDF_BREITE + "/Height " + LOGO_PDF_HOEHE +
+      "/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length " + bildRoh.length +
+      ">>\nstream\n" + bildRoh + "\nendstream",
   ];
+  const kids = seiten.map((_, i) => 5 + i * 2 + " 0 R").join(" ");
+  objekte[1] = "<</Type/Pages/Kids[" + kids + "]/Count " + seiten.length + ">>";
+
   inhalte.forEach((c, i) => {
-    objekte.push("<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents " +
-      (5 + i * 2) + " 0 R/Resources<</Font<</F1 3 0 R>>>>>>");
+    objekte.push("<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents " + (6 + i * 2) +
+      " 0 R/Resources<</Font<</F1 3 0 R>>/XObject<</Im0 4 0 R>>>>>>");
     objekte.push("<</Length " + c.length + ">>\nstream\n" + c + "\nendstream");
   });
 
@@ -717,6 +777,10 @@ const leereAnfrage = (user) => ({
     ansprechpartner: "", email: "", telefon: "",
   },
   bemerkungVertrieb: "",
+  akquiseArt: "eigen",
+  herkunft: "Eigenes Netzwerk",
+  herkunftDetail: "",
+  tippgeberId: null,
   lieferstellenListe: false,
   lieferstellenDatei: null,
   dienstleistungsvertrag: false,
@@ -1109,6 +1173,11 @@ const monateDazu = (iso, monate) => {
   return d.toISOString().slice(0, 10);
 };
 
+/* Zusatzprovision für selbst gewonnene Kunden, in Prozentpunkten.
+   Sie geht zulasten des Firmenanteils, die Struktur bleibt unberührt. */
+let BONUS_EIGENAKQUISE = 10;
+const setzeBonus = (wert) => { BONUS_EIGENAKQUISE = parseFloat(wert) || 0; };
+
 /* Ein Kunde kann von mehreren Vertriebspartnern betreut werden.
    beteiligte hält je Partner den prozentualen Anteil an der Vertriebsprovision. */
 const beteiligte = (a) =>
@@ -1123,16 +1192,34 @@ function gesamtverteilung(a, mitarbeiter, betrag) {
   const summe = teile.reduce((t, b) => t + (parseFloat(b.anteil) || 0), 0) || 1;
   const map = {};
   let firma = 0;
+  let bonusGesamt = 0;
+  const eigen = (a.akquiseArt || "eigen") === "eigen" && BONUS_EIGENAKQUISE > 0;
+
   teile.forEach((b) => {
-    const v = verteilung((g * (parseFloat(b.anteil) || 0)) / summe, b.id, mitarbeiter);
+    const anteilG = (g * (parseFloat(b.anteil) || 0)) / summe;
+    const v = verteilung(anteilG, b.id, mitarbeiter);
     v.anteile.forEach((x) => {
-      if (!map[x.id]) map[x.id] = { ...x, betrag: 0 };
+      if (!map[x.id]) map[x.id] = { ...x, betrag: 0, bonus: 0 };
       map[x.id].betrag += x.betrag;
       if (x.overhead) map[x.id].overhead = true;
     });
     firma += v.firma;
+
+    /* Der Bonus geht an den Partner selbst, nicht an seine Struktur */
+    if (eigen) {
+      const bonus = (anteilG * BONUS_EIGENAKQUISE) / 100;
+      if (!map[b.id]) map[b.id] = { id: b.id, name: "", rolle: "", satz: 0, betrag: 0, bonus: 0 };
+      map[b.id].bonus += bonus;
+      map[b.id].betrag += bonus;
+      bonusGesamt += bonus;
+      firma -= bonus;
+    }
   });
-  return { anteile: Object.values(map).sort((x, y) => y.betrag - x.betrag), firma };
+
+  return {
+    anteile: Object.values(map).sort((x, y) => y.betrag - x.betrag),
+    firma, bonus: bonusGesamt, eigenakquise: eigen,
+  };
 }
 
 const anteilVon = (a, id, mitarbeiter, variante) => {
@@ -1596,6 +1683,12 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
           {eur(kopfBetrag)}
         </span>
       </div>
+      {(a.akquiseArt || "eigen") === "eigen" && BONUS_EIGENAKQUISE > 0 && (
+        <div className="text-xs mb-2 px-2 py-1 rounded inline-block"
+             style={{ background: "#F1F7F0", color: C.ok }}>
+          Eigenakquise · {num(BONUS_EIGENAKQUISE, 0)} Prozentpunkte Bonus
+        </div>
+      )}
       <div className="text-xs mb-3" style={{ color: C.muted }}>
         {a.bestaetigung && sichtGesamt
           ? "bestätigt: " + num(bestaetigteMenge(a)) + " kWh × " + num(a.bestaetigung.aufschlag || 0, 3) + " ct/kWh"
@@ -1612,7 +1705,13 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
             {z.name}
             <span className="block text-xs" style={{ color: C.muted }}>
               {z.overhead ? "Overhead-Provision · " : ""}{z.rolle} · {num(z.satz, 0)} Prozentpunkte
+              {z.bonus > 0 ? " + " + num(BONUS_EIGENAKQUISE, 0) + " Bonus Eigenakquise" : ""}
             </span>
+            {z.bonus > 0 && (
+              <span className="block text-xs" style={{ color: C.gruen }}>
+                davon {eur(z.bonus)} Bonus für selbst gewonnenen Kunden
+              </span>
+            )}
           </span>
           <span className="text-right">
             <span className="block" style={{ fontVariantNumeric: "tabular-nums",
@@ -1661,7 +1760,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
 /* ------------------------------------------------------------------ */
 /*  Anfrage-Assistent                                                  */
 /* ------------------------------------------------------------------ */
-function Assistent({ user, mitarbeiter, alleAnfragen, entwurf, onSpeichern, onSenden, onAbbrechen }) {
+function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpeichern, onSenden, onAbbrechen }) {
   const [a, setA] = useState(entwurf || leereAnfrage(user));
   const [schritt, setSchritt] = useState(1);
   const [geprueft, setGeprueft] = useState(false);
@@ -1815,6 +1914,60 @@ function Assistent({ user, mitarbeiter, alleAnfragen, entwurf, onSpeichern, onSe
               onChange={(v) => setK("ansprechpartner", v)} fehler={geprueft && !a.kunde.ansprechpartner} />
             <Feld label="Telefon" value={a.kunde.telefon} onChange={(v) => setK("telefon", v)} />
             <Feld label="E-Mail" value={a.kunde.email} onChange={(v) => setK("email", v)} breit />
+            <div className="sm:col-span-2 p-4 rounded"
+                 style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+              <span className="block text-xs mb-2" style={{ color: C.muted }}>Wie kam der Kunde zustande?</span>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {AKQUISE_ART.map((x) => (
+                  <button key={x.value} onClick={() => setA({ ...a, akquiseArt: x.value })}
+                    className="px-3 py-2 rounded text-sm text-left"
+                    style={{
+                      background: a.akquiseArt === x.value ? C.ink : "#fff",
+                      color: a.akquiseArt === x.value ? "#fff" : C.text,
+                      border: "1px solid " + (a.akquiseArt === x.value ? C.ink : C.line),
+                    }}>
+                    {x.label}
+                    <span className="block text-xs mt-0.5"
+                          style={{ color: a.akquiseArt === x.value ? "#8B9BB0" : C.muted }}>
+                      {x.text}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <Select label="Herkunft des Kunden" value={a.herkunft || "Eigenes Netzwerk"}
+                  onChange={(v) => setA({ ...a, herkunft: v })} options={HERKUNFT} />
+                {a.herkunft === "Tippgeber" ? (
+                  (tippgeber || []).filter((t) => t.besitzerId === user.id).length > 0 ? (
+                    <Select label="Welcher Tippgeber?" value={a.tippgeberId || ""}
+                      onChange={(v) => {
+                        const t = (tippgeber || []).find((x) => x.id === v);
+                        setA({ ...a, tippgeberId: v || null,
+                               herkunftDetail: t ? (t.firma || t.name) : "" });
+                      }}
+                      options={[{ value: "", label: "Bitte wählen" },
+                        ...(tippgeber || []).filter((t) => t.besitzerId === user.id)
+                          .map((t) => ({ value: t.id, label: t.firma || t.name }))]} />
+                  ) : (
+                    <div>
+                      <Feld label="Name des Tippgebers" value={a.herkunftDetail || ""}
+                        onChange={(v) => setA({ ...a, herkunftDetail: v })} />
+                      <p className="text-xs mt-1" style={{ color: C.muted }}>
+                        Lege deine Tippgeber unter „Tippgeber" an, dann rechnet das Portal deren
+                        Vergütung automatisch mit.
+                      </p>
+                    </div>
+                  )
+                ) : (
+                  <Feld
+                    label={a.herkunft === "Veranstaltung" ? "Welche Veranstaltung?"
+                      : a.herkunft === "Netzwerk" ? "Welches Netzwerk?"
+                      : "Nähere Angabe"}
+                    value={a.herkunftDetail || ""} onChange={(v) => setA({ ...a, herkunftDetail: v })} />
+                )}
+              </div>
+            </div>
+
             <div className="sm:col-span-2">
               <Feld label="Branche" value={a.kunde.branche || ""} onChange={(v) => setK("branche", v)}
                 placeholder="z. B. Hotellerie, Metallverarbeitung, Pflege" breit />
@@ -2130,10 +2283,14 @@ function Assistent({ user, mitarbeiter, alleAnfragen, entwurf, onSpeichern, onSe
                 </div>
                 <div>
                   <div className="text-xs mb-1" style={{ color: C.muted }}>
-                    Deine Provision je Lieferjahr ({num(user.satz || 0, 0)} %)
+                    Deine Provision je Lieferjahr ({num(user.satz || 0, 0)} %
+                    {(a.akquiseArt || "eigen") === "eigen" && BONUS_EIGENAKQUISE > 0
+                      ? " + " + num(BONUS_EIGENAKQUISE, 0) + " % Bonus" : ""})
                   </div>
                   <div className="text-lg" style={{ fontVariantNumeric: "tabular-nums", color: C.ok }}>
-                    {eur((verbrauchGesamt(a) * a.aufschlag * (user.satz || 0)) / 10000)}
+                    {eur((verbrauchGesamt(a) * a.aufschlag *
+                      ((user.satz || 0) + ((a.akquiseArt || "eigen") === "eigen" ? BONUS_EIGENAKQUISE : 0)))
+                      / 10000)}
                   </div>
                 </div>
               </div>
@@ -2166,6 +2323,12 @@ function Assistent({ user, mitarbeiter, alleAnfragen, entwurf, onSpeichern, onSe
                 <div>{num(a.aufschlag, 3)} ct/kWh</div></div>
               <div><span style={{ color: C.muted }}>Zugeordnet an</span>
                 <div>{a.partnerName}</div></div>
+              <div><span style={{ color: C.muted }}>Akquise</span>
+                <div>
+                  {(AKQUISE_ART.find((x) => x.value === (a.akquiseArt || "eigen")) || {}).label}
+                  {a.herkunft ? " · " + a.herkunft : ""}
+                  {a.herkunftDetail ? " · " + a.herkunftDetail : ""}
+                </div></div>
             </div>
 
             <div className="rounded overflow-hidden mb-5" style={{ border: "1px solid " + C.line }}>
@@ -3765,6 +3928,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             <Zeile k="Telefon" v={a.kunde.telefon} />
             <Zeile k="E-Mail" v={a.kunde.email} />
             <Zeile k="Branche" v={a.kunde.branche} />
+            <Zeile k="Akquise" v={(AKQUISE_ART.find((x) => x.value === (a.akquiseArt || "eigen")) || {}).label} />
+            <Zeile k="Herkunft" v={[a.herkunft, a.herkunftDetail].filter(Boolean).join(" · ")} />
             {istSpot && (
               <Zeile k="Zielpreis Spotmarkt" v={a.zielpreis ? a.zielpreis + " ct/kWh" : "offen"} />
             )}
@@ -4278,7 +4443,7 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
 }
 
 /* Verwaltung der Vertriebsmitarbeiter: anlegen, einladen, Sätze setzen, freigeben */
-function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren }) {
+function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus, setBonus }) {
   const [auswahl, setAuswahl] = useState(null);
   const [neu, setNeu] = useState(null);
   const [link, setLink] = useState(null);
@@ -4505,6 +4670,24 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren }) {
           Vertriebsmitarbeiter anlegen
         </Btn>
       </div>
+
+      {istGF && (
+        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="text-sm mb-1">Bonus für Eigenakquise</div>
+          <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "62ch" }}>
+            Zusätzliche Prozentpunkte für Kunden, die ein Partner selbst gewonnen hat. Der Bonus geht
+            zulasten des Firmenanteils, die Overhead-Provision der Teamleiter bleibt unverändert.
+          </p>
+          <div className="sm:max-w-xs">
+            <Feld label="Bonus in Prozentpunkten" value={bonus}
+              onChange={(v) => setBonus(v.replace(/[^\d]/g, ""))} />
+          </div>
+          <p className="text-xs mt-2" style={{ color: C.muted }}>
+            Beispiel bei 1.000 € Gesamtprovision: Ein Partner mit 25 % erhält bei Eigenakquise{" "}
+            {eur(10 * (25 + (parseFloat(bonus) || 0)))} statt {eur(250)}.
+          </p>
+        </div>
+      )}
 
       {istGF && zurPruefung.length > 0 && (
         <div className="rounded p-4 mb-5" style={{ background: "#F6F8FA", border: "1px solid " + C.strom }}>
@@ -5502,7 +5685,8 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
   const kunden = anfragen.filter((a) =>
     ["uebermittelt", "bestaetigt", "abgeschlossen"].includes(a.status));
 
-  const kopf = ["Vorgang", "Kunde", "Branche", "Straße", "PLZ", "Ort", "Ansprechpartner", "Telefon",
+  const kopf = ["Vorgang", "Kunde", "Branche", "Akquise", "Herkunft", "Herkunft Detail",
+    "Straße", "PLZ", "Ort", "Ansprechpartner", "Telefon",
     "E-Mail", "Status", "Vertriebspartner", "Aufteilung", "Team", "Produkt", "Laufzeit Monate",
     "Lieferbeginn", "Vertragsende", "kWh Strom", "kWh Erdgas", "kWh gesamt", "Aufschlag ct/kWh",
     "Gesamtprovision EUR", "Versorger", "Vertragsstatus", "Zielpreis ct/kWh"];
@@ -5514,7 +5698,10 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
       return (m ? m.name : "?") + " " + b.anteil + " %";
     });
     return [
-      a.id, a.kunde.firma, a.kunde.branche, a.kunde.strasse, a.kunde.plz, a.kunde.ort,
+      a.id, a.kunde.firma, a.kunde.branche,
+      (AKQUISE_ART.find((x) => x.value === (a.akquiseArt || "eigen")) || {}).label || "",
+      a.herkunft || "", a.herkunftDetail || "",
+      a.kunde.strasse, a.kunde.plz, a.kunde.ort,
       a.kunde.ansprechpartner, a.kunde.telefon, a.kunde.email, STATUS[a.status].label,
       a.partnerName, teile.join(" / "), a.team,
       v ? v.produkt : a.produkt, laufzeitVon(a),
@@ -5539,15 +5726,17 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
     kunden.forEach((a) => {
       const r = zeile(a);
       z.push({ text: a.kunde.firma + "  ·  " + a.id, gross: true });
-      z.push("Branche: " + (r[2] || "–") + "   Anschrift: " + [r[3], r[4] + " " + r[5]].filter(Boolean).join(", "));
-      z.push("Kontakt: " + [r[6], r[7], r[8]].filter(Boolean).join("  ·  "));
-      z.push("Betreuung: " + r[11] + "   Status: " + r[9]);
-      z.push("Produkt: " + r[13] + ", " + r[14] + " Monate   Lieferbeginn " + (r[15] || "offen") +
-             "   Ende " + (r[16] || "offen"));
-      z.push("Menge: Strom " + num(r[17]) + " kWh, Erdgas " + num(r[18]) + " kWh, gesamt " + num(r[19]) + " kWh");
-      z.push("Aufschlag " + num(r[20], 3) + " ct/kWh   Gesamtprovision " + eur(r[21]) +
-             (r[22] ? "   Versorger " + r[22] : ""));
-      if (r[24]) z.push("Zielpreis Spotmarkt: " + r[24] + " ct/kWh");
+      z.push("Branche: " + (r[2] || "–") + "   Akquise: " + r[3] +
+             "   Herkunft: " + [r[4], r[5]].filter(Boolean).join(", "));
+      z.push("Anschrift: " + [r[6], r[7] + " " + r[8]].filter(Boolean).join(", "));
+      z.push("Kontakt: " + [r[9], r[10], r[11]].filter(Boolean).join("  ·  "));
+      z.push("Betreuung: " + r[14] + "   Status: " + r[12]);
+      z.push("Produkt: " + r[16] + ", " + r[17] + " Monate   Lieferbeginn " + (r[18] || "offen") +
+             "   Ende " + (r[19] || "offen"));
+      z.push("Menge: Strom " + num(r[20]) + " kWh, Erdgas " + num(r[21]) + " kWh, gesamt " + num(r[22]) + " kWh");
+      z.push("Aufschlag " + num(r[23], 3) + " ct/kWh   Gesamtprovision " + eur(r[24]) +
+             (r[25] ? "   Versorger " + r[25] : ""));
+      if (r[27]) z.push("Zielpreis Spotmarkt: " + r[27] + " ct/kWh");
       z.push(" ");
     });
     if (!kunden.length) z.push("Keine Kunden erfasst.");
@@ -6529,6 +6718,275 @@ function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
   );
 }
 
+/* Tippgeber des Vertriebspartners */
+const VERGUETUNG = [
+  { value: "prozent", label: "Prozentual an der Provision",
+    text: "Anteil an der Provision des Partners, je Lieferjahr", einheit: "%" },
+  { value: "fest", label: "Fester Betrag je Lieferjahr",
+    text: "Gleichbleibender Betrag für jedes Lieferjahr", einheit: "€" },
+  { value: "einmal", label: "Einmalzahlung",
+    text: "Einmalig bei Abschluss des Kunden", einheit: "€" },
+];
+
+const leererTippgeber = (besitzer) => ({
+  id: "TG" + uid(), besitzerId: besitzer,
+  name: "", firma: "", telefon: "", email: "", adresse: "",
+  art: "prozent", wert: "10", notiz: "", aktiv: true,
+  angelegt: heute(),
+});
+
+/* Was bekommt der Tippgeber für einen Kunden je Lieferjahr? */
+function tippgeberProvision(t, a, mitarbeiter) {
+  const eigen = anteilVon(a, t.besitzerId, mitarbeiter);
+  const wert = parseFloat(String(t.wert).replace(",", ".")) || 0;
+  if (t.art === "prozent") return (eigen * wert) / 100;
+  if (t.art === "fest") return wert;
+  return 0;
+}
+
+function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
+  const [auswahl, setAuswahl] = useState(null);
+  const [entwurf, setEntwurf] = useState(null);
+
+  const meine = tippgeber.filter((t) => t.besitzerId === user.id);
+  const gewaehlt = tippgeber.find((t) => t.id === auswahl);
+
+  const kundenVon = (t) => anfragen.filter((a) =>
+    a.tippgeberId === t.id && ["bestaetigt", "abgeschlossen"].includes(a.status));
+
+  const summe = (t) => kundenVon(t).reduce((x, a) => x + tippgeberProvision(t, a, mitarbeiter), 0);
+  const einmalSumme = (t) => t.art === "einmal"
+    ? kundenVon(t).length * (parseFloat(String(t.wert).replace(",", ".")) || 0) : 0;
+
+  const speichern = () => {
+    const da = tippgeber.some((t) => t.id === entwurf.id);
+    setTippgeber(da ? tippgeber.map((t) => (t.id === entwurf.id ? entwurf : t))
+                    : [...tippgeber, entwurf]);
+    setEntwurf(null);
+  };
+
+  /* Auswertung: bewusst ohne Vertragsdaten */
+  const auswertungPdf = (t) => {
+    const kunden = kundenVon(t);
+    const z = [];
+    z.push({ text: t.firma || t.name, gross: true });
+    if (t.firma && t.name) z.push("Ansprechpartner: " + t.name);
+    if (t.adresse) z.push(t.adresse);
+    z.push(" ");
+    z.push("Vermittelt über " + (mitarbeiter.find((m) => m.id === t.besitzerId) || {}).name);
+    z.push("Vergütung: " + (VERGUETUNG.find((v) => v.value === t.art) || {}).label +
+           " · " + t.wert + (t.art === "prozent" ? " %" : " €"));
+    z.push(" ");
+    z.push({ text: "Vermittelte Kunden", gross: true });
+    if (!kunden.length) z.push("Noch keine abgeschlossenen Kunden.");
+    kunden.forEach((a) => {
+      const betrag = t.art === "einmal"
+        ? (parseFloat(String(t.wert).replace(",", ".")) || 0)
+        : tippgeberProvision(t, a, mitarbeiter);
+      z.push(a.kunde.firma + "   " + eur(betrag) +
+             (t.art === "einmal" ? "  (einmalig)" : "  je Lieferjahr"));
+    });
+    z.push(" ");
+    const gesamt = t.art === "einmal" ? einmalSumme(t) : summe(t);
+    z.push({ text: "Gesamt " + eur(gesamt) +
+             (t.art === "einmal" ? " einmalig" : " je Lieferjahr"), gross: true });
+    z.push(" ");
+    z.push("Erstellt am " + datum(heute()) + " · EGC-Energie");
+    const pdf = erzeugePdf("tippgeber_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
+      "Tippgeberabrechnung", z);
+    if (pdf) dateiLaden(pdf);
+  };
+
+  /* ---------- Formular ---------- */
+  if (entwurf) {
+    const setF = (k, v) => setEntwurf({ ...entwurf, [k]: v });
+    const art = VERGUETUNG.find((v) => v.value === entwurf.art) || VERGUETUNG[0];
+    return (
+      <div>
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={() => setEntwurf(null)} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
+          <h2 className="text-lg">
+            {tippgeber.some((t) => t.id === entwurf.id) ? "Tippgeber bearbeiten" : "Neuer Tippgeber"}
+          </h2>
+        </div>
+        <div className="rounded p-5 space-y-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Feld label="Firma" value={entwurf.firma} onChange={(v) => setF("firma", v)} />
+            <Feld label="Ansprechpartner" value={entwurf.name} onChange={(v) => setF("name", v)} />
+            <Feld label="Telefon" value={entwurf.telefon} onChange={(v) => setF("telefon", v)} />
+            <Feld label="E-Mail" value={entwurf.email} onChange={(v) => setF("email", v)} />
+            <Feld label="Anschrift" value={entwurf.adresse} onChange={(v) => setF("adresse", v)} breit />
+          </div>
+
+          <div>
+            <span className="block text-xs mb-2" style={{ color: C.muted }}>Wie wird vergütet?</span>
+            <div className="space-y-2">
+              {VERGUETUNG.map((v) => (
+                <button key={v.value} onClick={() => setF("art", v.value)}
+                  className="w-full text-left px-3 py-2 rounded"
+                  style={{
+                    background: entwurf.art === v.value ? "#F1F5FA" : "#fff",
+                    border: "1px solid " + (entwurf.art === v.value ? C.strom : C.line),
+                  }}>
+                  <span className="text-sm">{v.label}</span>
+                  <span className="block text-xs" style={{ color: C.muted }}>{v.text}</span>
+                </button>
+              ))}
+            </div>
+            <div className="sm:max-w-xs mt-4">
+              <Feld label={"Wert in " + art.einheit} value={entwurf.wert}
+                onChange={(v) => setF("wert", v)} />
+            </div>
+            <p className="text-xs mt-2" style={{ color: C.muted }}>
+              {entwurf.art === "prozent"
+                ? "Anteil an deiner eigenen Provision, nicht an der Gesamtprovision."
+                : entwurf.art === "fest"
+                ? "Wird für jedes Lieferjahr des Vertrags fällig."
+                : "Wird einmalig beim Abschluss fällig."}
+            </p>
+          </div>
+
+          <Feld label="Notiz" value={entwurf.notiz} onChange={(v) => setF("notiz", v)} breit />
+
+          <div className="flex gap-2">
+            <Btn icon={Check} onClick={speichern} disabled={!entwurf.firma && !entwurf.name}>
+              Speichern
+            </Btn>
+            <Btn variante="hell" onClick={() => setEntwurf(null)}>Abbrechen</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ---------- Einzelansicht ---------- */
+  if (gewaehlt) {
+    const kunden = kundenVon(gewaehlt);
+    const art = VERGUETUNG.find((v) => v.value === gewaehlt.art) || VERGUETUNG[0];
+    return (
+      <div>
+        <div className="flex items-center gap-3 mb-1">
+          <button onClick={() => setAuswahl(null)} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
+          <h2 className="text-lg">{gewaehlt.firma || gewaehlt.name}</h2>
+        </div>
+        <p className="text-sm mb-5 ml-8" style={{ color: C.muted }}>
+          {[gewaehlt.name, gewaehlt.telefon, gewaehlt.email].filter(Boolean).join(" · ")}
+        </p>
+
+        <div className="grid sm:grid-cols-3 gap-3 mb-5">
+          <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="text-xs mb-2" style={{ color: C.muted }}>Vergütung</div>
+            <div className="text-lg">{gewaehlt.wert} {art.einheit}</div>
+            <div className="text-xs mt-1" style={{ color: C.muted }}>{art.label}</div>
+          </div>
+          <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="text-xs mb-2" style={{ color: C.muted }}>Vermittelte Kunden</div>
+            <div className="text-2xl" style={{ fontVariantNumeric: "tabular-nums" }}>{kunden.length}</div>
+          </div>
+          <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.ok }}>
+            <div className="text-xs mb-2" style={{ color: C.muted }}>
+              {gewaehlt.art === "einmal" ? "Summe einmalig" : "Summe je Lieferjahr"}
+            </div>
+            <div className="text-2xl" style={{ color: C.ok, fontVariantNumeric: "tabular-nums" }}>
+              {num(gewaehlt.art === "einmal" ? einmalSumme(gewaehlt) : summe(gewaehlt), 2)} €
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-5">
+          <Btn icon={FileText} onClick={() => auswertungPdf(gewaehlt)}>Auswertung als PDF</Btn>
+          <Btn variante="hell" onClick={() => setEntwurf(gewaehlt)}>Bearbeiten</Btn>
+          <Btn variante="gefahr" icon={Trash2}
+            onClick={() => { setTippgeber(tippgeber.filter((t) => t.id !== gewaehlt.id)); setAuswahl(null); }}>
+            Entfernen
+          </Btn>
+        </div>
+
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="px-4 py-3 text-sm" style={{ borderBottom: "1px solid " + C.line }}>
+            Vermittelte Kunden
+          </div>
+          {kunden.length === 0 && (
+            <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>
+              Noch keine abgeschlossenen Kunden über diesen Tippgeber.
+            </div>
+          )}
+          {kunden.map((a, i) => (
+            <div key={a.id} className="flex items-center gap-4 px-4 py-3 text-sm"
+                 style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <span className="flex-1">{a.kunde.firma}
+                <span className="block text-xs" style={{ color: C.muted }}>{a.kunde.ort}</span>
+              </span>
+              <span style={{ fontVariantNumeric: "tabular-nums", color: C.ok }}>
+                {eur(gewaehlt.art === "einmal"
+                  ? (parseFloat(String(gewaehlt.wert).replace(",", ".")) || 0)
+                  : tippgeberProvision(gewaehlt, a, mitarbeiter))}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-xs mt-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+          Die Auswertung als PDF enthält ausschließlich Firmennamen und den Betrag für den
+          Tippgeber. Verbrauch, Laufzeit, Versorger und Aufschlag stehen nicht darin.
+        </p>
+      </div>
+    );
+  }
+
+  /* ---------- Liste ---------- */
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <p className="text-sm" style={{ color: C.muted, maxWidth: "52ch" }}>
+          Deine Tippgeber und was sie für vermittelte Kunden erhalten. Die Vergütung legst du je
+          Tippgeber selbst fest.
+        </p>
+        <Btn icon={Plus} onClick={() => setEntwurf(leererTippgeber(user.id))}>Tippgeber anlegen</Btn>
+      </div>
+
+      {meine.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm"
+             style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          Noch keine Tippgeber angelegt.
+        </div>
+      ) : (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {meine.map((t, i) => {
+            const art = VERGUETUNG.find((v) => v.value === t.art) || VERGUETUNG[0];
+            const anzahl = kundenVon(t).length;
+            return (
+              <button key={t.id} onClick={() => setAuswahl(t.id)}
+                className="w-full text-left px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1"
+                style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+                <div className="flex-1 min-w-40">
+                  <div className="text-sm">{t.firma || t.name}</div>
+                  <div className="text-xs" style={{ color: C.muted }}>
+                    {[t.name && t.firma ? t.name : null, t.telefon].filter(Boolean).join(" · ")}
+                    {t.notiz ? " · " + t.notiz : ""}
+                  </div>
+                </div>
+                <span className="text-xs w-40" style={{ color: C.muted }}>
+                  {t.wert} {art.einheit} · {art.value === "einmal" ? "einmalig"
+                    : art.value === "fest" ? "je Lieferjahr" : "der Provision"}
+                </span>
+                <span className="text-sm w-24 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {anzahl} {anzahl === 1 ? "Kunde" : "Kunden"}
+                </span>
+                <span className="text-sm w-28 text-right"
+                      style={{ color: C.ok, fontVariantNumeric: "tabular-nums" }}>
+                  {eur(t.art === "einmal" ? einmalSumme(t) : summe(t))}
+                </span>
+                <ChevronRight size={15} style={{ color: C.muted }} />
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* Persönliche Aufgaben mit Fälligkeit */
 const PRIO = { hoch: { label: "Hoch", color: "#B24328" }, normal: { label: "Normal", color: "#6B7787" } };
 
@@ -6734,7 +7192,7 @@ function Balken({ anteil, farbe = "#4A9130" }) {
 }
 
 /* Punkt 7: Monats- und Quartalsziele in kWh */
-function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user }) {
+function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBonusziele }) {
   const darfSetzen = ["Teamleiter", "Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
   const kandidaten = darfSetzen
     ? (user.rolle === "Teamleiter"
@@ -6745,12 +7203,79 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user }) {
   const setz = (id, k, v) =>
     setMitarbeiter(mitarbeiter.map((m) => (m.id === id ? { ...m, [k]: v.replace(/\D/g, "") } : m)));
 
+  const istGF = user.rolle === "Geschäftsführung";
+  const [offenFuer, setOffenFuer] = useState(null);
+  const ziele = bonusziele || BONUSZIELE_START;
+
+  /* Individuelle Bonusstufe für eine Person hinterlegen */
+  const eigenesZiel = (m, art, feld, wert) => {
+    const stand = bonusStand(m, anfragen, mitarbeiter, ziele).find((x) => x.id === art) || {};
+    setMitarbeiter(mitarbeiter.map((x) => x.id !== m.id ? x : {
+      ...x,
+      bonusziele: {
+        ...(x.bonusziele || {}),
+        [art]: {
+          ziel: feld === "ziel" ? wert.replace(/[^\d]/g, "")
+                : String((x.bonusziele && x.bonusziele[art] ? x.bonusziele[art].ziel : stand.ziel) || 0),
+          betrag: feld === "betrag" ? wert.replace(/[^\d]/g, "")
+                : String((x.bonusziele && x.bonusziele[art] ? x.bonusziele[art].betrag : stand.betrag) || 0),
+        },
+      },
+    }));
+  };
+
+  const zielZuruecksetzen = (m, art) =>
+    setMitarbeiter(mitarbeiter.map((x) => {
+      if (x.id !== m.id) return x;
+      const rest = { ...(x.bonusziele || {}) };
+      delete rest[art];
+      return { ...x, bonusziele: rest };
+    }));
+  const setzZiel = (rolle, art, feld, wert) =>
+    setBonusziele({
+      ...ziele,
+      [rolle]: { ...ziele[rolle],
+        [art]: { ...ziele[rolle][art], [feld]: wert.replace(/[^\d]/g, "") } },
+    });
+
   return (
     <div className="space-y-5">
       <p className="text-sm" style={{ color: C.muted, maxWidth: "62ch" }}>
-        Ziele in Kilowattstunden je Monat und Quartal. Gezählt wird die Menge aus abgeschlossenen
-        Verträgen im laufenden Zeitraum.
+        Persönliche Ziele in Kilowattstunden sowie die Bonusstufen. Gezählt wird die Menge aus
+        abgeschlossenen Verträgen im laufenden Zeitraum.
       </p>
+
+      {istGF && (
+        <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
+          <div className="text-sm mb-1">Bonusstufen festlegen</div>
+          <p className="text-xs mb-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+            Je Rolle und Zeitraum eine Zielmenge und der Bonus, der bei Erreichen ausgezahlt wird.
+            Beim Vertriebspartner zählt die eigene Menge, beim Teamleiter die des Teams
+            einschließlich eigener Abschlüsse, bei der Vertriebsleitung die des ganzen Hauses.
+          </p>
+
+          {[["vertriebspartner", "Vertriebspartner"],
+            ["teamleiter", "Teamleiter"],
+            ["leitung_vertrieb", "Leitung Vertrieb"]].map(([schluessel, titel]) => (
+            <div key={schluessel} className="mb-5">
+              <div className="text-sm mb-2">{titel}</div>
+              <div className="space-y-3">
+                {ZEITRAEUME_BONUS.map((z) => (
+                  <div key={z.id} className="grid sm:grid-cols-3 gap-3 items-end">
+                    <div className="text-sm pb-2">{z.label}</div>
+                    <Feld label="Zielmenge in kWh" zahl
+                      value={ziele[schluessel][z.id].ziel}
+                      onChange={(v) => setzZiel(schluessel, z.id, "ziel", v)} />
+                    <Feld label="Bonus in €" zahl
+                      value={ziele[schluessel][z.id].betrag}
+                      onChange={(v) => setzZiel(schluessel, z.id, "betrag", v)} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {kandidaten.map((m) => {
         const z = zielstand(m, anfragen, mitarbeiter);
         return (
@@ -6761,6 +7286,72 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user }) {
                 <div className="text-sm">{m.name}</div>
                 <div className="text-xs" style={{ color: C.muted }}>{m.rolle} · Team {m.team}</div>
               </div>
+            </div>
+
+            <div className="rounded p-3 mb-4" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                <span className="text-xs" style={{ color: C.muted }}>Bonusstufen</span>
+                {darfSetzen && (
+                  <button className="text-xs" style={{ color: C.strom }}
+                    onClick={() => setOffenFuer(offenFuer === m.id ? null : m.id)}>
+                    {offenFuer === m.id ? "Bearbeitung schließen" : "individuell festlegen"}
+                  </button>
+                )}
+              </div>
+
+              <div className="grid sm:grid-cols-3 gap-3">
+                {bonusStand(m, anfragen, mitarbeiter, ziele).map((b) => (
+                  <div key={b.id} className="p-3 rounded"
+                       style={{ background: "#fff",
+                                border: "1px solid " + (b.erreicht ? C.ok : C.line) }}>
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-sm">{b.label}</span>
+                      <span className="text-sm"
+                            style={{ color: b.erreicht ? C.ok : C.muted, fontVariantNumeric: "tabular-nums" }}>
+                        {eur(b.betrag)}
+                      </span>
+                    </div>
+                    <div className="text-xs mt-1 mb-2"
+                         style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
+                      {num(b.ist)} von {num(b.ziel)} kWh
+                      {b.individuell && (
+                        <span className="ml-1 px-1 rounded"
+                              style={{ border: "1px solid " + C.line, color: C.strom }}>individuell</span>
+                      )}
+                    </div>
+                    <Balken anteil={b.anteil} farbe={b.erreicht ? C.ok : C.strom} />
+                    <div className="text-xs mt-1"
+                         style={{ color: b.erreicht ? C.ok : C.muted }}>
+                      {b.erreicht ? "Bonus erreicht"
+                        : b.ziel > 0 ? "noch " + num(b.ziel - b.ist) + " kWh"
+                        : "kein Ziel hinterlegt"}
+                    </div>
+
+                    {darfSetzen && offenFuer === m.id && (
+                      <div className="mt-3 pt-3 space-y-3" style={{ borderTop: "1px solid " + C.line }}>
+                        <Feld label="Zielmenge kWh" zahl
+                          value={(m.bonusziele && m.bonusziele[b.id] ? m.bonusziele[b.id].ziel : b.ziel)}
+                          onChange={(v) => eigenesZiel(m, b.id, "ziel", v)} />
+                        <Feld label="Bonus €" zahl
+                          value={(m.bonusziele && m.bonusziele[b.id] ? m.bonusziele[b.id].betrag : b.betrag)}
+                          onChange={(v) => eigenesZiel(m, b.id, "betrag", v)} />
+                        {b.individuell && (
+                          <button className="text-xs" style={{ color: C.muted }}
+                            onClick={() => zielZuruecksetzen(m, b.id)}>
+                            auf Rollenvorgabe zurücksetzen
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {darfSetzen && offenFuer === m.id && (
+                <p className="text-xs mt-3" style={{ color: C.muted }}>
+                  Individuelle Werte gelten nur für {m.name} und überschreiben die Vorgabe der Rolle.
+                </p>
+              )}
             </div>
 
             <div className="grid sm:grid-cols-2 gap-6">
@@ -6792,6 +7383,87 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user }) {
       })}
     </div>
   );
+}
+
+/* Bonusziele: je Rolle und Zeitraum eine Zielmenge und ein Betrag.
+   Die Vorgaben sind Startwerte und von der Geschäftsführung änderbar. */
+const BONUSZIELE_START = {
+  vertriebspartner: {
+    monat:   { ziel: 3500000,   betrag: 500 },
+    quartal: { ziel: 10500000,  betrag: 1500 },
+    jahr:    { ziel: 42000000,  betrag: 5000 },
+  },
+  teamleiter: {
+    monat:   { ziel: 12000000,  betrag: 1000 },
+    quartal: { ziel: 36000000,  betrag: 3000 },
+    jahr:    { ziel: 144000000, betrag: 10000 },
+  },
+  leitung_vertrieb: {
+    monat:   { ziel: 30000000,  betrag: 1500 },
+    quartal: { ziel: 90000000,  betrag: 5000 },
+    jahr:    { ziel: 360000000, betrag: 15000 },
+  },
+};
+
+const ZEITRAEUME_BONUS = [
+  { id: "monat", label: "Monat" },
+  { id: "quartal", label: "Quartal" },
+  { id: "jahr", label: "Jahr" },
+];
+
+const bonusSchluessel = (rolle) =>
+  rolle === "Teamleiter" ? "teamleiter"
+  : rolle === "Leitung Vertrieb" ? "leitung_vertrieb"
+  : "vertriebspartner";
+
+/* Welche Menge zählt für wen: eigene, Team oder gesamt */
+function bonusMenge(m, anfragen, mitarbeiter, art) {
+  const n = new Date();
+  const ids = m.rolle === "Leitung Vertrieb"
+    ? null
+    : m.rolle === "Teamleiter"
+      ? [m.id, ...strukturUnter(m.id, mitarbeiter).map((x) => x.id)]
+      : [m.id];
+
+  return anfragen
+    .filter((a) => a.status === "abgeschlossen" && a.kalkulation)
+    .filter((a) => (ids ? ids.some((id) => istBeteiligt(a, id)) : true))
+    .reduce((t, a) => {
+      const v = aktiveVariante(a);
+      const d = new Date((v && v.lieferbeginn) || a.angelegt);
+      if (isNaN(d)) return t;
+      const passt =
+        art === "monat"
+          ? d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth()
+          : art === "quartal"
+            ? d.getFullYear() === n.getFullYear() &&
+              Math.floor(d.getMonth() / 3) === Math.floor(n.getMonth() / 3)
+            : d.getFullYear() === n.getFullYear();
+      if (!passt) return t;
+      /* Beim eigenen Bereich zählt nur der eigene Anteil an der Menge */
+      if (ids && ids.length === 1) {
+        const b = beteiligte(a).find((x) => x.id === m.id);
+        return t + verbrauchGesamt(a) * ((b ? parseFloat(b.anteil) || 100 : 100) / 100);
+      }
+      return t + verbrauchGesamt(a);
+    }, 0);
+}
+
+function bonusStand(m, anfragen, mitarbeiter, ziele) {
+  const satz = (ziele || BONUSZIELE_START)[bonusSchluessel(m.rolle)] || {};
+  const eigen = m.bonusziele || {};   // individuelle Vorgabe, falls hinterlegt
+  return ZEITRAEUME_BONUS.map((z) => {
+    const vorgabe = eigen[z.id] || satz[z.id] || { ziel: 0, betrag: 0 };
+    const individuell = !!eigen[z.id];
+    const ist = bonusMenge(m, anfragen, mitarbeiter, z.id);
+    const ziel = parseFloat(vorgabe.ziel) || 0;
+    return {
+      id: z.id, label: z.label, ist, ziel, individuell,
+      betrag: parseFloat(vorgabe.betrag) || 0,
+      anteil: ziel > 0 ? ist / ziel : 0,
+      erreicht: ziel > 0 && ist >= ziel,
+    };
+  });
 }
 
 /* Zielstand berechnen */
@@ -8059,7 +8731,7 @@ function Rangliste({ titel, zeilen, hinweis, geld = true }) {
 }
 
 function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, leads,
-                    setMitarbeiter, aufgaben, setAufgaben }) {
+                    setMitarbeiter, aufgaben, setAufgaben, bonusziele }) {
   const [bereich, setBereich] = useState("meine");
   const [anpassen, setAnpassen] = useState(false);
   const istTL = user.rolle === "Teamleiter";
@@ -8221,6 +8893,35 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, l
                    : x.liste ? () => onListe(x.titel, x.liste) : null} />
         ))}
       </div>
+
+      {vertrieb && zeigt("ziele") && (() => {
+        const stufen = bonusStand(user, anfragen, mitarbeiter, bonusziele);
+        return (
+          <Karte titel="Bonusstufen"
+            rechts={<span className="text-xs" style={{ color: C.muted }}>
+              {stufen.filter((b) => b.erreicht).length} von {stufen.length} erreicht
+            </span>}>
+            <div className="p-4 grid sm:grid-cols-3 gap-4">
+              {stufen.map((b) => (
+                <div key={b.id}>
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="text-sm">{b.label}</span>
+                    <span className="text-sm"
+                          style={{ color: b.erreicht ? C.ok : C.muted, fontVariantNumeric: "tabular-nums" }}>
+                      {eur(b.betrag)}
+                    </span>
+                  </div>
+                  <Balken anteil={b.anteil} farbe={b.erreicht ? C.ok : C.strom} />
+                  <div className="text-xs mt-1" style={{ color: b.erreicht ? C.ok : C.muted }}>
+                    {b.erreicht ? "erreicht"
+                      : b.ziel > 0 ? "noch " + num(b.ziel - b.ist) + " kWh" : "kein Ziel"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Karte>
+        );
+      })()}
 
       {vertrieb && zeigt("ziele") && (stand.monat.ziel > 0 || stand.quartal.ziel > 0) && (
         <Karte titel="Zielerreichung"
@@ -8415,6 +9116,9 @@ export default function App() {
   const [akquise, setAkquise] = useState([]);
   const [aufgaben, setAufgaben] = useState([]);
   const [protokoll, setProtokoll] = useState([]);
+  const [bonusSatz, setBonusSatz] = useState("10");
+  const [tippgeber, setTippgeber] = useState([]);
+  const [bonusziele, setBonusziele] = useState(BONUSZIELE_START);
   const [listenAnsicht, setListenAnsicht] = useState(null);
   const [userId, setUserId] = useState(null);
   const [registriert, setRegistriert] = useState(null);
@@ -8476,6 +9180,18 @@ export default function App() {
           const pr2 = await window.storage.get("egc-crm:protokoll");
           if (pr2 && pr2.value) setProtokoll(JSON.parse(pr2.value));
         } catch (e12) { /* noch kein Protokoll */ }
+        try {
+          const bo = await window.storage.get("egc-crm:bonus");
+          if (bo && bo.value) { setBonusSatz(bo.value); setzeBonus(bo.value); }
+        } catch (e13) { setzeBonus("10"); }
+        try {
+          const tg = await window.storage.get("egc-crm:tippgeber");
+          if (tg && tg.value) setTippgeber(JSON.parse(tg.value));
+        } catch (e14) { /* noch keine Tippgeber */ }
+        try {
+          const bz = await window.storage.get("egc-crm:bonusziele");
+          if (bz && bz.value) setBonusziele({ ...BONUSZIELE_START, ...JSON.parse(bz.value) });
+        } catch (e15) { /* Startwerte */ }
       } catch (e) { /* erster Start: Demodaten */ }
       setGeladen(true);
     })();
@@ -8497,10 +9213,13 @@ export default function App() {
         await window.storage.set("egc-crm:akquise", JSON.stringify(akquise));
         await window.storage.set("egc-crm:aufgaben", JSON.stringify(aufgaben));
         await window.storage.set("egc-crm:protokoll", JSON.stringify(protokoll));
+        await window.storage.set("egc-crm:bonus", String(bonusSatz));
+        await window.storage.set("egc-crm:tippgeber", JSON.stringify(tippgeber));
+        await window.storage.set("egc-crm:bonusziele", JSON.stringify(bonusziele));
       } catch (e) { /* Speichern nicht verfügbar */ }
     })();
   }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine,
-      akquise, aufgaben, protokoll, geladen]);
+      akquise, aufgaben, protokoll, bonusSatz, tippgeber, bonusziele, geladen]);
 
   const speichern = (a) =>
     setAnfragen((prev) => (prev.some((x) => x.id === a.id)
@@ -8683,6 +9402,9 @@ export default function App() {
     if (stellen.length) a.lieferstellen = stellen;
     a.wunschLieferbeginn = l.laufzeitStrom || l.laufzeitGas || "";
     a.beratungHinweis = l.bemerkung || "";
+    a.akquiseArt = l.quelle === "Eigenakquise" ? "eigen" : "unternehmen";
+    a.herkunft = HERKUNFT.includes(l.quelle) ? l.quelle : "Sonstiges";
+    a.herkunftDetail = l.quelleDetail || "";
     setEntwurf(a);
     setAnsicht("neu");
   };
@@ -8712,6 +9434,7 @@ export default function App() {
       { id: "anfragen", label: "Meine Anfragen", icon: Inbox },
       { id: "kunden", label: "Meine Kunden", icon: FileSignature },
       { id: "pruefung", label: "Kunde prüfen", icon: Check },
+      { id: "tippgeber", label: "Tippgeber", icon: Users },
       { id: "pipeline", label: "Pipeline", icon: BarChart3 },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
@@ -8733,6 +9456,7 @@ export default function App() {
       { id: "alle", label: "Team-Vorgänge", icon: Users },
       { id: "kunden", label: "Kunden im Team", icon: FileSignature },
       { id: "pruefung", label: "Kunde prüfen", icon: Check },
+      { id: "tippgeber", label: "Tippgeber", icon: Users },
       { id: "pipeline", label: "Pipeline", icon: BarChart3 },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
@@ -8917,7 +9641,8 @@ export default function App() {
     );
   } else if (ansicht === "neu" || entwurf) {
     inhalt = (
-      <Assistent user={user} mitarbeiter={mitarbeiter} alleAnfragen={anfragen} entwurf={entwurf}
+      <Assistent user={user} mitarbeiter={mitarbeiter} alleAnfragen={anfragen}
+        tippgeber={tippgeber} entwurf={entwurf}
         onSpeichern={(a) => { speichern(a); setEntwurf(null); setAnsicht("anfragen"); setTab("offen"); }}
         onSenden={einreichen}
         onAbbrechen={() => { setEntwurf(null); setAnsicht("anfragen"); }} />
@@ -8983,7 +9708,7 @@ export default function App() {
     inhalt = (
       <Dashboard anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
         termine={termine} leads={leads} setMitarbeiter={setMitarbeiter}
-        aufgaben={aufgaben} setAufgaben={setAufgaben}
+        aufgaben={aufgaben} setAufgaben={setAufgaben} bonusziele={bonusziele}
         onOeffnen={(id, ziel) => { if (ziel) { setOffen(null); setAnsicht(ziel); } else setOffen(id); }}
         onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />
     );
@@ -9014,7 +9739,8 @@ export default function App() {
                mitarbeiter={mitarbeiter} user={user} nurStorno />;
   } else if (ansicht === "ziele") {
     inhalt = <Ziele mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
-               anfragen={anfragen} user={user} />;
+               anfragen={anfragen} user={user}
+               bonusziele={bonusziele} setBonusziele={setBonusziele} />;
   } else if (ansicht === "akquise") {
     inhalt = (
       <Akquise listen={akquise} setListen={setAkquise} user={user} mitarbeiter={mitarbeiter}
@@ -9040,12 +9766,18 @@ export default function App() {
           if (stellen.length) a.lieferstellen = stellen;
           if (e.daten.laufzeit) a.wunschLieferbeginn = e.daten.laufzeit;
           a.bemerkungVertrieb = [e.notiz, e.website].filter(Boolean).join(" · ");
+          a.akquiseArt = "unternehmen";
+          a.herkunft = "Kaltakquise";
+          a.herkunftDetail = "Kontaktliste " + (e.branche || "");
           setEntwurf(a);
           setAnsicht("neu");
         }} />
     );
   } else if (ansicht === "kalender") {
     inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} />;
+  } else if (ansicht === "tippgeber") {
+    inhalt = <Tippgeber tippgeber={tippgeber} setTippgeber={setTippgeber}
+               anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "pruefung") {
     inhalt = <Kundenpruefung anfragen={anfragen} leads={leads} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "aufgaben") {
@@ -9086,7 +9818,9 @@ export default function App() {
     inhalt = <Ablage ablage={ablage} setAblage={setAblage} user={user} />;
   } else if (ansicht === "partner") {
     inhalt = <Partnerverwaltung mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
-               user={user} notieren={notieren} />;
+               user={user} notieren={notieren} bonus={bonusSatz}
+               setBonus={(v) => { setBonusSatz(v); setzeBonus(v);
+                 notieren("Provisionssatz", "Bonus für Eigenakquise auf " + v + " Prozentpunkte gesetzt"); }} />;
   } else if (ansicht === "meine-daten") {
     inhalt = <MeineStammdaten user={user} mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} />;
   } else {
