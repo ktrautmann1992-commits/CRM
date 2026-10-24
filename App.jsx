@@ -37,7 +37,8 @@ const STATUS = {
   angefragt: { label: "Angebot beim Versorger angefragt", color: "#BE6A16" },
   angebot: { label: "Angebot liegt vor", color: C.ok },
   uebermittelt: { label: "Auftrag an Versorger übermittelt", color: "#2F5FE0" },
-  bestaetigt: { label: "Bestätigter Kunde", color: C.ok },
+  einreichung: { label: "Beim Versorger eingereicht", color: C.gold },
+  bestaetigt: { label: "Vom Versorger bestätigt, Provision offen", color: C.ok },
   abgeschlossen: { label: "Abgeschlossen", color: C.ink },
   abgelehnt: { label: "Abgelehnt", color: C.muted },
 };
@@ -291,7 +292,7 @@ const stammdatenLuecken = (sd) => {
 };
 
 const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v5.3 · 09.09.2026 · Individuelle Bonusziele";
+const VERSION = "v5.7 · 11.09.2026 · Smartmeter-Ablauf und Firmenanteil";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -355,6 +356,18 @@ const heute = () => new Date().toISOString().slice(0, 10);
 const jetzt = () => new Date().toTimeString().slice(0, 5);
 
 /* Farbe je Rolle, damit im Nachrichtenverlauf sofort erkennbar ist, wer schreibt */
+/* Rollen, die im Nachrichtenfenster mit @ angesprochen werden können */
+const ERWAEHNBAR = [
+  { kuerzel: "Kalkulation", rolle: "Kalkulation" },
+  { kuerzel: "Vertragsmanagement", rolle: "Vertragsmanagement" },
+  { kuerzel: "Geschaeftsfuehrung", rolle: "Geschäftsführung" },
+  { kuerzel: "Vertrieb", rolle: "Vertriebspartner" },
+];
+
+const erwaehnungenAus = (text) =>
+  ERWAEHNBAR.filter((e) =>
+    new RegExp("@" + e.kuerzel, "i").test(String(text || ""))).map((e) => e.rolle);
+
 const ROLLENFARBE = {
   Vertriebspartner: "#2F5FE0",
   Teamleiter: "#4A9130",
@@ -1178,6 +1191,28 @@ const monateDazu = (iso, monate) => {
 let BONUS_EIGENAKQUISE = 10;
 const setzeBonus = (wert) => { BONUS_EIGENAKQUISE = parseFloat(wert) || 0; };
 
+/* Anteil der Gesamtprovision, der tatsächlich bei EGC ankommt.
+   Die Sätze der Vertriebspartner rechnen auf die volle Gesamtprovision,
+   ausgezahlt wird aber aus diesem Anteil. Je Versorger überschreibbar. */
+let FIRMENANTEIL = 75;
+let FIRMENANTEIL_JE_VERSORGER = {};
+const setzeFirmenanteil = (wert, jeVersorger) => {
+  FIRMENANTEIL = parseFloat(wert);
+  if (isNaN(FIRMENANTEIL)) FIRMENANTEIL = 100;
+  FIRMENANTEIL_JE_VERSORGER = jeVersorger || {};
+};
+const firmenanteilVon = (versorgerName) => {
+  const eigen = FIRMENANTEIL_JE_VERSORGER[versorgerName];
+  const w = parseFloat(eigen);
+  return eigen !== undefined && eigen !== "" && !isNaN(w) ? w : FIRMENANTEIL;
+};
+
+/* Welcher Eigenakquise-Satz gilt für diese Person? */
+const eigenBonusVon = (m) =>
+  m && m.eigenBonus !== undefined && m.eigenBonus !== ""
+    ? parseFloat(m.eigenBonus) || 0
+    : BONUS_EIGENAKQUISE;
+
 /* Ein Kunde kann von mehreren Vertriebspartnern betreut werden.
    beteiligte hält je Partner den prozentualen Anteil an der Vertriebsprovision. */
 const beteiligte = (a) =>
@@ -1188,12 +1223,13 @@ const istBeteiligt = (a, id) => beteiligte(a).some((b) => b.id === id);
 
 function gesamtverteilung(a, mitarbeiter, betrag) {
   const g = betrag != null ? betrag : gesamtprovision(a);
+  const quote = firmenanteilVon(a && a.bestaetigung ? a.bestaetigung.versorger : null);
+  const beiEgc = (g * quote) / 100;
   const teile = beteiligte(a);
   const summe = teile.reduce((t, b) => t + (parseFloat(b.anteil) || 0), 0) || 1;
   const map = {};
-  let firma = 0;
   let bonusGesamt = 0;
-  const eigen = (a.akquiseArt || "eigen") === "eigen" && BONUS_EIGENAKQUISE > 0;
+  const eigen = (a.akquiseArt || "eigen") === "eigen";
 
   teile.forEach((b) => {
     const anteilG = (g * (parseFloat(b.anteil) || 0)) / summe;
@@ -1203,22 +1239,29 @@ function gesamtverteilung(a, mitarbeiter, betrag) {
       map[x.id].betrag += x.betrag;
       if (x.overhead) map[x.id].overhead = true;
     });
-    firma += v.firma;
-
-    /* Der Bonus geht an den Partner selbst, nicht an seine Struktur */
+    /* Der Bonus geht an den Partner selbst, nicht an seine Struktur.
+       Ist für die Person ein eigener Satz hinterlegt, gilt dieser. */
     if (eigen) {
-      const bonus = (anteilG * BONUS_EIGENAKQUISE) / 100;
+      const person = mitarbeiter.find((x) => x.id === b.id) || {};
+      const satz = person.eigenBonus !== undefined && person.eigenBonus !== ""
+        ? parseFloat(person.eigenBonus) || 0
+        : BONUS_EIGENAKQUISE;
+      const bonus = (anteilG * satz) / 100;
       if (!map[b.id]) map[b.id] = { id: b.id, name: "", rolle: "", satz: 0, betrag: 0, bonus: 0 };
       map[b.id].bonus += bonus;
       map[b.id].betrag += bonus;
       bonusGesamt += bonus;
-      firma -= bonus;
     }
   });
 
+  const ausgeschuettet = Object.values(map).reduce((t, x) => t + x.betrag, 0);
   return {
     anteile: Object.values(map).sort((x, y) => y.betrag - x.betrag),
-    firma, bonus: bonusGesamt, eigenakquise: eigen,
+    /* Was der Firma bleibt: ihr Anteil an der Gesamtprovision abzüglich
+       aller Auszahlungen, die auf die volle Gesamtprovision gerechnet werden. */
+    firma: beiEgc - ausgeschuettet,
+    beiEgc, quote, ausgeschuettet,
+    bonus: bonusGesamt, eigenakquise: eigen,
   };
 }
 
@@ -1666,18 +1709,26 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
   /* Die gesamte ausgeschüttete Provision sehen nur Geschäftsführung und Finanzbuchhaltung.
      Teamleiter und Vertriebsleitung sehen ausschließlich ihren eigenen Anteil. */
   const sichtStruktur = ["Geschäftsführung", "Finanzbuchhaltung"].includes(user.rolle);
-  const sichtGesamt = sichtStruktur || user.rolle === "Kalkulation";
+  const sichtGesamt = sichtStruktur;
   const sichtFirma = user.rolle === "Geschäftsführung";
+  /* Die Kalkulation sieht den Anteil des Vertriebspartners und den Aufschlag,
+     nicht die Gesamtprovision und nicht die Aufteilung in der Struktur. */
+  const istKalkSicht = user.rolle === "Kalkulation";
   const zeilen = sichtStruktur ? v.anteile : v.anteile.filter((x) => x.id === user.id);
   const jahre = laufzeit ? laufzeit / 12 : 0;
   const eigen = v.anteile.find((x) => x.id === user.id);
-  const kopfBetrag = sichtGesamt ? gesamt : eigen ? eigen.betrag : 0;
+  const partner = v.anteile.find((x) => beteiligte(a).some((b) => b.id === x.id));
+  const kopfBetrag = sichtGesamt ? gesamt
+    : istKalkSicht ? (partner ? partner.betrag : 0)
+    : eigen ? eigen.betrag : 0;
 
   return (
     <div className="rounded p-4" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
       <div className="flex items-baseline justify-between mb-3">
         <span className="text-xs" style={{ color: C.muted }}>
-          {sichtGesamt ? "Gesamtprovision je Lieferjahr" : "Deine Provision je Lieferjahr"}
+          {sichtGesamt ? "Gesamtprovision je Lieferjahr"
+            : istKalkSicht ? "Provision des Vertriebspartners je Lieferjahr"
+            : "Deine Provision je Lieferjahr"}
         </span>
         <span className="text-2xl" style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
           {eur(kopfBetrag)}
@@ -1690,7 +1741,12 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         </div>
       )}
       <div className="text-xs mb-3" style={{ color: C.muted }}>
-        {a.bestaetigung && sichtGesamt
+        {istKalkSicht
+          ? (partner ? partner.name + " · " + num(partner.satz, 0) + " % · " : "") +
+            "Aufschlag " + num((a.bestaetigung ? a.bestaetigung.aufschlag
+              : (variante ? variante.aufschlag
+                 : (aktiveVariante(a) ? aktiveVariante(a).aufschlag : a.aufschlag))) || 0, 3) + " ct/kWh"
+          : a.bestaetigung && sichtGesamt
           ? "bestätigt: " + num(bestaetigteMenge(a)) + " kWh × " + num(a.bestaetigung.aufschlag || 0, 3) + " ct/kWh"
           : sichtGesamt
           ? num(verbrauchGesamt(a)) + " kWh × " + num((variante ? variante.aufschlag : (aktiveVariante(a) ? aktiveVariante(a).aufschlag : a.aufschlag)) || 0, 3) + " ct/kWh"
@@ -1750,7 +1806,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         </div>
       )}
 
-      {!sichtStruktur && !eigen && (
+      {!sichtStruktur && !istKalkSicht && !eigen && (
         <p className="text-sm" style={{ color: C.muted }}>Für dich fällt bei diesem Vorgang keine Provision an.</p>
       )}
     </div>
@@ -2522,6 +2578,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   };
 
   const [frage, setFrage] = useState("");
+  const [eingang, setEingang] = useState({ betrag: "", datum: heute(), notiz: "" });
   const [antwort, setAntwort] = useState("");
   const istGF = user.rolle === "Geschäftsführung";
   const intern = ["Kalkulation", "Geschäftsführung", "Leitung Vertrieb"].includes(user.rolle);
@@ -2611,6 +2668,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       nachrichten: [...(a.nachrichten || []), {
         id: uid(), text: nachricht.trim(), von: user.name, rolle: user.rolle,
         datum: heute(), zeit: jetzt(),
+        erwaehnt: erwaehnungenAus(nachricht),
       }],
     });
     setNachricht("");
@@ -2805,6 +2863,17 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                       </span>
                     </div>
                     <p className="text-sm" style={{ whiteSpace: "pre-wrap" }}>{n.text}</p>
+                    {(n.erwaehnt || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {n.erwaehnt.map((r) => (
+                          <span key={r} className="text-xs px-1.5 py-0.5 rounded"
+                                style={{ background: "#fff", border: "1px solid " + C.line,
+                                         color: ROLLENFARBE[r] || C.muted }}>
+                            {r} angesprochen
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2815,9 +2884,21 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) nachrichtSenden();
                 }}
-                placeholder={"Nachricht als " + user.rolle + " schreiben"}
+                placeholder={"Nachricht als " + user.rolle + " schreiben. Mit @ jemanden ansprechen."}
                 className="w-full px-3 py-2 text-sm rounded outline-none"
                 style={{ border: "1px solid " + C.line }} />
+
+              <div className="flex flex-wrap gap-1 mt-2">
+                {ERWAEHNBAR.map((e) => (
+                  <button key={e.kuerzel}
+                    onClick={() => setNachricht((nachricht + " @" + e.kuerzel + " ").replace(/^ /, ""))}
+                    className="text-xs px-2 py-1 rounded"
+                    style={{ border: "1px solid " + C.line,
+                             color: ROLLENFARBE[e.rolle] || C.muted }}>
+                    @{e.kuerzel}
+                  </button>
+                ))}
+              </div>
               <div className="flex items-center gap-3 mt-2">
                 <Btn icon={Send} onClick={nachrichtSenden} disabled={!nachricht.trim()}>Senden</Btn>
                 <span className="text-xs" style={{ color: C.muted }}>
@@ -3029,9 +3110,13 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   <span className="text-sm">{l.bezeichnung || "Lieferstelle"}</span>
                   <span className="text-xs px-1.5 py-0.5 rounded"
                         style={{ border: "1px solid " + C.line, color: C.muted }}>{l.zaehlerart}</span>
-                  <span className="text-xs" style={{ color: C.muted }}>{l.plz} {l.ort}</span>
+                  <span className="text-xs" style={{ color: C.muted }}>
+                    {[l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
+                  </span>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-x-8">
+                  <Zeile k="Lieferanschrift"
+                    v={[l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")} />
                   <Zeile k="Versorger" v={l.versorger} />
                   <Zeile k="Kundennummer" v={l.kundennummer} />
                   <Zeile k="Jahresverbrauch" v={num(parseFloat(l.verbrauch) || 0) + " kWh"} />
@@ -3418,7 +3503,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           )}
 
           {/* Aufgabe 10: Bearbeitung durch das Kalkulationsteam nach dem Abschluss */}
-          {istKalk && a.status === "uebermittelt" && (
+          {istKalk && ["uebermittelt", "einreichung"].includes(a.status) && (
             <div className="rounded p-5"
                  style={{ background: a.einreichung ? "#FDF9EC" : C.card,
                           border: "1px solid " + (a.einreichung ? C.gold : C.strom) }}>
@@ -3444,10 +3529,17 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
               )}
 
               <label className="flex items-center gap-3 text-sm mb-5">
-                <input type="checkbox" checked={!!a.einreichung}
-                  onChange={(e) => onUpdate({ ...a, einreichung: e.target.checked })}
+                <input type="checkbox" checked={a.status === "einreichung" || !!a.einreichung}
+                  onChange={(e) => onUpdate({
+                    ...a,
+                    einreichung: e.target.checked,
+                    status: e.target.checked ? "einreichung" : "uebermittelt",
+                    verlauf: [...a.verlauf, { d: heute(),
+                      t: e.target.checked ? "Beim Versorger eingereicht"
+                         : "Einreichung zurückgenommen", w: user.name }],
+                  })}
                   style={{ accentColor: C.gold }} />
-                In Einreichung beim Versorger
+                Beim Versorger eingereicht
               </label>
 
               <div className="flex flex-wrap gap-2">
@@ -3586,24 +3678,46 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             </div>
           )}
 
-          {/* Vertragsmanagement: Provisionseingang bestätigen */}
-          {istVM && a.status === "bestaetigt" && (
+          {/* Geschäftsführung: Provisionseingang erfassen und bestätigen */}
+          {user.rolle === "Geschäftsführung" && a.status === "bestaetigt" && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok }}>
-              <div className="text-sm mb-3">Provision prüfen und bestätigen</div>
+              <div className="text-sm mb-3">Provisionseingang erfassen</div>
               <div className="grid sm:grid-cols-2 gap-x-8 mb-4">
                 <Zeile k="Versorger" v={a.bestaetigung && a.bestaetigung.versorger} />
                 <Zeile k="Bestätigte Menge" v={num(bestaetigteMenge(a)) + " kWh"} />
                 <Zeile k="Gesamtaufschlag" v={a.bestaetigung ? num(a.bestaetigung.aufschlag, 3) + " ct/kWh" : "–"} />
-                <Zeile k="Gesamtprovision" v={eur(gesamtprovision(a))} />
+                <Zeile k="Erwartete Provision" v={eur(gesamtprovision(a))} />
               </div>
+              <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                <Feld label="Eingegangener Betrag in €" value={eingang.betrag}
+                  onChange={(v) => setEingang({ ...eingang, betrag: v })}
+                  placeholder={num(gesamtprovision(a), 2)} />
+                <Feld label="Eingegangen am" type="date" value={eingang.datum}
+                  onChange={(v) => setEingang({ ...eingang, datum: v })} />
+              </div>
+              <label className="block mb-4">
+                <span className="block text-xs mb-1" style={{ color: C.muted }}>Bemerkung</span>
+                <textarea rows={2} value={eingang.notiz}
+                  onChange={(e) => setEingang({ ...eingang, notiz: e.target.value })}
+                  className="w-full px-3 py-2 text-sm rounded outline-none"
+                  style={{ border: "1px solid " + C.line }} />
+              </label>
               <Btn variante="ok" icon={Check}
                 onClick={() => { onUpdate({
-                  ...a, status: "abgeschlossen", vertragsStatus: "Lieferung aktiv",
-                  provisionErhalten: { von: user.name, datum: heute() },
-                  verlauf: [...a.verlauf, { d: heute(), t: "Provisionseingang bestätigt", w: user.name }],
+                  ...a, status: "abgeschlossen", vertragsStatus: a.vertragsStatus || "Lieferung aktiv",
+                  provisionErhalten: { von: user.name, datum: eingang.datum || heute(),
+                    betrag: parseFloat(String(eingang.betrag).replace(",", ".")) || gesamtprovision(a),
+                    notiz: eingang.notiz },
+                  verlauf: [...a.verlauf, { d: heute(),
+                    t: "Provisionseingang bestätigt" + (eingang.betrag ? ": " + eur(parseFloat(String(eingang.betrag).replace(",", ".")) || 0) : ""),
+                    w: user.name }],
                 }); onZurueck(); }}>
                 Provisionseingang bestätigen
               </Btn>
+              <p className="text-xs mt-3" style={{ color: C.muted, maxWidth: "62ch" }}>
+                Erst danach erscheint der Kunde beim Vertriebspartner in seiner Provisionsliste und
+                beim Vertragsmanagement in der Vertragsbetreuung.
+              </p>
             </div>
           )}
 
@@ -3933,7 +4047,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             {istSpot && (
               <Zeile k="Zielpreis Spotmarkt" v={a.zielpreis ? a.zielpreis + " ct/kWh" : "offen"} />
             )}
-            <Zeile k="Anschrift" v={a.kunde.plz + " " + a.kunde.ort} />
+            <Zeile k="Straße" v={a.kunde.strasse} />
+            <Zeile k="Anschrift" v={[a.kunde.plz, a.kunde.ort].filter(Boolean).join(" ")} />
           </div>
 
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
@@ -4126,6 +4241,31 @@ function Provisionen({ anfragen, mitarbeiter, user, onOeffnen, onListe }) {
           </div>
         )}
       </button>
+      {sichtFirma && (() => {
+        const f = firmaVon(fix);
+        return (
+          <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.gruen }}>
+            <div className="text-sm mb-3">Was der Firma bleibt, abgeschlossene Verträge</div>
+            <div className="grid sm:grid-cols-3 gap-4">
+              {[["Anteil EGC an der Gesamtprovision", f.beiEgc, C.text],
+                ["Ausgeschüttet an den Vertrieb", f.aus, C.gas],
+                ["Verbleibt bei EGC-Energie", f.rest, C.ok]].map(([k, w, farbe]) => (
+                <div key={k}>
+                  <div className="text-xs mb-1" style={{ color: C.muted }}>{k}</div>
+                  <div className="text-xl" style={{ color: farbe, fontVariantNumeric: "tabular-nums" }}>
+                    {eur(w)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs mt-3" style={{ color: C.muted }}>
+              Die Sätze der Vertriebspartner rechnen auf die volle Gesamtprovision. Ausgezahlt wird
+              aus dem Anteil, der tatsächlich bei EGC ankommt.
+            </p>
+          </div>
+        );
+      })()}
+
       <Block titel="Abgeschlossen" liste={fix} farbe={C.ok} />
       <Block titel="In Aussicht (Angebot liegt beim Kunden)" liste={offen} farbe={C.muted} />
     </div>
@@ -4578,6 +4718,26 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
                         ...koepfe.filter((k) => k.id !== gewaehlt.id)
                           .map((k) => ({ value: k.id, label: k.name + " · " + k.rolle }))]} />
           </div>
+          {istGF && (
+            <div className="mt-4 pt-4" style={{ borderTop: "1px solid " + C.line }}>
+              <div className="sm:max-w-xs">
+                <Feld label="Eigenakquise-Bonus in Prozentpunkten"
+                  value={gewaehlt.eigenBonus !== undefined && gewaehlt.eigenBonus !== ""
+                    ? gewaehlt.eigenBonus : ""}
+                  placeholder={"Vorgabe: " + num(parseFloat(bonus) || 0, 0)}
+                  onChange={(v) => setz(gewaehlt.id, { eigenBonus: v.replace(/[^\d]/g, "") })} />
+              </div>
+              <p className="text-xs mt-2" style={{ color: C.muted, maxWidth: "60ch" }}>
+                Leer lassen, damit die allgemeine Vorgabe gilt. Ein eigener Wert überschreibt sie
+                nur für {gewaehlt.name}.
+                {gewaehlt.eigenBonus !== undefined && gewaehlt.eigenBonus !== "" && (
+                  <button className="ml-2" style={{ color: C.strom }}
+                    onClick={() => setz(gewaehlt.id, { eigenBonus: "" })}>zurücksetzen</button>
+                )}
+              </p>
+            </div>
+          )}
+
           {(() => {
             const v = verteilung(1000, gewaehlt.id, mitarbeiter);
             return (
@@ -5456,7 +5616,7 @@ function LeadAuswertung({ leads, mitarbeiter, user, darfAlles }) {
 }
 
 /* Versorger, mit denen zusammengearbeitet wird */
-function Versorgerliste({ versorger, setVersorger, user }) {
+function Versorgerliste({ versorger, setVersorger, user, standard, setStandard }) {
   const [name, setName] = useState("");
   const [notiz, setNotiz] = useState("");
   const [branchen, setBranchen] = useState("");
@@ -5869,7 +6029,12 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
       if (a.status === "angebot") zu("angebot", a.id, "Angebot liegt vor: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
       if (a.status === "klaerfall") zu("klaerfall", a.id, "Unterlagen fehlen: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
       if (a.status === "angefragt") zu("angefragt", a.id, "Angebot beim Versorger angefragt: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
-      if (a.status === "bestaetigt") zu("bestaetigt", a.id, "Auftrag bestätigt: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
+      if (a.status === "einreichung") zu("einreichung", a.id, "Beim Versorger eingereicht: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
+      if (a.status === "bestaetigt") zu("bestaetigt", a.id, "Vom Versorger bestätigt: " + a.kunde.firma + ", Provision noch offen", { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
+      if (a.status === "abgeschlossen" && a.provisionErhalten)
+        zu("provision", a.id, "Provision eingegangen: " + a.kunde.firma, { ansicht: "provisionen", vorgang: a.id }, a.provisionErhalten.datum);
+      if (a.status === "abgelehnt" && a.klaerung && a.klaerung.art === "ablehnung")
+        zu("ablehnung", a.id, "Vom Versorger abgelehnt: " + a.kunde.firma, { ansicht: "anfragen", vorgang: a.id }, a.angelegt);
       if (a.status === "abgeschlossen") {
         const ende = vertragsende(a);
         const rest = monateBis(ende);
@@ -5902,6 +6067,13 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
       .forEach((a) => zu("auftrag", a.id, "Neuer Auftrag einzureichen: " + a.kunde.firma, { ansicht: "auftraege", vorgang: a.id }, a.angelegt));
     (smartmeter || []).filter((v) => v.status === "eingereicht")
       .forEach((v) => zu("sm", v.id, "Smartmeter-Anfrage: " + v.kunde, { ansicht: "smartmeter" }, v.angelegt));
+    (smartmeter || []).forEach((v) =>
+      (v.nachrichten || []).forEach((n) => {
+        if (n.rolle !== "Kalkulation")
+          zu("sm-antwort", v.id + ":" + n.id,
+            "Smartmeter, Antwort von " + n.von + ": " + v.kunde,
+            { ansicht: "smartmeter" }, n.datum);
+      }));
   }
 
   if (user.rolle === "Geschäftsführung") {
@@ -5912,9 +6084,59 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
   }
 
   if (user.rolle === "Vertragsmanagement") {
-    anfragen.filter((a) => a.status === "bestaetigt")
-      .forEach((a) => zu("vertrag", a.id, "Vertrag zu prüfen: " + a.kunde.firma, { ansicht: "vertraege", vorgang: a.id }, a.angelegt));
+    anfragen.filter((a) => a.status === "abgeschlossen" &&
+        (!a.vertragsStatus || a.vertragsStatus === "Vertrag zu erstellen"))
+      .forEach((a) => zu("vertrag", a.id, "Vertrag zu erstellen: " + a.kunde.firma,
+        { ansicht: "vertraege", vorgang: a.id }, a.angelegt));
   }
+
+  /* Smartmeter-Meldungen für den Vertrieb */
+  (smartmeter || [])
+    .filter((v) => v.partnerId === user.id ||
+      (user.rolle === "Teamleiter" &&
+       strukturUnter(user.id, mitarbeiter).some((m) => m.id === v.partnerId)))
+    .forEach((v) => {
+      if (v.status === "klaerfall")
+        zu("sm-klaerfall", v.id, "Smartmeter, Daten fehlen: " + v.kunde,
+          { ansicht: "smartmeter" }, v.angelegt);
+      if (v.status === "uebermittelt")
+        zu("sm-uebermittelt", v.id, "Smartmeter an Messstellenbetreiber übermittelt: " + v.kunde,
+          { ansicht: "smartmeter" }, v.angelegt);
+      if (v.status === "msb_abgelehnt")
+        zu("sm-abgelehnt", v.id, "Smartmeter abgelehnt: " + v.kunde,
+          { ansicht: "smartmeter" }, v.angelegt);
+      if (v.status === "abgeschlossen")
+        zu("sm-fertig", v.id, "Smartmeter abgeschlossen: " + v.kunde +
+          (v.provision ? " · " + eur(v.provision.partner) : ""),
+          { ansicht: "smartmeter" }, v.angelegt);
+      /* Antworten der Kalkulation im Nachrichtenfenster */
+      (v.nachrichten || []).forEach((n) => {
+        if (n.von !== user.name && n.rolle !== user.rolle)
+          zu("sm-nachricht", v.id + ":" + n.id,
+            "Smartmeter, Antwort von " + n.von + ": " + v.kunde,
+            { ansicht: "smartmeter" }, n.datum);
+      });
+    });
+
+  if (user.rolle === "Geschäftsführung") {
+    anfragen.filter((a) => a.status === "bestaetigt")
+      .forEach((a) => zu("ausstehend", a.id,
+        "Provision ausstehend: " + a.kunde.firma + " · " + eur(gesamtprovision(a)),
+        { ansicht: "ausstehend", vorgang: a.id }, (a.bestaetigung || {}).datum));
+  }
+
+  /* Erwähnungen im Nachrichtenfenster eines Vorgangs */
+  anfragen.forEach((a) => {
+    (a.nachrichten || []).forEach((n) => {
+      const gemeint = (n.erwaehnt || []).includes(user.rolle) &&
+        n.von !== user.name &&
+        (user.rolle !== "Vertriebspartner" || istBeteiligt(a, user.id));
+      if (gemeint)
+        zu("erwaehnung", a.id + ":" + n.id,
+          n.von + " hat dich bei " + a.kunde.firma + " angesprochen",
+          { ansicht: "alle", vorgang: a.id }, n.datum);
+    });
+  });
 
   (tickets || []).forEach((t) => {
     if (t.empfaenger === user.rolle && t.status !== "abgeschlossen")
@@ -6685,6 +6907,21 @@ function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
 
   return (
     <div>
+      {darfPflegen && (
+        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
+          <div className="text-sm mb-1">Anteil an der Gesamtprovision</div>
+          <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "64ch" }}>
+            Welcher Anteil der ausgewiesenen Gesamtprovision tatsächlich bei EGC ankommt. Der Wert
+            gilt für alle Versorger, sofern beim einzelnen Versorger nichts anderes eingetragen ist.
+            Die Sätze der Vertriebspartner rechnen weiterhin auf die volle Gesamtprovision.
+          </p>
+          <div className="sm:max-w-xs">
+            <Feld label="Vorgabe in Prozent" value={standard}
+              onChange={(v) => setStandard(v.replace(/[^\d]/g, ""))} />
+          </div>
+        </div>
+      )}
+
       <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "62ch" }}>
         Prüfe vor der Ansprache, ob eine Firma schon bei uns geführt wird. Du erfährst nur, ob sie
         im Bestand ist — nicht, wer sie betreut.
@@ -6987,6 +7224,231 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
   );
 }
 
+/* Vom Versorger bestätigte Aufträge, bei denen die Provision noch aussteht */
+function ProvisionAusstehend({ anfragen, mitarbeiter, user, onOeffnen }) {
+  const [versorgerFilter, setVersorgerFilter] = useState("alle");
+  const offen = anfragen.filter((a) => a.status === "bestaetigt");
+  const versorger = [...new Set(offen.map((a) => (a.bestaetigung || {}).versorger).filter(Boolean))].sort();
+  const liste = offen
+    .filter((a) => versorgerFilter === "alle" || (a.bestaetigung || {}).versorger === versorgerFilter)
+    .sort((x, y) => ((y.bestaetigung || {}).datum || "").localeCompare((x.bestaetigung || {}).datum || ""));
+
+  const summe = liste.reduce((t, a) => t + gesamtprovision(a), 0);
+  const menge = liste.reduce((t, a) => t + bestaetigteMenge(a), 0);
+
+  return (
+    <div>
+      <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+        Aufträge, die das Kalkulationsteam als vom Versorger bestätigt gemeldet hat. Sobald du den
+        Provisionseingang bestätigst, erscheint der Kunde beim Vertriebspartner in der Provisionsliste
+        und beim Vertragsmanagement in der Betreuung.
+      </p>
+
+      <div className="grid sm:grid-cols-3 gap-3 mb-5">
+        {[["Offene Vorgänge", String(liste.length), C.text],
+          ["Erwartete Provision", eur(summe), C.gas],
+          ["Bestätigte Menge", num(menge) + " kWh", C.text]].map(([k, v, f]) => (
+          <div key={k} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="text-xs mb-2" style={{ color: C.muted }}>{k}</div>
+            <div className="text-2xl" style={{ color: f, fontVariantNumeric: "tabular-nums" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded p-3 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <Select label="Versorger" value={versorgerFilter} onChange={setVersorgerFilter}
+          options={[{ value: "alle", label: "Alle Versorger" }, ...versorger]} />
+      </div>
+
+      {liste.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm"
+             style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          Keine offenen Provisionen.
+        </div>
+      ) : (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {liste.map((a, i) => (
+            <button key={a.id} onClick={() => onOeffnen(a.id)}
+              className="w-full text-left px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1"
+              style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <div className="flex-1 min-w-40">
+                <div className="text-sm">{a.kunde.firma}</div>
+                <div className="text-xs" style={{ color: C.muted }}>
+                  {a.id} · {a.partnerName} · bestätigt {datum((a.bestaetigung || {}).datum)}
+                </div>
+              </div>
+              <span className="text-xs w-40" style={{ color: C.muted }}>
+                {(a.bestaetigung || {}).versorger}
+              </span>
+              <span className="text-sm w-28 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                {num(bestaetigteMenge(a))} kWh
+              </span>
+              <span className="text-sm w-28 text-right"
+                    style={{ color: C.gas, fontVariantNumeric: "tabular-nums" }}>
+                {eur(gesamtprovision(a))}
+              </span>
+              <ChevronRight size={15} style={{ color: C.muted }} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Branchenauswertung: welche Branche bringt Menge, Anfragen und Abschlüsse */
+const MONATSNAMEN = ["Januar", "Februar", "März", "April", "Mai", "Juni",
+  "Juli", "August", "September", "Oktober", "November", "Dezember"];
+
+function Branchen({ anfragen, onListe }) {
+  const jetztJahr = new Date().getFullYear();
+  const [jahr, setJahr] = useState(String(jetztJahr));
+  const [monat, setMonat] = useState("alle");
+  const [sortierung, setSortierung] = useState("menge");
+
+  const jahre = [...new Set(anfragen.map((a) => String(new Date(a.angelegt).getFullYear()))
+    .filter((j) => j !== "NaN"))].sort().reverse();
+
+  const imZeitfenster = (a) => {
+    const v = aktiveVariante(a);
+    const tag = a.status === "abgeschlossen" && v && v.lieferbeginn ? v.lieferbeginn : a.angelegt;
+    const d = new Date(tag);
+    if (isNaN(d)) return false;
+    if (jahr !== "alle" && String(d.getFullYear()) !== jahr) return false;
+    if (monat !== "alle" && d.getMonth() !== parseInt(monat)) return false;
+    return true;
+  };
+
+  const menge = anfragen.filter(imZeitfenster);
+  const gruppen = {};
+  menge.forEach((a) => {
+    const b = (a.kunde.branche || "").trim() || "ohne Angabe";
+    if (!gruppen[b]) gruppen[b] = { name: b, anfragen: 0, abschluesse: 0, verloren: 0, kwh: 0, provision: 0 };
+    gruppen[b].anfragen += 1;
+    if (a.status === "abgeschlossen") {
+      gruppen[b].abschluesse += 1;
+      gruppen[b].kwh += bestaetigteMenge(a) || verbrauchGesamt(a);
+      gruppen[b].provision += gesamtprovision(a);
+    }
+    if (a.status === "abgelehnt") gruppen[b].verloren += 1;
+  });
+
+  const zeilen = Object.values(gruppen).map((g) => ({
+    ...g,
+    quote: g.abschluesse + g.verloren > 0 ? (g.abschluesse / (g.abschluesse + g.verloren)) * 100 : 0,
+  })).sort((x, y) =>
+    sortierung === "menge" ? y.kwh - x.kwh
+    : sortierung === "anfragen" ? y.anfragen - x.anfragen
+    : sortierung === "quote" ? y.quote - x.quote
+    : y.provision - x.provision);
+
+  const maxKwh = Math.max(...zeilen.map((z) => z.kwh), 1);
+  const summe = (f) => zeilen.reduce((t, z) => t + f(z), 0);
+
+  const Kopf = ({ children, rechts, aktiv, aufKlick }) => (
+    <th onClick={aufKlick}
+        className={"px-3 py-2 text-xs font-normal " + (rechts ? "text-right" : "text-left")}
+        style={{ color: aktiv ? C.text : C.muted, whiteSpace: "nowrap",
+                 cursor: aufKlick ? "pointer" : "default",
+                 borderBottom: "1px solid " + (aktiv ? C.ink : C.line) }}>
+      {children}{aktiv ? " ↓" : ""}
+    </th>
+  );
+  const Zelle = ({ children, rechts, dick }) => (
+    <td className={"px-3 py-2.5 text-sm " + (rechts ? "text-right" : "")}
+        style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+                 borderTop: "1px solid " + C.line, fontWeight: dick ? 500 : 400 }}>{children}</td>
+  );
+
+  return (
+    <div>
+      <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "64ch" }}>
+        Welche Branche liefert Menge, Anfragen und Abschlüsse. Über Jahr und Monat lässt sich
+        eingrenzen — so wird über die Zeit sichtbar, welche Branchen wann am stärksten sind.
+      </p>
+
+      <div className="rounded p-3 mb-5 grid sm:grid-cols-3 gap-3"
+           style={{ background: C.card, border: "1px solid " + C.line }}>
+        <Select label="Jahr" value={jahr} onChange={setJahr}
+          options={[{ value: "alle", label: "Alle Jahre" }, ...jahre]} />
+        <Select label="Monat" value={monat} onChange={setMonat}
+          options={[{ value: "alle", label: "Ganzes Jahr" },
+            ...MONATSNAMEN.map((m, i) => ({ value: String(i), label: m }))]} />
+        <Select label="Sortieren nach" value={sortierung} onChange={setSortierung}
+          options={[{ value: "menge", label: "Abgeschlossene kWh" },
+                    { value: "anfragen", label: "Anfragen" },
+                    { value: "quote", label: "Abschlussquote" },
+                    { value: "provision", label: "Provision" }]} />
+      </div>
+
+      {zeilen.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm"
+             style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          Keine Vorgänge in diesem Zeitraum.
+        </div>
+      ) : (
+        <div className="rounded overflow-x-auto" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <table className="w-full" style={{ minWidth: 760 }}>
+            <thead>
+              <tr>
+                <Kopf>Branche</Kopf>
+                <Kopf rechts aktiv={sortierung === "anfragen"} aufKlick={() => setSortierung("anfragen")}>Anfragen</Kopf>
+                <Kopf rechts>Abschlüsse</Kopf>
+                <Kopf rechts>Verloren</Kopf>
+                <Kopf rechts aktiv={sortierung === "quote"} aufKlick={() => setSortierung("quote")}>Quote</Kopf>
+                <Kopf rechts aktiv={sortierung === "menge"} aufKlick={() => setSortierung("menge")}>kWh abgeschlossen</Kopf>
+                <Kopf rechts aktiv={sortierung === "provision"} aufKlick={() => setSortierung("provision")}>Provision</Kopf>
+              </tr>
+            </thead>
+            <tbody>
+              {zeilen.map((z) => (
+                <tr key={z.name} onClick={() => onListe && onListe("Branche " + z.name,
+                      menge.filter((a) => ((a.kunde.branche || "").trim() || "ohne Angabe") === z.name))}
+                    style={{ cursor: "pointer" }}>
+                  <Zelle>
+                    {z.name}
+                    <span className="block mt-1" style={{ width: 120 }}>
+                      <span className="block h-1 rounded" style={{ background: "#E6EAF0" }}>
+                        <span className="block h-1 rounded"
+                              style={{ width: Math.max(2, (z.kwh / maxKwh) * 100) + "%", background: C.gruen }} />
+                      </span>
+                    </span>
+                  </Zelle>
+                  <Zelle rechts>{z.anfragen}</Zelle>
+                  <Zelle rechts>{z.abschluesse}</Zelle>
+                  <Zelle rechts>{z.verloren}</Zelle>
+                  <Zelle rechts dick>{num(z.quote, 0)} %</Zelle>
+                  <Zelle rechts>{num(z.kwh)}</Zelle>
+                  <Zelle rechts>{eur(z.provision)}</Zelle>
+                </tr>
+              ))}
+              <tr style={{ background: "#F6F8FA" }}>
+                <Zelle dick>{zeilen.length} Branchen</Zelle>
+                <Zelle rechts dick>{summe((z) => z.anfragen)}</Zelle>
+                <Zelle rechts dick>{summe((z) => z.abschluesse)}</Zelle>
+                <Zelle rechts dick>{summe((z) => z.verloren)}</Zelle>
+                <Zelle rechts dick>
+                  {num(summe((z) => z.abschluesse) + summe((z) => z.verloren) > 0
+                    ? (summe((z) => z.abschluesse) /
+                       (summe((z) => z.abschluesse) + summe((z) => z.verloren))) * 100 : 0, 0)} %
+                </Zelle>
+                <Zelle rechts dick>{num(summe((z) => z.kwh))}</Zelle>
+                <Zelle rechts dick>{eur(summe((z) => z.provision))}</Zelle>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-xs mt-4" style={{ color: C.muted, maxWidth: "64ch" }}>
+        Abgeschlossene Vorgänge zählen zum Monat des Lieferbeginns, offene und verlorene zum Monat
+        der Anfrage. Die Quote setzt Abschlüsse ins Verhältnis zu Abschlüssen plus Absagen; noch
+        laufende Vorgänge bleiben unberücksichtigt.
+      </p>
+    </div>
+  );
+}
+
 /* Persönliche Aufgaben mit Fälligkeit */
 const PRIO = { hoch: { label: "Hoch", color: "#B24328" }, normal: { label: "Normal", color: "#6B7787" } };
 
@@ -7193,8 +7655,9 @@ function Balken({ anteil, farbe = "#4A9130" }) {
 
 /* Punkt 7: Monats- und Quartalsziele in kWh */
 function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBonusziele }) {
-  const darfSetzen = ["Teamleiter", "Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
-  const kandidaten = darfSetzen
+  const darfSetzen = user.rolle === "Geschäftsführung";
+  const darfZiele = ["Teamleiter", "Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
+  const kandidaten = darfZiele
     ? (user.rolle === "Teamleiter"
         ? [user, ...strukturUnter(user.id, mitarbeiter)]
         : mitarbeiter.filter((m) => ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle)))
@@ -7215,10 +7678,12 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBon
       bonusziele: {
         ...(x.bonusziele || {}),
         [art]: {
-          ziel: feld === "ziel" ? wert.replace(/[^\d]/g, "")
+          ziel: feld === "ziel" ? String(wert).replace(/[^\d]/g, "")
                 : String((x.bonusziele && x.bonusziele[art] ? x.bonusziele[art].ziel : stand.ziel) || 0),
-          betrag: feld === "betrag" ? wert.replace(/[^\d]/g, "")
-                : String((x.bonusziele && x.bonusziele[art] ? x.bonusziele[art].betrag : stand.betrag) || 0),
+          betrag: feld === "betrag" ? String(wert).replace(/[^\d]/g, "")
+                : String((x.bonusziele && x.bonusziele[art] ? x.bonusziele[art].betrag : stand.wert) || 0),
+          art: feld === "art" ? wert
+                : (x.bonusziele && x.bonusziele[art] ? x.bonusziele[art].art : stand.bonusArt) || "euro",
         },
       },
     }));
@@ -7235,7 +7700,8 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBon
     setBonusziele({
       ...ziele,
       [rolle]: { ...ziele[rolle],
-        [art]: { ...ziele[rolle][art], [feld]: wert.replace(/[^\d]/g, "") } },
+        [art]: { ...ziele[rolle][art],
+                 [feld]: feld === "art" ? wert : String(wert).replace(/[^\d]/g, "") } },
     });
 
   return (
@@ -7260,17 +7726,22 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBon
             <div key={schluessel} className="mb-5">
               <div className="text-sm mb-2">{titel}</div>
               <div className="space-y-3">
-                {ZEITRAEUME_BONUS.map((z) => (
-                  <div key={z.id} className="grid sm:grid-cols-3 gap-3 items-end">
-                    <div className="text-sm pb-2">{z.label}</div>
-                    <Feld label="Zielmenge in kWh" zahl
-                      value={ziele[schluessel][z.id].ziel}
-                      onChange={(v) => setzZiel(schluessel, z.id, "ziel", v)} />
-                    <Feld label="Bonus in €" zahl
-                      value={ziele[schluessel][z.id].betrag}
-                      onChange={(v) => setzZiel(schluessel, z.id, "betrag", v)} />
-                  </div>
-                ))}
+                {ZEITRAEUME_BONUS.map((z) => {
+                  const v = ziele[schluessel][z.id];
+                  const art = BONUSART.find((x) => x.value === (v.art || "euro")) || BONUSART[0];
+                  return (
+                    <div key={z.id} className="grid sm:grid-cols-4 gap-3 items-end">
+                      <div className="text-sm pb-2">{z.label}</div>
+                      <Feld label="Zielmenge in kWh" zahl value={v.ziel}
+                        onChange={(x) => setzZiel(schluessel, z.id, "ziel", x)} />
+                      <Select label="Bonusart" value={v.art || "euro"}
+                        onChange={(x) => setzZiel(schluessel, z.id, "art", x)}
+                        options={BONUSART.map((b) => ({ value: b.value, label: b.label }))} />
+                      <Feld label={"Bonus in " + art.einheit} zahl value={v.betrag}
+                        onChange={(x) => setzZiel(schluessel, z.id, "betrag", x)} />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -7311,6 +7782,11 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBon
                         {eur(b.betrag)}
                       </span>
                     </div>
+                    {b.bonusArt === "prozent" && (
+                      <div className="text-xs" style={{ color: C.muted }}>
+                        {num(b.wert, 0)} Prozentpunkte der Provision
+                      </div>
+                    )}
                     <div className="text-xs mt-1 mb-2"
                          style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
                       {num(b.ist)} von {num(b.ziel)} kWh
@@ -7332,8 +7808,15 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBon
                         <Feld label="Zielmenge kWh" zahl
                           value={(m.bonusziele && m.bonusziele[b.id] ? m.bonusziele[b.id].ziel : b.ziel)}
                           onChange={(v) => eigenesZiel(m, b.id, "ziel", v)} />
-                        <Feld label="Bonus €" zahl
-                          value={(m.bonusziele && m.bonusziele[b.id] ? m.bonusziele[b.id].betrag : b.betrag)}
+                        <Select label="Bonusart"
+                          value={(m.bonusziele && m.bonusziele[b.id] ? m.bonusziele[b.id].art : b.bonusArt) || "euro"}
+                          onChange={(v) => eigenesZiel(m, b.id, "art", v)}
+                          options={BONUSART.map((x) => ({ value: x.value, label: x.label }))} />
+                        <Feld label={"Bonus in " +
+                            ((BONUSART.find((x) => x.value ===
+                              ((m.bonusziele && m.bonusziele[b.id] ? m.bonusziele[b.id].art : b.bonusArt) || "euro"))
+                              || BONUSART[0]).einheit)} zahl
+                          value={(m.bonusziele && m.bonusziele[b.id] ? m.bonusziele[b.id].betrag : b.wert)}
                           onChange={(v) => eigenesZiel(m, b.id, "betrag", v)} />
                         {b.individuell && (
                           <button className="text-xs" style={{ color: C.muted }}
@@ -7370,7 +7853,7 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBon
                           : "Ziel erreicht"}
                       </span>
                     </div>
-                    {(darfSetzen || m.id === user.id) && (
+                    {(darfZiele || m.id === user.id) && (
                       <Feld label={"Ziel " + titel + " in kWh"} value={ziel || ""} zahl
                         onChange={(v) => setz(m.id, feld, v)} />
                     )}
@@ -7389,21 +7872,26 @@ function Ziele({ mitarbeiter, setMitarbeiter, anfragen, user, bonusziele, setBon
    Die Vorgaben sind Startwerte und von der Geschäftsführung änderbar. */
 const BONUSZIELE_START = {
   vertriebspartner: {
-    monat:   { ziel: 3500000,   betrag: 500 },
-    quartal: { ziel: 10500000,  betrag: 1500 },
-    jahr:    { ziel: 42000000,  betrag: 5000 },
+    monat:   { ziel: 3500000,   betrag: 500,   art: "euro" },
+    quartal: { ziel: 10500000,  betrag: 5,     art: "prozent" },
+    jahr:    { ziel: 42000000,  betrag: 5000,  art: "euro" },
   },
   teamleiter: {
-    monat:   { ziel: 12000000,  betrag: 1000 },
-    quartal: { ziel: 36000000,  betrag: 3000 },
-    jahr:    { ziel: 144000000, betrag: 10000 },
+    monat:   { ziel: 12000000,  betrag: 1000,  art: "euro" },
+    quartal: { ziel: 36000000,  betrag: 3000,  art: "euro" },
+    jahr:    { ziel: 144000000, betrag: 10000, art: "euro" },
   },
   leitung_vertrieb: {
-    monat:   { ziel: 30000000,  betrag: 1500 },
-    quartal: { ziel: 90000000,  betrag: 5000 },
-    jahr:    { ziel: 360000000, betrag: 15000 },
+    monat:   { ziel: 30000000,  betrag: 1500,  art: "euro" },
+    quartal: { ziel: 90000000,  betrag: 5000,  art: "euro" },
+    jahr:    { ziel: 360000000, betrag: 15000, art: "euro" },
   },
 };
+
+const BONUSART = [
+  { value: "euro", label: "Fester Betrag in Euro", einheit: "€" },
+  { value: "prozent", label: "Prozentpunkte der Provision", einheit: "%" },
+];
 
 const ZEITRAEUME_BONUS = [
   { id: "monat", label: "Monat" },
@@ -7417,7 +7905,7 @@ const bonusSchluessel = (rolle) =>
   : "vertriebspartner";
 
 /* Welche Menge zählt für wen: eigene, Team oder gesamt */
-function bonusMenge(m, anfragen, mitarbeiter, art) {
+function bonusZeitraum(m, anfragen, mitarbeiter, art) {
   const n = new Date();
   const ids = m.rolle === "Leitung Vertrieb"
     ? null
@@ -7440,26 +7928,32 @@ function bonusMenge(m, anfragen, mitarbeiter, art) {
               Math.floor(d.getMonth() / 3) === Math.floor(n.getMonth() / 3)
             : d.getFullYear() === n.getFullYear();
       if (!passt) return t;
-      /* Beim eigenen Bereich zählt nur der eigene Anteil an der Menge */
-      if (ids && ids.length === 1) {
-        const b = beteiligte(a).find((x) => x.id === m.id);
-        return t + verbrauchGesamt(a) * ((b ? parseFloat(b.anteil) || 100 : 100) / 100);
-      }
-      return t + verbrauchGesamt(a);
-    }, 0);
+      /* Beim eigenen Bereich zählt nur der eigene Anteil */
+      const q = ids && ids.length === 1
+        ? ((beteiligte(a).find((x) => x.id === m.id) || {}).anteil || 100) / 100
+        : 1;
+      return {
+        menge: t.menge + verbrauchGesamt(a) * q,
+        provision: t.provision + gesamtprovision(a) * q,
+      };
+    }, { menge: 0, provision: 0 });
 }
 
 function bonusStand(m, anfragen, mitarbeiter, ziele) {
   const satz = (ziele || BONUSZIELE_START)[bonusSchluessel(m.rolle)] || {};
   const eigen = m.bonusziele || {};   // individuelle Vorgabe, falls hinterlegt
   return ZEITRAEUME_BONUS.map((z) => {
-    const vorgabe = eigen[z.id] || satz[z.id] || { ziel: 0, betrag: 0 };
+    const vorgabe = eigen[z.id] || satz[z.id] || { ziel: 0, betrag: 0, art: "euro" };
     const individuell = !!eigen[z.id];
-    const ist = bonusMenge(m, anfragen, mitarbeiter, z.id);
+    const stand = bonusZeitraum(m, anfragen, mitarbeiter, z.id);
+    const ist = stand.menge;
     const ziel = parseFloat(vorgabe.ziel) || 0;
+    const wert = parseFloat(vorgabe.betrag) || 0;
+    const bonusArt = vorgabe.art || "euro";
+    const betrag = bonusArt === "prozent" ? (stand.provision * wert) / 100 : wert;
     return {
       id: z.id, label: z.label, ist, ziel, individuell,
-      betrag: parseFloat(vorgabe.betrag) || 0,
+      betrag, wert, bonusArt, provision: stand.provision,
       anteil: ziel > 0 ? ist / ziel : 0,
       erreicht: ziel > 0 && ist >= ziel,
     };
@@ -7895,12 +8389,17 @@ const SM_STATUS = {
   eingereicht: { label: "Bei Kalkulation", color: "#2F5FE0" },
   klaerfall: { label: "Daten fehlen", color: "#B24328" },
   uebermittelt: { label: "An Messstellenbetreiber übermittelt", color: "#BE6A16" },
-  abgeschlossen: { label: "Abgeschlossen", color: "#4A9130" },
+  msb_abgelehnt: { label: "Vom Messstellenbetreiber abgelehnt", color: "#B24328" },
+  bestaetigt: { label: "Bestätigt, Provision offen", color: "#BE6A16" },
+  abgeschlossen: { label: "Abgeschlossen, Smartmeter verbaut", color: "#4A9130" },
 };
 
 function Smartmeter({ vorgaenge, setVorgaenge, anfragen, mitarbeiter, user }) {
   const [auswahl, setAuswahl] = useState(null);
   const [neuKunde, setNeuKunde] = useState("");
+  const [nachricht, setNachricht] = useState("");
+  const [smDateien, setSmDateien] = useState([]);
+  const [eingangSm, setEingangSm] = useState({ betrag: "", partner: "", datum: heute() });
   const [fehlend, setFehlend] = useState("");
   const [modus, setModus] = useState(null);
 
@@ -7977,6 +8476,75 @@ function Smartmeter({ vorgaenge, setVorgaenge, anfragen, mitarbeiter, user }) {
             <p className="text-sm ml-6">{offen.fehlendText}</p>
           </div>
         )}
+
+        {offen.status === "msb_abgelehnt" && offen.ablehnungText && (
+          <div className="rounded p-4 mb-5" style={{ background: "#FCF3F0", border: "1px solid " + C.warn }}>
+            <div className="flex items-center gap-2 mb-1" style={{ color: C.warn }}>
+              <AlertTriangle size={15} />
+              <span className="text-sm">Vom Messstellenbetreiber abgelehnt</span>
+            </div>
+            <p className="text-sm ml-6">{offen.ablehnungText}</p>
+          </div>
+        )}
+
+        {/* Nachrichten zwischen Vertrieb und Kalkulation, für beide sichtbar */}
+        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="text-sm mb-3">Nachrichten</div>
+          {(offen.nachrichten || []).length === 0 && (
+            <p className="text-sm mb-3" style={{ color: C.muted }}>Noch keine Nachrichten.</p>
+          )}
+          <div className="space-y-3 mb-4">
+            {(offen.nachrichten || []).map((n) => (
+              <div key={n.id} className="p-3 rounded"
+                   style={{ background: "#F6F8FA", borderLeft: "3px solid " + (ROLLENFARBE[n.rolle] || C.line) }}>
+                <div className="flex flex-wrap items-baseline gap-2 mb-1">
+                  <span className="text-sm">{n.von}</span>
+                  <span className="text-xs" style={{ color: ROLLENFARBE[n.rolle] || C.muted }}>{n.rolle}</span>
+                  <span className="text-xs" style={{ color: C.muted }}>{datum(n.datum)}, {n.zeit}</span>
+                </div>
+                <p className="text-sm" style={{ whiteSpace: "pre-wrap" }}>{n.text}</p>
+                {(n.dateien || []).length > 0 && (
+                  <div className="space-y-2 mt-2">
+                    {n.dateien.map((d, i) => <DateiChip key={i} datei={d} />)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <textarea rows={2} value={nachricht} onChange={(e) => setNachricht(e.target.value)}
+            placeholder="Nachricht schreiben"
+            className="w-full px-3 py-2 text-sm rounded outline-none"
+            style={{ border: "1px solid " + C.line }} />
+          <div className="space-y-2 mt-2">
+            {smDateien.map((d, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="flex-1 min-w-0"><DateiChip datei={d} /></div>
+                <button onClick={() => setSmDateien(smDateien.filter((_, x) => x !== i))}
+                  style={{ color: C.muted }}><X size={15} /></button>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            <label className="flex items-center gap-2 px-3 py-2 rounded text-sm cursor-pointer"
+                   style={{ border: "1px dashed " + C.line, color: C.muted, background: "#fff" }}>
+              <Upload size={14} /> Datei anhängen
+              <input type="file" multiple className="hidden"
+                onChange={(e) => Array.from(e.target.files || []).forEach((f) =>
+                  dateiLesen(f, (d) => setSmDateien((v) => [...v, d])))} />
+            </label>
+            <Btn icon={Send} disabled={!nachricht.trim() && smDateien.length === 0}
+              onClick={() => {
+                setz(offen.id, {
+                  nachrichten: [...(offen.nachrichten || []), {
+                    id: uid(), text: nachricht.trim(), von: user.name, rolle: user.rolle,
+                    datum: heute(), zeit: jetzt(), dateien: smDateien,
+                  }],
+                });
+                setNachricht(""); setSmDateien([]);
+              }}>Senden</Btn>
+          </div>
+        </div>
 
         <div className="space-y-4">
           {offen.stellen.map((s2, i) => (
@@ -8060,11 +8628,20 @@ function Smartmeter({ vorgaenge, setVorgaenge, anfragen, mitarbeiter, user }) {
                   An Messstellenbetreiber übermittelt
                 </Btn>
               )}
-              <Btn variante="ok" icon={Check} onClick={() => { setz(offen.id, { status: "abgeschlossen",
-                verlauf: [...offen.verlauf, { d: heute(), t: "Smartmeter-Einbau bestätigt", w: user.name }] });
-                setAuswahl(null); }}>
-                Abschließen
-              </Btn>
+              {offen.status === "uebermittelt" && (
+                <>
+                  <Btn variante="ok" icon={Check} onClick={() => { setz(offen.id, { status: "bestaetigt",
+                    verlauf: [...offen.verlauf, { d: heute(),
+                      t: "Vom Messstellenbetreiber bestätigt", w: user.name }] });
+                    setAuswahl(null); }}>
+                    Vom Messstellenbetreiber bestätigt
+                  </Btn>
+                  <Btn variante={modus === "abgelehnt" ? "gefahr" : "hell"} icon={X}
+                    onClick={() => setModus("abgelehnt")}>
+                    Vom Messstellenbetreiber abgelehnt
+                  </Btn>
+                </>
+              )}
             </div>
             {modus === "rueck" && (
               <div className="space-y-3">
@@ -8074,14 +8651,104 @@ function Smartmeter({ vorgaenge, setVorgaenge, anfragen, mitarbeiter, user }) {
                     className="w-full px-3 py-2 text-sm rounded outline-none"
                     style={{ border: "1px solid " + C.line }} />
                 </label>
+                <div className="space-y-2">
+                  {smDateien.map((d, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0"><DateiChip datei={d} /></div>
+                      <button onClick={() => setSmDateien(smDateien.filter((_, x) => x !== i))}
+                        style={{ color: C.muted }}><X size={15} /></button>
+                    </div>
+                  ))}
+                </div>
+                <label className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm cursor-pointer"
+                       style={{ border: "1px dashed " + C.line, color: C.muted, background: "#fff" }}>
+                  <Upload size={14} /> Datei anhängen
+                  <input type="file" multiple className="hidden"
+                    onChange={(e) => Array.from(e.target.files || []).forEach((f) =>
+                      dateiLesen(f, (d) => setSmDateien((v) => [...v, d])))} />
+                </label>
                 <Btn variante="gefahr" icon={RotateCcw} disabled={!fehlend.trim()}
                   onClick={() => { setz(offen.id, { status: "klaerfall", fehlendText: fehlend,
+                    nachrichten: [...(offen.nachrichten || []), {
+                      id: uid(), text: "Unterlagen nachgefordert: " + fehlend,
+                      von: user.name, rolle: user.rolle, datum: heute(), zeit: jetzt(),
+                      dateien: smDateien }],
                     verlauf: [...offen.verlauf, { d: heute(), t: "Zurück an den Vertrieb", w: user.name }] });
-                    setFehlend(""); setAuswahl(null); }}>
+                    setFehlend(""); setSmDateien([]); setAuswahl(null); }}>
                   An den Vertriebspartner zurücksenden
                 </Btn>
               </div>
             )}
+
+            {modus === "abgelehnt" && (
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="block text-xs mb-1" style={{ color: C.muted }}>
+                    Begründung des Messstellenbetreibers
+                  </span>
+                  <textarea rows={3} value={fehlend} onChange={(e) => setFehlend(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded outline-none"
+                    style={{ border: "1px solid " + C.line }} />
+                </label>
+                <Btn variante="gefahr" icon={X} disabled={!fehlend.trim()}
+                  onClick={() => { setz(offen.id, { status: "msb_abgelehnt", ablehnungText: fehlend,
+                    verlauf: [...offen.verlauf, { d: heute(),
+                      t: "Vom Messstellenbetreiber abgelehnt", w: user.name }] });
+                    setFehlend(""); setAuswahl(null); }}>
+                  Ablehnung erfassen
+                </Btn>
+              </div>
+            )}
+          </div>
+        )}
+
+        {user.rolle === "Geschäftsführung" && offen.status === "bestaetigt" && (
+          <div className="rounded p-5 mt-5" style={{ background: C.card, border: "1px solid " + C.ok }}>
+            <div className="text-sm mb-1">Provisionseingang erfassen</div>
+            <p className="text-xs mb-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+              Beim Smartmeter wird der Betrag für den Vertriebspartner direkt eingetragen, nicht
+              prozentual berechnet.
+            </p>
+            <div className="grid sm:grid-cols-3 gap-4 mb-4">
+              <Feld label="Eingegangene Provision in €" value={eingangSm.betrag}
+                onChange={(v) => setEingangSm({ ...eingangSm, betrag: v })} />
+              <Feld label="Davon an den Partner in €" value={eingangSm.partner}
+                onChange={(v) => setEingangSm({ ...eingangSm, partner: v })} />
+              <Feld label="Eingegangen am" type="date" value={eingangSm.datum}
+                onChange={(v) => setEingangSm({ ...eingangSm, datum: v })} />
+            </div>
+            <Btn variante="ok" icon={Check}
+              onClick={() => {
+                const anPartner = parseFloat(String(eingangSm.partner).replace(",", ".")) || 0;
+                setz(offen.id, {
+                  status: "abgeschlossen",
+                  vermerk: "Smartmeter verbaut",
+                  provision: {
+                    gesamt: parseFloat(String(eingangSm.betrag).replace(",", ".")) || 0,
+                    partner: anPartner, datum: eingangSm.datum || heute(), von: user.name,
+                  },
+                  verlauf: [...offen.verlauf, { d: heute(),
+                    t: "Provisionseingang bestätigt, " + eur(anPartner) + " für den Partner",
+                    w: user.name }],
+                });
+                setEingangSm({ betrag: "", partner: "", datum: heute() });
+                setAuswahl(null);
+              }}>
+              Eingang bestätigen und an das Vertragsmanagement geben
+            </Btn>
+          </div>
+        )}
+
+        {offen.provision && (
+          <div className="rounded p-4 mt-5" style={{ background: "#F1F7F0", border: "1px solid " + C.ok }}>
+            <div className="text-sm mb-2" style={{ color: C.ok }}>
+              {offen.vermerk || "Abgeschlossen"}
+            </div>
+            <div className="grid sm:grid-cols-3 gap-4 text-sm">
+              <Zeile k="Provision gesamt" v={eur(offen.provision.gesamt)} />
+              <Zeile k="Für den Vertriebspartner" v={eur(offen.provision.partner)} />
+              <Zeile k="Eingegangen am" v={datum(offen.provision.datum)} />
+            </div>
           </div>
         )}
 
@@ -8101,6 +8768,21 @@ function Smartmeter({ vorgaenge, setVorgaenge, anfragen, mitarbeiter, user }) {
   /* ---------- Liste ---------- */
   return (
     <div>
+      {darfPflegen && (
+        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
+          <div className="text-sm mb-1">Anteil an der Gesamtprovision</div>
+          <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "64ch" }}>
+            Welcher Anteil der ausgewiesenen Gesamtprovision tatsächlich bei EGC ankommt. Der Wert
+            gilt für alle Versorger, sofern beim einzelnen Versorger nichts anderes eingetragen ist.
+            Die Sätze der Vertriebspartner rechnen weiterhin auf die volle Gesamtprovision.
+          </p>
+          <div className="sm:max-w-xs">
+            <Feld label="Vorgabe in Prozent" value={standard}
+              onChange={(v) => setStandard(v.replace(/[^\d]/g, ""))} />
+          </div>
+        </div>
+      )}
+
       <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "62ch" }}>
         {istKalk
           ? "Smartmeter-Anfragen aus dem Vertrieb. Prüfen, an den Messstellenbetreiber übermitteln oder Unterlagen nachfordern."
@@ -8172,6 +8854,8 @@ function Tickets({ tickets, setTickets, user, mitarbeiter }) {
   const [text, setText] = useState("");
   const [auswahl, setAuswahl] = useState(null);
   const [antwort, setAntwort] = useState("");
+  const [anhaenge, setAnhaenge] = useState([]);
+  const [neuDateien, setNeuDateien] = useState([]);
 
   const zustaendig = TICKET_EMPFAENGER.includes(user.rolle);
   const meine = tickets.filter((t) => t.vonId === user.id);
@@ -8188,10 +8872,11 @@ function Tickets({ tickets, setTickets, user, mitarbeiter }) {
       id: "T" + uid(), nummer: naechsteNummer(), empfaenger, betreff,
       vonId: user.id, von: user.name, vonRolle: user.rolle,
       datum: heute(), zeit: jetzt(), status: "offen",
-      beitraege: [{ id: uid(), text, von: user.name, rolle: user.rolle, datum: heute(), zeit: jetzt() }],
+      beitraege: [{ id: uid(), text, von: user.name, rolle: user.rolle,
+                    datum: heute(), zeit: jetzt(), dateien: neuDateien }],
     };
     setTickets([t, ...tickets]);
-    setBetreff(""); setText(""); setNeuOffen(false);
+    setBetreff(""); setText(""); setNeuDateien([]); setNeuOffen(false);
   };
 
   const setz = (id, aend) => setTickets(tickets.map((t) => (t.id === id ? { ...t, ...aend } : t)));
@@ -8202,10 +8887,11 @@ function Tickets({ tickets, setTickets, user, mitarbeiter }) {
       status: ticket.status === "offen" ? "bearbeitung" : ticket.status,
       beitraege: [...ticket.beitraege, {
         id: uid(), text: antwort.trim(), von: user.name, rolle: user.rolle,
-        datum: heute(), zeit: jetzt(),
+        datum: heute(), zeit: jetzt(), dateien: anhaenge,
       }],
     });
     setAntwort("");
+    setAnhaenge([]);
   };
 
   if (ticket) {
@@ -8240,6 +8926,11 @@ function Tickets({ tickets, setTickets, user, mitarbeiter }) {
                     </span>
                   </div>
                   <p className="text-sm" style={{ whiteSpace: "pre-wrap" }}>{b.text}</p>
+                  {(b.dateien || []).length > 0 && (
+                    <div className="space-y-2 mt-3">
+                      {b.dateien.map((d, i) => <DateiChip key={i} datei={d} />)}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -8251,8 +8942,27 @@ function Tickets({ tickets, setTickets, user, mitarbeiter }) {
                 placeholder="Antwort schreiben"
                 className="w-full px-3 py-2 text-sm rounded outline-none"
                 style={{ border: "1px solid " + C.line }} />
+
+              <div className="space-y-2 mt-2">
+                {anhaenge.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0"><DateiChip datei={d} /></div>
+                    <button onClick={() => setAnhaenge(anhaenge.filter((_, x) => x !== i))}
+                      style={{ color: C.muted }}><X size={15} /></button>
+                  </div>
+                ))}
+              </div>
+              <label className="flex items-center gap-2 px-3 py-2 rounded text-sm cursor-pointer mt-2"
+                     style={{ border: "1px dashed " + C.line, color: C.muted, background: "#fff" }}>
+                <Upload size={14} /> Datei anhängen
+                <input type="file" multiple className="hidden"
+                  onChange={(e) => Array.from(e.target.files || []).forEach((f) =>
+                    dateiLesen(f, (d) => setAnhaenge((v) => [...v, d])))} />
+              </label>
+
               <div className="flex flex-wrap gap-2 mt-2">
-                <Btn icon={Send} onClick={antworten} disabled={!antwort.trim()}>Antworten</Btn>
+                <Btn icon={Send} onClick={antworten}
+                  disabled={!antwort.trim() && anhaenge.length === 0}>Antworten</Btn>
                 {darfStatus && (
                   <>
                     {ticket.status === "offen" && (
@@ -8292,6 +9002,26 @@ function Tickets({ tickets, setTickets, user, mitarbeiter }) {
               className="w-full px-3 py-2 text-sm rounded outline-none"
               style={{ border: "1px solid " + C.line }} />
           </label>
+          <div>
+            <span className="block text-xs mb-2" style={{ color: C.muted }}>Dateien</span>
+            <div className="space-y-2 mb-2">
+              {neuDateien.map((d, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0"><DateiChip datei={d} /></div>
+                  <button onClick={() => setNeuDateien(neuDateien.filter((_, x) => x !== i))}
+                    style={{ color: C.muted }}><X size={15} /></button>
+                </div>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 px-3 py-2 rounded text-sm cursor-pointer"
+                   style={{ border: "1px dashed " + C.line, color: C.muted, background: "#fff" }}>
+              <Upload size={14} /> Datei anhängen
+              <input type="file" multiple className="hidden"
+                onChange={(e) => Array.from(e.target.files || []).forEach((f) =>
+                  dateiLesen(f, (d) => setNeuDateien((v) => [...v, d])))} />
+            </label>
+          </div>
+
           <Btn icon={Send} onClick={anlegen} disabled={!betreff.trim() || !text.trim()}>
             Ticket eröffnen
           </Btn>
@@ -9119,6 +9849,7 @@ export default function App() {
   const [bonusSatz, setBonusSatz] = useState("10");
   const [tippgeber, setTippgeber] = useState([]);
   const [bonusziele, setBonusziele] = useState(BONUSZIELE_START);
+  const [firmenanteil, setFirmenanteil] = useState("75");
   const [listenAnsicht, setListenAnsicht] = useState(null);
   const [userId, setUserId] = useState(null);
   const [registriert, setRegistriert] = useState(null);
@@ -9192,6 +9923,10 @@ export default function App() {
           const bz = await window.storage.get("egc-crm:bonusziele");
           if (bz && bz.value) setBonusziele({ ...BONUSZIELE_START, ...JSON.parse(bz.value) });
         } catch (e15) { /* Startwerte */ }
+        try {
+          const fa = await window.storage.get("egc-crm:firmenanteil");
+          if (fa && fa.value) setFirmenanteil(fa.value);
+        } catch (e16) { /* Startwert 75 */ }
       } catch (e) { /* erster Start: Demodaten */ }
       setGeladen(true);
     })();
@@ -9216,10 +9951,11 @@ export default function App() {
         await window.storage.set("egc-crm:bonus", String(bonusSatz));
         await window.storage.set("egc-crm:tippgeber", JSON.stringify(tippgeber));
         await window.storage.set("egc-crm:bonusziele", JSON.stringify(bonusziele));
+        await window.storage.set("egc-crm:firmenanteil", String(firmenanteil));
       } catch (e) { /* Speichern nicht verfügbar */ }
     })();
   }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine,
-      akquise, aufgaben, protokoll, bonusSatz, tippgeber, bonusziele, geladen]);
+      akquise, aufgaben, protokoll, bonusSatz, tippgeber, bonusziele, firmenanteil, geladen]);
 
   const speichern = (a) =>
     setAnfragen((prev) => (prev.some((x) => x.id === a.id)
@@ -9241,6 +9977,16 @@ export default function App() {
   const offeneTickets = user
     ? tickets.filter((t) => t.empfaenger === user.rolle && t.status !== "abgeschlossen").length : 0;
   const neueAuftraege = anfragen.filter((a) => a.status === "uebermittelt").length;
+  const provisionOffen = anfragen.filter((a) => a.status === "bestaetigt").length;
+  /* Smartmeter: die Kalkulation sieht eingereichte, der Vertrieb die eigenen Klärfälle */
+  const offeneSmartmeter = !user ? 0
+    : ["Kalkulation", "Geschäftsführung"].includes(user.rolle)
+      ? smartmeter.filter((v) => v.status === "eingereicht").length
+      : smartmeter.filter((v) =>
+          v.status === "klaerfall" &&
+          (v.partnerId === user.id ||
+           (user.rolle === "Teamleiter" &&
+            strukturUnter(user.id, mitarbeiter).some((m) => m.id === v.partnerId)))).length;
   const offeneAufgaben = user
     ? aufgaben.filter((t) => t.fuerId === user.id && !t.erledigt && t.faellig <= heute()).length : 0;
   const offeneProbleme = user
@@ -9409,6 +10155,15 @@ export default function App() {
     setAnsicht("neu");
   };
 
+  /* Rechengrundlagen aktuell halten */
+  useEffect(() => {
+    const jeVersorger = {};
+    versorger.forEach((v) => {
+      if (v.anteil !== undefined && v.anteil !== "") jeVersorger[v.name] = v.anteil;
+    });
+    setzeFirmenanteil(firmenanteil, jeVersorger);
+  }, [firmenanteil, versorger]);
+
   const meldungen = user
     ? meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter, akquise) : [];
   const gelesen = (user && user.gelesen) || [];
@@ -9439,7 +10194,7 @@ export default function App() {
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
-      { id: "smartmeter", label: "Smartmeter", icon: Zap },
+      { id: "smartmeter", label: "Smartmeter", icon: Zap, badge: offeneSmartmeter },
       { id: "provisionen", label: "Meine Provisionen", icon: Wallet },
       { id: "ziele", label: "Meine Ziele", icon: Target },
       { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
@@ -9461,7 +10216,7 @@ export default function App() {
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
-      { id: "smartmeter", label: "Smartmeter", icon: Zap },
+      { id: "smartmeter", label: "Smartmeter", icon: Zap, badge: offeneSmartmeter },
       { id: "provisionen", label: "Meine Provisionen", icon: Wallet },
       { id: "ziele", label: "Ziele im Team", icon: Target },
       { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
@@ -9497,7 +10252,7 @@ export default function App() {
       { id: "eingang", label: "Eingang", icon: Calculator },
       { id: "versorger", label: "Versorgerbestätigung", icon: FileSignature },
       { id: "auftraege", label: "Neue Aufträge", icon: FileSignature, badge: neueAuftraege },
-      { id: "smartmeter", label: "Smartmeter", icon: Zap },
+      { id: "smartmeter", label: "Smartmeter", icon: Zap, badge: offeneSmartmeter },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
@@ -9511,6 +10266,7 @@ export default function App() {
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "vertraege", label: "Verträge", icon: FileSignature },
       { id: "kunden", label: "Bestandskunden", icon: FileSignature },
+      { id: "smartmeter", label: "Smartmeter", icon: Zap },
       { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
       { id: "stornos", label: "Stornierungen", icon: X },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
@@ -9551,6 +10307,9 @@ export default function App() {
       { id: "kunden", label: "Alle Kunden", icon: FileSignature },
       { id: "pipeline", label: "Pipeline", icon: BarChart3 },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
+      { id: "ausstehend", label: "Provision ausstehend", icon: Wallet, badge: provisionOffen },
+      { id: "smartmeter", label: "Smartmeter", icon: Zap, badge: offeneSmartmeter },
+      { id: "branchen", label: "Branchenauswertung", icon: BarChart3 },
       { id: "ruecksprachen", label: "Rücksprachen", icon: AlertTriangle },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
@@ -9581,8 +10340,8 @@ export default function App() {
     { id: "offen", label: "Offene Anfragen", f: (a) => ["entwurf", "eingereicht", "ruecksprache", "angefragt"].includes(a.status) },
     { id: "angebote", label: "Angebote", f: (a) => a.status === "angebot" },
     { id: "klaer", label: "Klärfälle", f: (a) => a.status === "klaerfall" },
-    { id: "uebermittelt", label: "Auftrag an Versorger übermittelt", f: (a) => a.status === "uebermittelt" },
-    { id: "bestaetigt", label: "Bestätigte Kunden", f: (a) => a.status === "bestaetigt" },
+    { id: "uebermittelt", label: "Beim Versorger", f: (a) => ["uebermittelt", "einreichung"].includes(a.status) },
+    { id: "bestaetigt", label: "Bestätigt, Provision offen", f: (a) => a.status === "bestaetigt" },
     { id: "fix", label: "Abgeschlossene Kunden", f: (a) => a.status === "abgeschlossen" },
   ];
 
@@ -9692,12 +10451,12 @@ export default function App() {
     );
   } else if (ansicht === "versorger") {
     inhalt = (
-      <Liste anfragen={anfragen.filter((a) => a.status === "uebermittelt")}
+      <Liste anfragen={anfragen.filter((a) => ["uebermittelt", "einreichung"].includes(a.status))}
         leerText="Keine Aufträge in der Versorgerbestätigung." onOeffnen={setOffen} />
     );
   } else if (ansicht === "vertraege") {
     inhalt = (
-      <Liste anfragen={anfragen.filter((a) => ["bestaetigt", "abgeschlossen"].includes(a.status))}
+      <Liste anfragen={anfragen.filter((a) => a.status === "abgeschlossen")}
         leerText="Noch keine Verträge zu bearbeiten." onOeffnen={setOffen} />
     );
   } else if (ansicht === "provisionen") {
@@ -9775,6 +10534,12 @@ export default function App() {
     );
   } else if (ansicht === "kalender") {
     inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} />;
+  } else if (ansicht === "branchen") {
+    inhalt = <Branchen anfragen={anfragen}
+               onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />;
+  } else if (ansicht === "ausstehend") {
+    inhalt = <ProvisionAusstehend anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
+               onOeffnen={(id) => setOffen(id)} />;
   } else if (ansicht === "tippgeber") {
     inhalt = <Tippgeber tippgeber={tippgeber} setTippgeber={setTippgeber}
                anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} />;
@@ -9813,7 +10578,10 @@ export default function App() {
     inhalt = <Abrechnung anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
                setAnfragen={setAnfragen} notieren={notieren} onOeffnen={(id) => setOffen(id)} />;
   } else if (ansicht === "versorgerliste") {
-    inhalt = <Versorgerliste versorger={versorger} setVersorger={setVersorger} user={user} />;
+    inhalt = <Versorgerliste versorger={versorger} setVersorger={setVersorger} user={user}
+               standard={firmenanteil}
+               setStandard={(v) => { setFirmenanteil(v); notieren("Provisionssatz",
+                 "Anteil an der Gesamtprovision auf " + v + " % gesetzt"); }} />;
   } else if (ansicht === "unterlagen") {
     inhalt = <Ablage ablage={ablage} setAblage={setAblage} user={user} />;
   } else if (ansicht === "partner") {
