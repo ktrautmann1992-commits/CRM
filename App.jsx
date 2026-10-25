@@ -4,6 +4,10 @@ import {
   AlertTriangle, Users, Calculator, FileSignature, BarChart3,
   Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw, Menu, Bell, Target, Calendar,
 } from "lucide-react";
+import {
+  sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
+  schonBekannt, anmelden, abmelden, meineId, einladungPruefen, einladungEinloesen, dateiInhalt,
+} from "./datenbank.js";
 
 /* ------------------------------------------------------------------ */
 /*  Design-Token                                                       */
@@ -226,10 +230,7 @@ function migriereAnfragen(liste) {
 }
 
 function migriereMitarbeiter(liste) {
-  const vorhanden = (liste || []).map((m) => m.id);
-  /* Rollen, die es beim letzten Speichern noch nicht gab, kommen dazu */
-  const ergaenzt = [...(liste || []), ...USERS.filter((u) => !vorhanden.includes(u.id))];
-  return ergaenzt.map((m) => ({
+  return (liste || []).map((m) => ({
     telefon: "", bild: null, status: "aktiv", satz: 0, upline: null,
     ...m,
     stammdaten: { ...leereStammdaten(), ...(m.stammdaten || {}) },
@@ -291,12 +292,11 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const DEMO_PASSWORT = "EGC-demo!2026";
-const VERSION = "v5.7 · 11.09.2026 · Smartmeter-Ablauf und Firmenanteil";
+const VERSION = "v5.8 · 24.10.2026 · Datenbank und echte Anmeldung";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
-    email: "m.weber@egc-energie.de", telefon: "0681 3390211", status: "aktiv", passwort: DEMO_PASSWORT,
+    email: "m.weber@egc-energie.de", telefon: "0681 3390211", status: "aktiv",
     bild: null, freigabe: { von: "Karsten", datum: "2025-11-04" },
     stammdaten: { ...leereStammdaten(), firma: "Weber Energievertrieb e.K.", strasse: "Talstraße 9",
       plz: "66424", ort: "Homburg", steuernummer: "040/123/45678", kontoinhaber: "Marco Weber",
@@ -305,7 +305,7 @@ const USERS = [
       gewerbe: { name: "gewerbeanmeldung_weber.pdf" }, ausweisVorne: { name: "ausweis_vorne.jpg" },
       ausweisHinten: { name: "ausweis_hinten.jpg" }, ustNachweis: { name: "ust_bescheinigung.pdf" } } },
   { id: "vp-klein", name: "Sandra Klein", rolle: "Vertriebspartner", team: "Süd", satz: 30, upline: "tl-sued",
-    email: "s.klein@egc-energie.de", telefon: "0621 449012", status: "pruefung", passwort: DEMO_PASSWORT,
+    email: "s.klein@egc-energie.de", telefon: "0621 449012", status: "pruefung",
     bild: null, freigabe: null,
     stammdaten: { ...leereStammdaten(), firma: "Klein Consulting", strasse: "Rheinallee 44",
       plz: "67061", ort: "Ludwigshafen", steuernummer: "27/456/78901", kontoinhaber: "Sandra Klein",
@@ -314,10 +314,10 @@ const USERS = [
       gewerbe: { name: "gewerbe_klein.pdf" }, ausweisVorne: { name: "perso_v.jpg" },
       ausweisHinten: { name: "perso_h.jpg" } } },
   { id: "kalk", name: "Team Kalkulation", rolle: "Kalkulation", team: "-", satz: 0, upline: null,
-    email: "kalkulation@egc-energie.de", telefon: "", status: "aktiv", passwort: DEMO_PASSWORT,
+    email: "kalkulation@egc-energie.de", telefon: "", status: "aktiv",
     bild: null, stammdaten: leereStammdaten() },
   { id: "tl-sued", name: "Jörg Adam", rolle: "Teamleiter", team: "Süd", satz: 50, upline: "lv",
-    email: "j.adam@egc-energie.de", telefon: "0681 3390200", status: "aktiv", passwort: DEMO_PASSWORT,
+    email: "j.adam@egc-energie.de", telefon: "0681 3390200", status: "aktiv",
     bild: null, freigabe: { von: "Karsten", datum: "2025-06-12" },
     stammdaten: { ...leereStammdaten(), firma: "Adam Vertrieb GmbH", strasse: "Bahnhofstraße 2",
       plz: "66111", ort: "Saarbrücken", kontoinhaber: "Adam Vertrieb GmbH",
@@ -325,19 +325,19 @@ const USERS = [
       gewerbe: { name: "handelsregister_adam.pdf" }, ausweisVorne: { name: "ausweis_v.jpg" },
       ausweisHinten: { name: "ausweis_h.jpg" }, ustNachweis: { name: "ust_adam.pdf" } } },
   { id: "lv", name: "Katrin Roth", rolle: "Leitung Vertrieb", team: "-", satz: 0, upline: null,
-    email: "k.roth@egc-energie.de", telefon: "0681 3390100", status: "aktiv", passwort: DEMO_PASSWORT,
+    email: "k.roth@egc-energie.de", telefon: "0681 3390100", status: "aktiv",
     bild: null, stammdaten: leereStammdaten() },
   { id: "vm", name: "Nadine Petry", rolle: "Vertragsmanagement", team: "-", satz: 0, upline: null,
-    email: "n.petry@egc-energie.de", telefon: "", status: "aktiv", passwort: DEMO_PASSWORT,
+    email: "n.petry@egc-energie.de", telefon: "", status: "aktiv",
     bild: null, stammdaten: leereStammdaten() },
   { id: "lead", name: "Timo Bauer", rolle: "Leadmanagement", team: "-", satz: 0, upline: null,
-    email: "leads@egc-energie.de", telefon: "", status: "aktiv", passwort: DEMO_PASSWORT,
+    email: "leads@egc-energie.de", telefon: "", status: "aktiv",
     bild: null, stammdaten: leereStammdaten() },
   { id: "fibu", name: "Petra Simon", rolle: "Finanzbuchhaltung", team: "-", satz: 0, upline: null,
-    email: "buchhaltung@egc-energie.de", telefon: "", status: "aktiv", passwort: DEMO_PASSWORT,
+    email: "buchhaltung@egc-energie.de", telefon: "", status: "aktiv",
     bild: null, stammdaten: leereStammdaten() },
   { id: "gf", name: "Karsten", rolle: "Geschäftsführung", team: "-", satz: 0, upline: null,
-    email: "karsten@egc-energie.de", telefon: "", status: "aktiv", passwort: DEMO_PASSWORT,
+    email: "karsten@egc-energie.de", telefon: "", status: "aktiv",
     bild: null, stammdaten: leereStammdaten() },
 ];
 
@@ -438,7 +438,7 @@ const spalteZuIndex = (ref) => {
 };
 
 async function xlsxLesen(datei) {
-  const roh = atob(String(datei.url).split(",")[1]);
+  const roh = atob(String(await dateiInhalt(datei)).split(",")[1]);
   const bytes = new Uint8Array(roh.length);
   for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
   const z = await zipOeffnen(bytes);
@@ -478,8 +478,8 @@ async function xlsxLesen(datei) {
   }).filter((z2) => z2.some((w) => w));
 }
 
-function csvLesen(datei) {
-  const roh = decodeURIComponent(escape(atob(String(datei.url).split(",")[1])));
+async function csvLesen(datei) {
+  const roh = decodeURIComponent(escape(atob(String(await dateiInhalt(datei)).split(",")[1])));
   const trenner = (roh.split("\n")[0].match(/;/g) || []).length >=
                   (roh.split("\n")[0].match(/,/g) || []).length ? ";" : ",";
   return roh.split(/\r?\n/).filter((z) => z.trim()).map((z) => {
@@ -841,7 +841,7 @@ const istDatum = (t) => /\d{1,4}[.\-/]\d{1,2}[.\-/]\d{1,4}/.test(String(t || "")
 
 /* Lastgang auswerten: Menge, Spitzenlast, Benutzungsstunden, Monatsverlauf */
 async function lastgangAuswerten(datei) {
-  const zeilen = /\.xlsx?$/i.test(datei.name) ? await xlsxLesen(datei) : csvLesen(datei);
+  const zeilen = /\.xlsx?$/i.test(datei.name) ? await xlsxLesen(datei) : await csvLesen(datei);
   if (!zeilen.length) throw new Error("Die Datei ist leer.");
 
   /* Spalte mit den meisten Zahlen suchen */
@@ -1611,7 +1611,23 @@ function blobVon(datei) {
   return new Blob([feld], { type: typ });
 }
 
+/* Dateien aus dem Dateispeicher erst holen. Das Fenster wird sofort geöffnet,
+   sonst blockiert Safari es nach dem Warten als Werbefenster. */
+async function abgelegteOeffnen(datei) {
+  const fenster = window.open("", "_blank");
+  try {
+    const voll = { ...datei, url: await dateiInhalt(datei) };
+    const url = URL.createObjectURL(blobVon(voll));
+    if (fenster) fenster.location.href = url; else location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    if (fenster) fenster.close();
+    alert("Die Datei konnte nicht geladen werden: " + ((e && e.message) || e));
+  }
+}
+
 function dateiOeffnen(datei) {
+  if (!datei.url && datei.pfad) return abgelegteOeffnen(datei);
   try {
     const url = URL.createObjectURL(blobVon(datei));
     const fenster = window.open(url, "_blank");
@@ -1621,6 +1637,7 @@ function dateiOeffnen(datei) {
 }
 
 function dateiLaden(datei) {
+  if (!datei.url && datei.pfad) return abgelegteOeffnen(datei);
   try {
     const url = URL.createObjectURL(blobVon(datei));
     const a = document.createElement("a");
@@ -1640,7 +1657,7 @@ function DateiChip({ datei, label, klein }) {
   if (!datei) return null;
   const inhalt = (
     <>
-      <FileText size={klein ? 14 : 15} style={{ color: datei.url ? C.strom : C.muted }} />
+      <FileText size={klein ? 14 : 15} style={{ color: datei.url || datei.pfad ? C.strom : C.muted }} />
       <span className="flex-1 truncate">{datei.name}</span>
       {datei.groesse ? (
         <span className="text-xs" style={{ color: C.muted }}>{kb(datei.groesse)}</span>
@@ -1654,7 +1671,7 @@ function DateiChip({ datei, label, klein }) {
     textDecoration: "none",
     color: C.text,
   };
-  if (!datei.url)
+  if (!datei.url && !datei.pfad)
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded text-sm" style={stil}>
         {inhalt}
@@ -4154,6 +4171,11 @@ function Provisionen({ anfragen, mitarbeiter, user, onOeffnen, onListe }) {
   const eigen = (a) => anteilVon(a, user.id, mitarbeiter);
   const firma = (a) => gesamtverteilung(a, mitarbeiter).firma;
   const summe = (l, f) => l.reduce((s, a) => s + f(a), 0);
+  /* Firmenanteil, Ausschüttung und Rest über eine Liste von Vorgängen */
+  const firmaVon = (l) => l.reduce((t, a) => {
+    const v = gesamtverteilung(a, mitarbeiter);
+    return { beiEgc: t.beiEgc + v.beiEgc, aus: t.aus + v.ausgeschuettet, rest: t.rest + v.firma };
+  }, { beiEgc: 0, aus: 0, rest: 0 });
   const kopf = (l) => (vollsicht ? summe(l, gesamtprovision) : summe(l, eigen));
 
   const Block = ({ titel, liste, farbe }) => (
@@ -4487,73 +4509,6 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
 
         {offen && (
           <div className="mt-6 pt-5" style={{ borderTop: "1px solid " + C.line }}>
-            <div className="p-4 rounded mb-5"
-                 style={{ background: verbrauchGesamt(a) >= 100000 ? "#F6F8FA" : "#F1F3F5",
-                          border: "1px solid " + C.line }}>
-              <label className="flex items-start gap-3 text-sm"
-                     style={{ opacity: verbrauchGesamt(a) >= 100000 ? 1 : 0.55 }}>
-                <input type="checkbox" className="mt-0.5"
-                  disabled={verbrauchGesamt(a) < 100000}
-                  checked={!!a.dienstleistungsvertrag && verbrauchGesamt(a) >= 100000}
-                  onChange={(e) => setA({ ...a, dienstleistungsvertrag: e.target.checked })}
-                  style={{ accentColor: C.ink }} />
-                <span>
-                  Dienstleistungsvertrag gewünscht
-                  <span className="block text-xs mt-0.5" style={{ color: C.muted }}>
-                    {verbrauchGesamt(a) >= 100000
-                      ? "Die Kalkulation hängt den Vertrag dem Angebot bei."
-                      : "Erst ab 100.000 kWh möglich, aktuell " + num(verbrauchGesamt(a)) + " kWh."}
-                  </span>
-                </span>
-              </label>
-            </div>
-
-            {(() => {
-              const treffer = dubletten(a, alleAnfragen, mitarbeiter);
-              if (!treffer.length) return null;
-              return (
-                <div className="p-4 rounded mb-5" style={{ background: "#FDF6EE", border: "1px solid " + C.gas }}>
-                  <div className="flex items-center gap-2 mb-2" style={{ color: C.gas }}>
-                    <AlertTriangle size={15} />
-                    <span className="text-sm">Dieser Kunde ist möglicherweise schon erfasst</span>
-                  </div>
-                  {treffer.map((t) => (
-                    <div key={t.vorgang.id} className="text-sm py-1">
-                      {t.vorgang.kunde.firma} · {t.vorgang.id} · {STATUS[t.vorgang.status].label}
-                      <span className="block text-xs" style={{ color: C.muted }}>
-                        betreut von {t.inhaber} · {t.gruende.join(", ")}
-                      </span>
-                    </div>
-                  ))}
-                  <p className="text-xs mt-2" style={{ color: C.muted }}>
-                    Kläre vor dem Senden, ob es sich wirklich um denselben Kunden handelt. Senden ist
-                    weiterhin möglich.
-                  </p>
-                </div>
-              );
-            })()}
-
-            <label className="block mb-5">
-              <span className="block text-xs mb-1" style={{ color: C.muted }}>
-                Bemerkung an das Team Kalkulation
-              </span>
-              <textarea rows={3} value={a.bemerkungVertrieb || ""}
-                onChange={(e) => setA({ ...a, bemerkungVertrieb: e.target.value })}
-                placeholder="Weitere Informationen zum Kunden, zur Menge oder zum gewünschten Vorgehen"
-                className="w-full px-3 py-2 text-sm rounded outline-none"
-                style={{ border: "1px solid " + C.line }} />
-            </label>
-
-            {sperren.length > 0 && (
-              <div className="p-4 rounded mb-5" style={{ background: "#FCF3F0", border: "1px solid " + C.warn }}>
-                <div className="flex items-center gap-2 mb-2" style={{ color: C.warn }}>
-                  <AlertTriangle size={15} />
-                  <span className="text-sm">Senden ist erst möglich, wenn das erledigt ist</span>
-                </div>
-                <ul className="text-sm ml-6 list-disc">{sperren.map((f) => <li key={f}>{f}</li>)}</ul>
-              </div>
-            )}
-
             {luecken.length > 0 ? (
               <div className="p-4 rounded mb-4" style={{ background: "#FCF3F0", border: "1px solid " + C.warn }}>
                 <div className="text-sm mb-2" style={{ color: C.warn }}>Es fehlt noch</div>
@@ -4623,7 +4578,7 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
     };
     setMitarbeiter([...mitarbeiter, m]);
     if (notieren) notieren("Mitarbeiter", m.name + " angelegt als " + m.rolle + " mit " + m.satz + " %");
-    setLink({ name: m.name, url: "https://egc-energie-vertriebsportal.netlify.app/registrieren?code=" + code });
+    setLink({ name: m.name, url: window.location.origin + "/?code=" + code });
     setNeu(null);
   };
 
@@ -4750,13 +4705,33 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
           })()}
         </div>
 
-        {gewaehlt.status === "eingeladen" && gewaehlt.einladung && (
+        {gewaehlt.einladung ? (
           <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
-            <div className="text-sm mb-2">Einladung offen</div>
+            <div className="text-sm mb-1">
+              {gewaehlt.status === "eingeladen" ? "Einladung offen" : "Zugangslink zum Passwort-Neusetzen offen"}
+            </div>
+            <p className="text-xs mb-2" style={{ color: C.muted }}>Gilt 30 Tage und nur einmal.</p>
             <div className="p-3 rounded text-sm break-all"
                  style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
-              https://egc-energie-vertriebsportal.netlify.app/registrieren?code={gewaehlt.einladung}
+              {window.location.origin}/?code={gewaehlt.einladung}
             </div>
+            <div className="mt-3">
+              <Btn icon={Check} onClick={() => {
+                try { navigator.clipboard.writeText(window.location.origin + "/?code=" + gewaehlt.einladung); }
+                catch (e) { /* manuell kopieren */ }
+              }}>Link kopieren</Btn>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="text-sm mb-1">Zugang</div>
+            <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "60ch" }}>
+              Passwort vergessen? Ein neuer Zugangslink lässt das Passwort neu vergeben.
+            </p>
+            <Btn variante="hell" onClick={() =>
+              setz(gewaehlt.id, { einladung: uid().toUpperCase() + uid().toUpperCase() })}>
+              Neuen Zugangslink erzeugen
+            </Btn>
           </div>
         )}
 
@@ -4882,11 +4857,19 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
 }
 
 /* Registrierung über den Einladungslink: Passwort vergeben */
-function Registrierung({ m, onFertig, onAbbruch }) {
+function Registrierung({ einladung, onFertig, onAbbruch }) {
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
+  const [fehler, setFehler] = useState("");
+  const [laeuft, setLaeuft] = useState(false);
   const regeln = passwortRegeln(pw);
   const passt = regeln.every((r) => r.ok) && pw === pw2;
+
+  const absenden = async () => {
+    setLaeuft(true); setFehler("");
+    try { await onFertig(pw); } catch (e) { setFehler((e && e.message) || String(e)); }
+    setLaeuft(false);
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4"
@@ -4894,9 +4877,12 @@ function Registrierung({ m, onFertig, onAbbruch }) {
       <div className="w-full max-w-md">
         <img src={LOGO} alt="EGC Energie" className="w-44 mx-auto mb-8" />
         <div className="rounded p-6" style={{ background: C.card }}>
-          <h1 className="text-lg mb-1">Willkommen, {m.name}</h1>
-          <p className="text-sm mb-5" style={{ color: C.muted }}>
+          <h1 className="text-lg mb-1">Willkommen, {einladung.name}</h1>
+          <p className="text-sm mb-1" style={{ color: C.muted }}>
             Vergib ein Passwort für deinen Zugang zum Vertriebsportal.
+          </p>
+          <p className="text-sm mb-5" style={{ color: C.muted }}>
+            Deine Anmeldung: <span style={{ color: C.text }}>{einladung.email}</span>
           </p>
 
           <div className="space-y-4">
@@ -4919,10 +4905,11 @@ function Registrierung({ m, onFertig, onAbbruch }) {
           </div>
 
           <div className="mt-6">
-            <Btn icon={Check} onClick={() => onFertig(pw)} disabled={!passt}>
-              Passwort setzen und anmelden
+            <Btn icon={Check} onClick={absenden} disabled={!passt || laeuft}>
+              {laeuft ? "Einen Moment …" : "Passwort setzen und anmelden"}
             </Btn>
           </div>
+          {fehler && <p className="text-sm mt-4" style={{ color: C.warn }}>{fehler}</p>}
           <button className="text-xs mt-4" style={{ color: C.muted }} onClick={onAbbruch}>
             Zurück zur Anmeldung
           </button>
@@ -4932,26 +4919,37 @@ function Registrierung({ m, onFertig, onAbbruch }) {
   );
 }
 
-/* Login-Maske */
-function Login({ mitarbeiter, onLogin, onCode }) {
+/* Anmeldemaske: Anmeldung über Supabase, Einladung über die Server-Funktion */
+function Login({ onAngemeldet, onEinladung, startCode }) {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(startCode || "");
   const [fehler, setFehler] = useState("");
-  const [modus, setModus] = useState("login");
+  const [laeuft, setLaeuft] = useState(false);
+  const [modus, setModus] = useState(startCode ? "code" : "login");
 
-  const anmelden = () => {
-    const m = mitarbeiter.find((x) => (x.email || "").toLowerCase() === email.trim().toLowerCase());
-    if (!m) return setFehler("Kein Zugang mit dieser E-Mail gefunden.");
-    if (m.status === "eingeladen") return setFehler("Für diesen Zugang wurde noch kein Passwort vergeben. Bitte den Einladungslink nutzen.");
-    if (m.passwort !== pw) return setFehler("Passwort stimmt nicht.");
-    setFehler(""); onLogin(m.id);
+  const einloggen = async () => {
+    setLaeuft(true); setFehler("");
+    try {
+      await anmelden(email, pw);
+      await onAngemeldet();
+    } catch (e) {
+      const t = (e && e.message) || "";
+      setFehler(/invalid login credentials/i.test(t) ? "E-Mail oder Passwort stimmt nicht."
+        : /fetch|network/i.test(t) ? "Keine Verbindung zum Server. Bitte Netz prüfen."
+        : "Anmeldung nicht möglich: " + t);
+    }
+    setLaeuft(false);
   };
 
-  const einloesen = () => {
-    const m = mitarbeiter.find((x) => x.einladung && x.einladung === code.trim().toUpperCase());
-    if (!m) return setFehler("Dieser Einladungscode ist ungültig oder bereits verwendet.");
-    setFehler(""); onCode(m.id);
+  const einloesen = async () => {
+    setLaeuft(true); setFehler("");
+    try {
+      const c = code.trim().toUpperCase();
+      const info = await einladungPruefen(c);
+      onEinladung({ ...info, code: c });
+    } catch (e) { setFehler((e && e.message) || String(e)); }
+    setLaeuft(false);
   };
 
   return (
@@ -4976,36 +4974,27 @@ function Login({ mitarbeiter, onLogin, onCode }) {
             <div className="space-y-4">
               <Feld label="E-Mail" value={email} onChange={setEmail} placeholder="name@egc-energie.de" />
               <Feld label="Passwort" type="password" value={pw} onChange={setPw} />
-              <Btn onClick={anmelden} disabled={!email || !pw}>Anmelden</Btn>
+              <Btn onClick={einloggen} disabled={!email || !pw || laeuft}>
+                {laeuft ? "Einen Moment …" : "Anmelden"}
+              </Btn>
             </div>
           ) : (
             <div className="space-y-4">
               <Feld label="Einladungscode aus deinem Link" value={code} onChange={setCode}
                 placeholder="Code hinter ?code= im Link" />
-              <Btn onClick={einloesen} disabled={!code}>Weiter zur Registrierung</Btn>
+              <Btn onClick={einloesen} disabled={!code || laeuft}>
+                {laeuft ? "Einen Moment …" : "Weiter zur Registrierung"}
+              </Btn>
             </div>
           )}
 
           {fehler && <p className="text-sm mt-4" style={{ color: C.warn }}>{fehler}</p>}
 
           <div className="mt-6 pt-4" style={{ borderTop: "1px solid " + C.line }}>
-            <p className="text-xs mb-2" style={{ color: C.muted }}>{VERSION}</p>
-            <p className="text-xs mb-2" style={{ color: C.muted }}>
-              Zugänge, Passwort für alle: {DEMO_PASSWORT}
+            <p className="text-xs" style={{ color: C.muted }}>
+              Passwort vergessen? Die Geschäftsführung schickt dir einen neuen Einladungslink.
             </p>
-            <div className="space-y-1">
-              {mitarbeiter.filter((m) => m.email && m.status === "aktiv").map((m) => (
-                <button key={m.id} onClick={() => { setEmail(m.email); setPw(DEMO_PASSWORT); setModus("login"); }}
-                  className="w-full flex items-center gap-2 text-xs px-2 py-1 rounded text-left"
-                  style={{ border: "1px solid " + C.line, background: "#F6F8FA" }}>
-                  <span className="flex-1 truncate" style={{ color: C.text }}>{m.email}</span>
-                  <span style={{ color: ROLLENFARBE[m.rolle] || C.muted }}>{m.rolle}</span>
-                </button>
-              ))}
-            </div>
-            <p className="text-xs mt-2" style={{ color: C.muted }}>
-              Tippen füllt die Felder aus.
-            </p>
+            <p className="text-xs mt-2" style={{ color: C.muted }}>{VERSION}</p>
           </div>
         </div>
       </div>
@@ -5638,6 +5627,22 @@ function Versorgerliste({ versorger, setVersorger, user, standard, setStandard }
       </p>
 
       {darfAendern && (
+        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
+          <div className="text-sm mb-1">Anteil an der Gesamtprovision</div>
+          <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "64ch" }}>
+            Welcher Anteil der ausgewiesenen Gesamtprovision tatsächlich bei EGC ankommt. Der Wert
+            gilt für alle Versorger, sofern beim einzelnen Versorger unten nichts anderes eingetragen ist.
+            Die Sätze der Vertriebspartner rechnen weiterhin auf die volle Gesamtprovision.
+            Nur die Geschäftsführung sieht diese Werte.
+          </p>
+          <div className="sm:max-w-xs">
+            <Feld label="Vorgabe in Prozent" value={standard}
+              onChange={(v) => setStandard(v.replace(/[^\d]/g, ""))} />
+          </div>
+        </div>
+      )}
+
+      {darfAendern && (
         <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
           <div className="grid sm:grid-cols-2 gap-4">
             <Feld label="Versorger" value={name} onChange={setName} placeholder="Name des Versorgers" />
@@ -5669,6 +5674,16 @@ function Versorgerliste({ versorger, setVersorger, user, standard, setStandard }
                 <div className="text-xs mt-0.5" style={{ color: C.gas }}>Branchen: {v.branchen}</div>
               )}
             </div>
+            {darfAendern && (
+              <input value={v.anteil ?? ""} inputMode="numeric" placeholder={standard + " %"}
+                title="Eigener Anteil an der Gesamtprovision für diesen Versorger, leer = Vorgabe"
+                onChange={(e) => {
+                  const w = e.target.value.replace(/[^\d]/g, "");
+                  setVersorger(versorger.map((x) => (x.id === v.id ? { ...x, anteil: w } : x)));
+                }}
+                className="w-16 px-2 py-1 text-sm rounded text-right outline-none"
+                style={{ border: "1px solid " + C.line }} />
+            )}
             {darfAendern && (
               <button onClick={() => setVersorger(versorger.filter((x) => x.id !== v.id))}
                 style={{ color: C.muted }} title="Entfernen">
@@ -5798,7 +5813,7 @@ function Ablage({ ablage, setAblage, user, start }) {
                      style={{ background: C.ink, color: "#fff" }}>
                     <Send size={14} /> Öffnen
                   </a>
-                ) : d.datei && d.datei.url ? (
+                ) : d.datei && (d.datei.url || d.datei.pfad) ? (
                   <div className="flex gap-2">
                     <button onClick={() => dateiOeffnen(d.datei)}
                             className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded"
@@ -6262,7 +6277,7 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin }) {
     setFehler(""); setLaedt(true);
     try {
       const istExcel = /\.xlsx?$/i.test(datei.name);
-      const zeilen = istExcel ? await xlsxLesen(datei) : csvLesen(datei);
+      const zeilen = istExcel ? await xlsxLesen(datei) : await csvLesen(datei);
       if (zeilen.length < 2) throw new Error("Die Datei enthält keine Daten.");
       const sp = spaltenZuordnen(zeilen[0]);
       const holen = (z, i, ersatz) => (i >= 0 ? z[i] || "" : z[ersatz] || "");
@@ -6833,43 +6848,28 @@ function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
     return n;
   };
 
-  const pruefen = () => {
+  /* Geprüft wird auf dem Server über alle Vorgänge und Leads im Haus.
+     Zurück kommt nur die Art des Treffers, nie wer den Kunden betreut. */
+  const pruefen = async () => {
     const gesucht = kurz(name);
     if (gesucht.length < 3) { setErgebnis({ art: "kurz" }); return; }
-    const maloSauber = malo.replace(/\s/g, "");
-
-    const passt = (a) => {
-      const n = kurz(a.kunde.firma);
-      const nameTreffer = n && (n === gesucht || n.includes(gesucht) || gesucht.includes(n));
-      const plzTreffer = !plz || a.kunde.plz === plz.trim();
-      const maloTreffer = maloSauber &&
-        a.lieferstellen.some((l) => String(l.maloId || "").replace(/\s/g, "") === maloSauber);
-      return maloTreffer || (nameTreffer && plzTreffer);
-    };
-
-    const treffer = anfragen.filter((a) => a.status !== "abgelehnt" && passt(a));
-    const leadTreffer = (leads || []).filter((l) => {
-      const n = kurz(l.firma);
-      return n && (n === gesucht || n.includes(gesucht) || gesucht.includes(n)) &&
-        (!plz || l.plz === plz.trim());
-    });
-
-    if (treffer.length === 0 && leadTreffer.length === 0) { setErgebnis({ art: "frei" }); return; }
-
-    const bestand = treffer.filter((a) => ["bestaetigt", "abgeschlossen"].includes(a.status));
-    const laufend = treffer.filter((a) => !["bestaetigt", "abgeschlossen"].includes(a.status));
-    const eigene = treffer.filter((a) => istBeteiligt(a, user.id));
-
-    setErgebnis({
-      art: bestand.length ? "kunde" : laufend.length ? "bearbeitung" : "lead",
-      eigene, anzahl: treffer.length + leadTreffer.length,
-    });
+    const eigene = anfragen.filter((a) => istBeteiligt(a, user.id) && a.status !== "abgelehnt" &&
+      (kurz(a.kunde.firma) === gesucht || kurz(a.kunde.firma).includes(gesucht)));
+    try {
+      const { data, error } = await sb.rpc("kunde_pruefen", { p_firma: name, p_plz: plz, p_malo: malo });
+      if (error) throw error;
+      setErgebnis({ art: data.art, eigene, anzahl: data.anzahl });
+    } catch (e) {
+      setErgebnis({ art: "fehler", text: (e && e.message) || String(e) });
+    }
   };
 
   const Antwort = () => {
     if (!ergebnis) return null;
     if (ergebnis.art === "kurz")
       return <p className="text-sm" style={{ color: C.muted }}>Bitte mindestens drei Zeichen eingeben.</p>;
+    if (ergebnis.art === "fehler")
+      return <p className="text-sm mt-5" style={{ color: C.warn }}>Prüfung nicht möglich: {ergebnis.text}</p>;
 
     const bilder = {
       frei: { farbe: C.ok, hg: "#F1F7F0", titel: "Noch nicht im Bestand",
@@ -6907,21 +6907,6 @@ function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
 
   return (
     <div>
-      {darfPflegen && (
-        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
-          <div className="text-sm mb-1">Anteil an der Gesamtprovision</div>
-          <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "64ch" }}>
-            Welcher Anteil der ausgewiesenen Gesamtprovision tatsächlich bei EGC ankommt. Der Wert
-            gilt für alle Versorger, sofern beim einzelnen Versorger nichts anderes eingetragen ist.
-            Die Sätze der Vertriebspartner rechnen weiterhin auf die volle Gesamtprovision.
-          </p>
-          <div className="sm:max-w-xs">
-            <Feld label="Vorgabe in Prozent" value={standard}
-              onChange={(v) => setStandard(v.replace(/[^\d]/g, ""))} />
-          </div>
-        </div>
-      )}
-
       <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "62ch" }}>
         Prüfe vor der Ansprache, ob eine Firma schon bei uns geführt wird. Du erfährst nur, ob sie
         im Bestand ist — nicht, wer sie betreut.
@@ -8739,7 +8724,14 @@ function Smartmeter({ vorgaenge, setVorgaenge, anfragen, mitarbeiter, user }) {
           </div>
         )}
 
-        {offen.provision && (
+        {offen.provision && (() => {
+          const Zeile = ({ k, v }) => (
+            <div className="flex justify-between gap-4 py-1.5 text-sm" style={{ borderBottom: "1px solid " + C.line }}>
+              <span style={{ color: C.muted }}>{k}</span>
+              <span className="text-right" style={{ fontVariantNumeric: "tabular-nums" }}>{v || "–"}</span>
+            </div>
+          );
+          return (
           <div className="rounded p-4 mt-5" style={{ background: "#F1F7F0", border: "1px solid " + C.ok }}>
             <div className="text-sm mb-2" style={{ color: C.ok }}>
               {offen.vermerk || "Abgeschlossen"}
@@ -8750,7 +8742,8 @@ function Smartmeter({ vorgaenge, setVorgaenge, anfragen, mitarbeiter, user }) {
               <Zeile k="Eingegangen am" v={datum(offen.provision.datum)} />
             </div>
           </div>
-        )}
+          );
+        })()}
 
         <div className="rounded p-4 mt-5" style={{ background: C.card, border: "1px solid " + C.line }}>
           <div className="text-sm mb-3">Verlauf</div>
@@ -8768,21 +8761,6 @@ function Smartmeter({ vorgaenge, setVorgaenge, anfragen, mitarbeiter, user }) {
   /* ---------- Liste ---------- */
   return (
     <div>
-      {darfPflegen && (
-        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
-          <div className="text-sm mb-1">Anteil an der Gesamtprovision</div>
-          <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "64ch" }}>
-            Welcher Anteil der ausgewiesenen Gesamtprovision tatsächlich bei EGC ankommt. Der Wert
-            gilt für alle Versorger, sofern beim einzelnen Versorger nichts anderes eingetragen ist.
-            Die Sätze der Vertriebspartner rechnen weiterhin auf die volle Gesamtprovision.
-          </p>
-          <div className="sm:max-w-xs">
-            <Feld label="Vorgabe in Prozent" value={standard}
-              onChange={(v) => setStandard(v.replace(/[^\d]/g, ""))} />
-          </div>
-        </div>
-      )}
-
       <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "62ch" }}>
         {istKalk
           ? "Smartmeter-Anfragen aus dem Vertrieb. Prüfen, an den Messstellenbetreiber übermitteln oder Unterlagen nachfordern."
@@ -9834,11 +9812,12 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, l
 /*  App                                                                */
 /* ------------------------------------------------------------------ */
 export default function App() {
-  const [anfragen, setAnfragen] = useState(seed());
-  const [mitarbeiter, setMitarbeiter] = useState(USERS);
-  const [leads, setLeads] = useState(seedLeads());
-  const [ablage, setAblage] = useState(seedAblage());
-  const [versorger, setVersorger] = useState(VERSORGER);
+  /* Alle Daten kommen aus der Datenbank; vor der Anmeldung ist alles leer */
+  const [anfragen, setAnfragen] = useState([]);
+  const [mitarbeiter, setMitarbeiter] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [ablage, setAblage] = useState([]);
+  const [versorger, setVersorger] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [smartmeter, setSmartmeter] = useState([]);
   const [probleme, setProbleme] = useState([]);
@@ -9862,100 +9841,169 @@ export default function App() {
 
   const user = mitarbeiter.find((u) => u.id === userId) || null;
 
+  /* ---------- Anbindung an die Datenbank ---------- */
+  const [sitzung, setSitzung] = useState("pruefen"); /* pruefen · keine · aktiv */
+  const [meldung, setMeldung] = useState("");
+  const [einladungStart] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("code") || ""; } catch (e) { return ""; }
+  });
+
+  const SETZER = {
+    anfragen: setAnfragen, mitarbeiter: setMitarbeiter, leads: setLeads, ablage: setAblage,
+    versorger: setVersorger, tickets: setTickets, smartmeter: setSmartmeter, probleme: setProbleme,
+    termine: setTermine, akquise: setAkquise, aufgaben: setAufgaben, protokoll: setProtokoll,
+    tippgeber: setTippgeber,
+  };
+  const UMFORMEN = { anfragen: migriereAnfragen, mitarbeiter: migriereMitarbeiter, leads: migriereLeads };
+  const NAMEN = Object.keys(SETZER);
+
+  const datenRef = React.useRef({});
+  datenRef.current = { anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme,
+                       termine, akquise, aufgaben, protokoll, tippgeber };
+  const zuletzt = React.useRef({});   /* zuletzt abgeglichener Stand je Sammlung */
+  const zuSpeichern = React.useRef(new Set()); /* noch zu speichern */
+  const nachladen = React.useRef(new Set());   /* Änderungen anderer, nach dem Speichern holen */
+  const kette = React.useRef(Promise.resolve());
+  const speichertGerade = React.useRef(false);
+
+  const einstellungenSetzen = (e) => {
+    if (e.bonus != null) { setBonusSatz(String(e.bonus)); setzeBonus(e.bonus); }
+    if (e.bonusziele) setBonusziele({ ...BONUSZIELE_START, ...e.bonusziele });
+    if (e.firmenanteil != null) setFirmenanteil(String(e.firmenanteil));
+  };
+
+  const sammlungLaden = async (n) => {
+    const liste = await laden(n, UMFORMEN[n]);
+    zuletzt.current[n] = liste;
+    SETZER[n](liste);
+  };
+
+  /* nach der Anmeldung: wer bin ich, dann alles laden, was meine Rolle sehen darf */
+  const allesLaden = async () => {
+    const id = await meineId();
+    if (!id) throw new Error("Zu dieser Anmeldung gibt es keinen Mitarbeiter-Zugang.");
+    const ergebnisse = await Promise.allSettled(NAMEN.map(sammlungLaden));
+    const fehler = ergebnisse.filter((x) => x.status === "rejected");
+    try { einstellungenSetzen(await einstellungenLaden()); } catch (e) { /* Vorgaben bleiben */ }
+    setMeldung(fehler.length ? "Nicht alle Daten konnten geladen werden: " + fehler[0].reason.message : "");
+    setUserId(id);
+    setGeladen(true);
+    setSitzung("aktiv");
+  };
+
+  const allesLeeren = () => {
+    setGeladen(false);
+    setUserId(null);
+    setMenu(false); setOffen(null); setEntwurf(null); setListenAnsicht(null); setMeldung("");
+    NAMEN.forEach((n) => { zuletzt.current[n] = []; SETZER[n]([]); });
+  };
+
+  /* beim Start: noch angemeldet? */
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get("egc-crm:anfragen");
-        if (r && r.value) setAnfragen(migriereAnfragen(JSON.parse(r.value)));
-        try {
-          const m = await window.storage.get("egc-crm:mitarbeiter");
-          if (m && m.value) setMitarbeiter(migriereMitarbeiter(JSON.parse(m.value)));
-        } catch (e2) { /* Standardsätze */ }
-        try {
-          const l = await window.storage.get("egc-crm:leads");
-          if (l && l.value) setLeads(migriereLeads(JSON.parse(l.value)));
-        } catch (e3) { /* Demo-Leads */ }
-        try {
-          const d = await window.storage.get("egc-crm:ablage");
-          if (d && d.value) setAblage(JSON.parse(d.value));
-        } catch (e4) { /* Standardunterlagen */ }
-        try {
-          const vs = await window.storage.get("egc-crm:versorger");
-          if (vs && vs.value) setVersorger(JSON.parse(vs.value));
-        } catch (e5) { /* Standardversorger */ }
-        try {
-          const tk = await window.storage.get("egc-crm:tickets");
-          if (tk && tk.value) setTickets(JSON.parse(tk.value));
-        } catch (e6) { /* noch keine Tickets */ }
-        try {
-          const sm = await window.storage.get("egc-crm:smartmeter");
-          if (sm && sm.value) setSmartmeter(JSON.parse(sm.value));
-        } catch (e7) { /* noch keine Smartmeter-Vorgänge */ }
-        try {
-          const pr = await window.storage.get("egc-crm:probleme");
-          if (pr && pr.value) setProbleme(JSON.parse(pr.value));
-        } catch (e8) { /* noch keine Problemfälle */ }
-        try {
-          const te = await window.storage.get("egc-crm:termine");
-          if (te && te.value) setTermine(JSON.parse(te.value));
-        } catch (e9) { /* noch keine Termine */ }
-        try {
-          const ak = await window.storage.get("egc-crm:akquise");
-          if (ak && ak.value) setAkquise(JSON.parse(ak.value));
-        } catch (e10) { /* noch keine Kontaktlisten */ }
-        try {
-          const au = await window.storage.get("egc-crm:aufgaben");
-          if (au && au.value) setAufgaben(JSON.parse(au.value));
-        } catch (e11) { /* noch keine Aufgaben */ }
-        try {
-          const pr2 = await window.storage.get("egc-crm:protokoll");
-          if (pr2 && pr2.value) setProtokoll(JSON.parse(pr2.value));
-        } catch (e12) { /* noch kein Protokoll */ }
-        try {
-          const bo = await window.storage.get("egc-crm:bonus");
-          if (bo && bo.value) { setBonusSatz(bo.value); setzeBonus(bo.value); }
-        } catch (e13) { setzeBonus("10"); }
-        try {
-          const tg = await window.storage.get("egc-crm:tippgeber");
-          if (tg && tg.value) setTippgeber(JSON.parse(tg.value));
-        } catch (e14) { /* noch keine Tippgeber */ }
-        try {
-          const bz = await window.storage.get("egc-crm:bonusziele");
-          if (bz && bz.value) setBonusziele({ ...BONUSZIELE_START, ...JSON.parse(bz.value) });
-        } catch (e15) { /* Startwerte */ }
-        try {
-          const fa = await window.storage.get("egc-crm:firmenanteil");
-          if (fa && fa.value) setFirmenanteil(fa.value);
-        } catch (e16) { /* Startwert 75 */ }
-      } catch (e) { /* erster Start: Demodaten */ }
-      setGeladen(true);
+        const { data } = await sb.auth.getSession();
+        if (data.session && !einladungStart) { await allesLaden(); return; }
+      } catch (e) {
+        setMeldung("Keine Verbindung zum Server: " + ((e && e.message) || e));
+      }
+      setSitzung("keine");
     })();
+    const { data } = sb.auth.onAuthStateChange((ereignis) => {
+      if (ereignis === "SIGNED_OUT") { allesLeeren(); setSitzung("keine"); }
+    });
+    return () => data.subscription.unsubscribe();
   }, []);
 
+  const speichernJetzt = () => {
+    kette.current = kette.current.then(async () => {
+      const namen = [...zuSpeichern.current];
+      zuSpeichern.current.clear();
+      if (!namen.length) return;
+      speichertGerade.current = true;
+      const fehler = [];
+      for (const n of namen) {
+        const f = await abgleichen(n, datenRef.current[n]);
+        if (f.length) fehler.push({ n, f });
+      }
+      speichertGerade.current = false;
+      if (fehler.length) {
+        const erster = fehler[0].f[0].meldung;
+        setMeldung(/fetch|network/i.test(erster)
+          ? "Keine Verbindung: Änderungen sind noch nicht gespeichert. Sie werden gespeichert, sobald das Netz wieder da ist."
+          : "Nicht gespeichert: " + erster);
+        /* bei Ablehnung durch den Server den echten Stand zurückholen */
+        if (!/fetch|network/i.test(erster)) fehler.forEach((x) => nachladen.current.add(x.n));
+      } else setMeldung("");
+      const nach = [...nachladen.current];
+      nachladen.current.clear();
+      for (const n of nach) await sammlungLaden(n).catch(() => {});
+    }).catch(() => { speichertGerade.current = false; });
+  };
+
+  /* Änderungen bemerken und kurz gesammelt speichern */
   useEffect(() => {
-    if (!geladen) return;
-    (async () => {
-      try {
-        await window.storage.set("egc-crm:anfragen", JSON.stringify(anfragen));
-        await window.storage.set("egc-crm:mitarbeiter", JSON.stringify(mitarbeiter));
-        await window.storage.set("egc-crm:leads", JSON.stringify(leads));
-        await window.storage.set("egc-crm:ablage", JSON.stringify(ablage));
-        await window.storage.set("egc-crm:versorger", JSON.stringify(versorger));
-        await window.storage.set("egc-crm:tickets", JSON.stringify(tickets));
-        await window.storage.set("egc-crm:smartmeter", JSON.stringify(smartmeter));
-        await window.storage.set("egc-crm:probleme", JSON.stringify(probleme));
-        await window.storage.set("egc-crm:termine", JSON.stringify(termine));
-        await window.storage.set("egc-crm:akquise", JSON.stringify(akquise));
-        await window.storage.set("egc-crm:aufgaben", JSON.stringify(aufgaben));
-        await window.storage.set("egc-crm:protokoll", JSON.stringify(protokoll));
-        await window.storage.set("egc-crm:bonus", String(bonusSatz));
-        await window.storage.set("egc-crm:tippgeber", JSON.stringify(tippgeber));
-        await window.storage.set("egc-crm:bonusziele", JSON.stringify(bonusziele));
-        await window.storage.set("egc-crm:firmenanteil", String(firmenanteil));
-      } catch (e) { /* Speichern nicht verfügbar */ }
-    })();
+    if (!geladen || !userId) return;
+    NAMEN.forEach((n) => {
+      if (zuletzt.current[n] !== datenRef.current[n]) {
+        zuSpeichern.current.add(n);
+        zuletzt.current[n] = datenRef.current[n];
+      }
+    });
+    if (!zuSpeichern.current.size) return;
+    const t = setTimeout(speichernJetzt, 500);
+    return () => clearTimeout(t);
   }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine,
-      akquise, aufgaben, protokoll, bonusSatz, tippgeber, bonusziele, firmenanteil, geladen]);
+      akquise, aufgaben, protokoll, tippgeber, geladen, userId]);
+
+  /* Einstellungen schreibt nur die Geschäftsführung */
+  useEffect(() => {
+    if (!geladen || !userId) return;
+    const ich = mitarbeiter.find((m) => m.id === userId);
+    if (!ich || ich.rolle !== "Geschäftsführung") return;
+    const t = setTimeout(async () => {
+      const f = (await einstellungSpeichern("bonus", String(bonusSatz)))
+        || (await einstellungSpeichern("bonusziele", bonusziele))
+        || (await einstellungSpeichern("firmenanteil", String(firmenanteil)));
+      if (f) setMeldung("Einstellung nicht gespeichert: " + f);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [bonusSatz, bonusziele, firmenanteil, geladen, userId]);
+
+  /* wieder online: Liegengebliebenes speichern */
+  useEffect(() => {
+    const wieder = () => { NAMEN.forEach((n) => zuSpeichern.current.add(n)); speichernJetzt(); };
+    window.addEventListener("online", wieder);
+    return () => window.removeEventListener("online", wieder);
+  }, []);
+
+  /* Live-Abgleich: Änderungen anderer erscheinen ohne Neuladen */
+  useEffect(() => {
+    if (!userId) return;
+    const warten = {};
+    return liveAbgleich((tabelle, p) => {
+      const n = sammlungVon(tabelle);
+      if (!n) return;
+      if (n === "einstellungen") { einstellungenLaden().then(einstellungenSetzen).catch(() => {}); return; }
+      if (schonBekannt(tabelle, p)) return;
+      if (n === "mitarbeiter" && p.new && p.new.id === userId && p.eventType === "UPDATE") {
+        /* eigener Zugang geändert (z. B. freigeschaltet): Rechte können sich geändert haben */
+        clearTimeout(warten.alles);
+        warten.alles = setTimeout(() => allesLaden().catch(() => {}), 400);
+        return;
+      }
+      if (speichertGerade.current || zuSpeichern.current.has(n)) { nachladen.current.add(n); return; }
+      clearTimeout(warten[n]);
+      warten[n] = setTimeout(() => sammlungLaden(n).catch(() => {}), 300);
+    });
+  }, [userId]);
+
+  const abmeldenUndLeeren = async () => {
+    await kette.current;
+    await abmelden();
+    allesLeeren();
+    setSitzung("keine");
+  };
 
   const speichern = (a) =>
     setAnfragen((prev) => (prev.some((x) => x.id === a.id)
@@ -10004,7 +10052,7 @@ export default function App() {
 
   /* Bestandskunden aus einer Tabelle übernehmen */
   const kundenImport = async (datei, partnerId) => {
-    const zeilen = /\.xlsx?$/i.test(datei.name) ? await xlsxLesen(datei) : csvLesen(datei);
+    const zeilen = /\.xlsx?$/i.test(datei.name) ? await xlsxLesen(datei) : await csvLesen(datei);
     if (zeilen.length < 2) throw new Error("Die Datei enthält keine Daten.");
     const kopf = zeilen[0].map((h) => String(h || "").toLowerCase());
     const sp = (...begriffe) => kopf.findIndex((h) => begriffe.some((b) => h.includes(b)));
@@ -10349,27 +10397,38 @@ export default function App() {
     rolle === "Teamleiter" && user ? anfragen.filter((a) => a.team === user.team) : anfragen;
 
   /* Registrierung über den Einladungslink */
-  if (registriert) {
-    const m = mitarbeiter.find((x) => x.id === registriert);
-    if (m)
-      return (
-        <Registrierung m={m}
-          onFertig={(pw) => {
-            setMitarbeiter(mitarbeiter.map((x) =>
-              x.id === m.id ? { ...x, passwort: pw, status: "registriert", einladung: null } : x));
-            setRegistriert(null);
-            setUserId(m.id);
-          }}
-          onAbbruch={() => setRegistriert(null)} />
-      );
-  }
+  if (registriert)
+    return (
+      <Registrierung einladung={registriert}
+        onFertig={async (pw) => {
+          await einladungEinloesen(registriert.code, pw);
+          await abmelden();
+          await anmelden(registriert.email, pw);
+          try { window.history.replaceState(null, "", window.location.pathname); } catch (e) { /* egal */ }
+          setRegistriert(null);
+          await allesLaden();
+        }}
+        onAbbruch={() => setRegistriert(null)} />
+    );
+
+  if (sitzung === "pruefen" || (sitzung === "aktiv" && !user))
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-4 gap-4"
+           style={{ background: C.ink, fontFamily: FONT, color: "#8B9BB0" }}>
+        <img src={LOGO} alt="EGC Energie" className="w-44" />
+        <p className="text-sm">{sitzung === "aktiv" ? "Zugang nicht gefunden." : "Daten werden geladen …"}</p>
+        {sitzung === "aktiv" && (
+          <button className="text-sm underline" onClick={abmeldenUndLeeren}>Abmelden</button>
+        )}
+      </div>
+    );
 
   /* Anmeldung */
   if (!user)
     return (
-      <Login mitarbeiter={mitarbeiter}
-        onLogin={(id) => setUserId(id)}
-        onCode={(id) => setRegistriert(id)} />
+      <Login startCode={einladungStart}
+        onAngemeldet={allesLaden}
+        onEinladung={(info) => setRegistriert(info)} />
     );
 
   const gesperrt = ["registriert", "abgelehnt", "pruefung"].includes(user.status);
@@ -10635,7 +10694,7 @@ export default function App() {
               <div className="text-sm truncate">{user.name}</div>
               <div className="text-xs truncate" style={{ color: "#8B9BB0" }}>{user.rolle}</div>
             </div>
-            <button onClick={() => setUserId(null)} title="Abmelden" style={{ color: "#8B9BB0" }}>
+            <button onClick={abmeldenUndLeeren} title="Abmelden" style={{ color: "#8B9BB0" }}>
               <ArrowLeft size={16} />
             </button>
           </div>
@@ -10674,13 +10733,11 @@ export default function App() {
             ))}
           </nav>
 
-          <select value={userId} onChange={(e) => { setUserId(e.target.value); setMenu(false); }}
-            className="w-full mt-5 px-3 py-2 text-xs rounded outline-none"
+          <button onClick={abmeldenUndLeeren}
+            className="w-full mt-5 px-3 py-2 text-xs rounded text-left"
             style={{ background: C.inkSoft, color: "#8B9BB0", border: "1px solid " + C.inkLine }}>
-            {mitarbeiter.map((u) => (
-              <option key={u.id} value={u.id}>Demo-Ansicht: {u.rolle} · {u.name}</option>
-            ))}
-          </select>
+            Abmelden
+          </button>
 
           <p className="text-xs mt-4" style={{ color: "#5C6E85" }}>{VERSION}</p>
           {gesperrt && (
@@ -10692,7 +10749,17 @@ export default function App() {
       </aside>
 
       {/* Inhalt */}
-      <main className="flex-1 px-4 sm:px-8 py-5 lg:py-6 max-w-6xl w-full">{inhalt}</main>
+      <main className="flex-1 px-4 sm:px-8 py-5 lg:py-6 max-w-6xl w-full">
+        {meldung && (
+          <div className="flex items-start gap-2 p-3 mb-4 rounded text-sm"
+               style={{ background: "#FCF3F0", border: "1px solid " + C.warn, color: C.warn }}>
+            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+            <span className="flex-1">{meldung}</span>
+            <button onClick={() => setMeldung("")} title="Ausblenden"><X size={15} /></button>
+          </div>
+        )}
+        {inhalt}
+      </main>
     </div>
   );
 }

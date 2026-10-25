@@ -127,6 +127,12 @@ export async function dateiInhalt(datei) {
 }
 
 /* ---------- Abgleich ---------- */
+/* Vergleichsform mit sortierten Schlüsseln: Die Datenbank (jsonb) ordnet Schlüssel
+   anders an, als die App sie schreibt. Ohne Sortierung sähe jeder Datensatz geändert aus. */
+const kanon = (wert) => JSON.stringify(wert, (k, v) =>
+  v && typeof v === "object" && !Array.isArray(v)
+    ? Object.keys(v).sort().reduce((o, x) => { o[x] = v[x]; return o; }, {}) : v);
+
 const stand = {}; /* tabelle → Map(id → JSON des zuletzt gespeicherten Stands) */
 const standVon = (t) => (stand[t] = stand[t] || new Map());
 
@@ -177,10 +183,12 @@ function tabellenVon(name) {
   return [s.tabelle, ...Object.values(s.abspalten || {})];
 }
 
-/* leer: nichts drin außer leeren Hüllen (z. B. Stammdaten, die man nicht sehen darf) */
-const ohneDaten = (zeile) =>
-  !zeile.daten || Object.values(zeile.daten).every((w) =>
-    w == null || w === "" || (typeof w === "object" && !Array.isArray(w) && Object.keys(w).length === 0));
+/* leer: nichts drin außer Vorgabewerten (z. B. Stammdaten oder Sätze anderer,
+   die man nicht sehen darf und die die App nur mit leeren Werten auffüllt) */
+const leer = (w) =>
+  w == null || w === "" || w === false || w === 0 ||
+  (Array.isArray(w) ? w.every(leer) : typeof w === "object" && Object.values(w).every(leer));
+const ohneDaten = (zeile) => leer(zeile.daten);
 
 /* Vergleicht die Liste mit dem gespeicherten Stand und schreibt die Unterschiede.
    Gibt eine Liste von Fehlermeldungen zurück (leer, wenn alles geklappt hat). */
@@ -193,16 +201,24 @@ export async function abgleichen(name, liste) {
   for (const z of zeilen) {
     const st = standVon(z.tabelle);
     const vorher = st.get(z.id);
-    const schnell = JSON.stringify(ersetzeBekannte(z.daten));
+    const schnell = kanon(ersetzeBekannte(z.daten));
     if (vorher === schnell) continue;
     /* Teil-Tabellen nur schreiben, wenn es dort etwas gibt oder vorher etwas gab */
     if (z.tabelle !== haupt && vorher === undefined && ohneDaten(z)) continue;
     try {
       const daten = await ablegen(z.tabelle, z.id, z.daten);
-      const json = JSON.stringify(daten);
+      const json = kanon(daten);
       if (json === vorher) { continue; }
-      const { error } = await sb.from(z.tabelle).upsert({ id: z.id, daten }, { onConflict: "id" });
+      /* neu anlegen oder ändern; gibt es den Datensatz schon (von anderer Stelle angelegt), ändern */
+      const aendern = () => sb.from(z.tabelle).update({ daten }).eq("id", z.id).select("id");
+      /* Anlegen ohne Rückgabe: manche Zeilen (Protokoll) darf man schreiben, aber nicht lesen */
+      let { data, error } = vorher === undefined
+        ? await sb.from(z.tabelle).insert({ id: z.id, daten }).then((x) => ({ ...x, data: [z] }))
+        : await aendern();
+      if (error && error.code === "23505") ({ data, error } = await aendern());
       if (error) throw error;
+      /* Zeilenrechte lassen unerlaubte Änderungen still ins Leere laufen */
+      if (!data || !data.length) throw new Error("Keine Berechtigung, diesen Datensatz zu ändern.");
       st.set(z.id, json);
     } catch (e) {
       fehler.push({ tabelle: z.tabelle, id: z.id, meldung: (e && e.message) || String(e) });
@@ -213,27 +229,32 @@ export async function abgleichen(name, liste) {
   const st = standVon(haupt);
   for (const id of [...st.keys()]) {
     if (vorhanden.has(id)) continue;
-    const { error } = await sb.from(haupt).delete().eq("id", id);
-    if (error) fehler.push({ tabelle: haupt, id, meldung: error.message });
+    const { data, error } = await sb.from(haupt).delete().eq("id", id).select("id");
+    if (error || !data || !data.length)
+      fehler.push({ tabelle: haupt, id, meldung: error ? error.message : "Keine Berechtigung, diesen Datensatz zu löschen." });
     else for (const t of tabellenVon(name)) standVon(t).delete(id);
   }
   return fehler;
 }
 
-/* Lädt eine Sammlung vollständig. Gibt die Liste zurück (leer, wenn es nichts gibt). */
-export async function laden(name) {
+/* Lädt eine Sammlung vollständig und gibt die Liste zurück.
+   `umformen` ergänzt fehlende Felder (wie bisher beim Laden aus dem Browser).
+   Als gespeichert gilt danach genau diese Darstellung, damit das Ergänzen
+   allein keine Schreibvorgänge auslöst. */
+export async function laden(name, umformen = (x) => x) {
   const tabellen = tabellenVon(name);
   const neuOben = !!(SAMMLUNGEN[name] && SAMMLUNGEN[name].neuOben);
   const ergebnisse = await Promise.all(tabellen.map((t) => alleZeilen(t, neuOben)));
   const [haupt, ...teile] = ergebnisse;
   const teilMaps = teile.map((zeilen) => new Map(zeilen.map((z) => [z.id, z.daten || {}])));
-  tabellen.forEach((t, i) => {
-    const st = standVon(t);
-    st.clear();
-    for (const z of ergebnisse[i]) st.set(z.id, JSON.stringify(z.daten || {}));
-  });
-  return haupt
-    .map((z) => Object.assign({ id: z.id }, z.daten, ...teilMaps.map((m) => m.get(z.id) || {})));
+  const liste = umformen(haupt.map((z) =>
+    Object.assign({ id: z.id }, z.daten, ...teilMaps.map((m) => m.get(z.id) || {}))));
+
+  const aufServer = {};
+  tabellen.forEach((t, i) => { aufServer[t] = new Set(ergebnisse[i].map((z) => z.id)); standVon(t).clear(); });
+  for (const z of zeilenVon(name, liste))
+    if (aufServer[z.tabelle].has(z.id)) standVon(z.tabelle).set(z.id, kanon(z.daten));
+  return liste;
 }
 
 async function alleZeilen(tabelle, neuOben) {
@@ -256,13 +277,13 @@ export async function einstellungenLaden() {
   const o = {};
   for (const z of data) {
     o[z.schluessel] = z.wert;
-    einstellungStand.set(z.schluessel, JSON.stringify(z.wert));
+    einstellungStand.set(z.schluessel, kanon(z.wert));
   }
   return o;
 }
 
 export async function einstellungSpeichern(schluessel, wert) {
-  const json = JSON.stringify(wert);
+  const json = kanon(wert);
   if (einstellungStand.get(schluessel) === json) return null;
   const { error } = await sb.from("einstellungen").upsert({ schluessel, wert }, { onConflict: "schluessel" });
   if (error) return error.message;
@@ -289,14 +310,30 @@ export function sammlungVon(tabelle) {
   return Object.keys(SAMMLUNGEN).find((n) => tabellenVon(n).includes(tabelle)) || null;
 }
 
-/* Ist ein Datensatz aus dem Live-Abgleich schon auf unserem Stand? Dann nichts neu laden. */
-export function schonBekannt(tabelle, zeile) {
-  if (!zeile || !zeile.id) return false;
-  if (tabelle === "einstellungen") return einstellungStand.get(zeile.schluessel) === JSON.stringify(zeile.wert);
-  return standVon(tabelle).get(zeile.id) === JSON.stringify(zeile.daten || {});
+/* Ist eine Meldung aus dem Live-Abgleich schon auf unserem Stand? Dann nichts neu laden.
+   (Das sind vor allem die eigenen Änderungen, die zurückkommen.) */
+export function schonBekannt(tabelle, meldung) {
+  if (!meldung) return false;
+  if (meldung.eventType === "DELETE") {
+    const id = meldung.old && meldung.old.id;
+    return tabelle === "einstellungen" ? false : !!id && !standVon(tabelle).has(id);
+  }
+  const zeile = meldung.new;
+  if (!zeile) return false;
+  if (tabelle === "einstellungen") return einstellungStand.get(zeile.schluessel) === kanon(zeile.wert);
+  if (!zeile.id) return false;
+  return standVon(tabelle).get(zeile.id) === kanon(zeile.daten || {});
 }
 
 /* ---------- Anmeldung ---------- */
+export async function meineId() {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await sb.from("mitarbeiter").select("id").eq("auth_id", user.id).maybeSingle();
+  if (error) throw error;
+  return data ? data.id : null;
+}
+
 export async function anmelden(email, passwort) {
   const { data, error } = await sb.auth.signInWithPassword({ email: email.trim().toLowerCase(), password: passwort });
   if (error) throw error;
