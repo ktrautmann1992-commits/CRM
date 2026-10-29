@@ -292,7 +292,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.8.1 · 29.10.2026 · Firmenanteil in der Mitarbeiter-Vorschau";
+const VERSION = "v5.8.2 · 29.10.2026 · Firmenanteil in Vorschau und Provisionsübersicht";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -4253,7 +4253,7 @@ function Provisionen({ anfragen, mitarbeiter, user, onOeffnen, onListe }) {
         </div>
         {vollsicht && (
           <div className="text-sm mt-2" style={{ color: "#8B9BB0" }}>
-            ausgeschüttet {eur(summe(fix, gesamtprovision) - summe(fix, firma))}
+            ausgeschüttet {eur(firmaVon(fix).aus)}
             {sichtFirma ? " · verbleibt in der Firma " + eur(summe(fix, firma)) : ""}
           </div>
         )}
