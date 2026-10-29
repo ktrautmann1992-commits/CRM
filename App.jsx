@@ -292,7 +292,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.8 · 24.10.2026 · Datenbank und echte Anmeldung";
+const VERSION = "v5.8.1 · 29.10.2026 · Firmenanteil in der Mitarbeiter-Vorschau";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -4694,12 +4694,17 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
           )}
 
           {(() => {
+            /* Die Sätze rechnen auf die volle Gesamtprovision, bei EGC kommt
+               aber nur der Firmenanteil an. Daraus wird ausgezahlt. */
             const v = verteilung(1000, gewaehlt.id, mitarbeiter);
+            const beiEgc = (1000 * FIRMENANTEIL) / 100;
+            const firma = beiEgc - v.anteile.reduce((t, x) => t + x.betrag, 0);
             return (
               <p className="text-xs mt-3" style={{ color: C.muted }}>
                 Bei 1.000 € Gesamtprovision: {v.anteile.map((x) =>
                   x.name + " " + eur(x.betrag)).join(" · ")}
-                {istGF ? " · Firma " + eur(v.firma) : ""}
+                {istGF ? " · Firma " + eur(firma) + " (von " + eur(beiEgc) + " Firmenanteil, "
+                  + num(FIRMENANTEIL, 0) + " %)" : ""}
               </p>
             );
           })()}
