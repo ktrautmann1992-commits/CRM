@@ -292,7 +292,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.8.2 · 29.10.2026 · Firmenanteil in Vorschau und Provisionsübersicht";
+const VERSION = "v5.8.3 · 29.10.2026 · Firmenanteil nur noch aus der Datenbank";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -1193,12 +1193,14 @@ const setzeBonus = (wert) => { BONUS_EIGENAKQUISE = parseFloat(wert) || 0; };
 
 /* Anteil der Gesamtprovision, der tatsächlich bei EGC ankommt.
    Die Sätze der Vertriebspartner rechnen auf die volle Gesamtprovision,
-   ausgezahlt wird aber aus diesem Anteil. Je Versorger überschreibbar. */
-let FIRMENANTEIL = 75;
+   ausgezahlt wird aber aus diesem Anteil. Je Versorger überschreibbar.
+   Der Wert steht bewusst nicht im Code: Er kommt nur aus der Datenbank, und
+   die gibt ihn ausschließlich an die Geschäftsführung heraus. Solange er
+   fehlt, bleibt er NaN und die Firmenbeträge erscheinen als „–“. */
+let FIRMENANTEIL = NaN;
 let FIRMENANTEIL_JE_VERSORGER = {};
 const setzeFirmenanteil = (wert, jeVersorger) => {
   FIRMENANTEIL = parseFloat(wert);
-  if (isNaN(FIRMENANTEIL)) FIRMENANTEIL = 100;
   FIRMENANTEIL_JE_VERSORGER = jeVersorger || {};
 };
 const firmenanteilVon = (versorgerName) => {
@@ -5680,7 +5682,7 @@ function Versorgerliste({ versorger, setVersorger, user, standard, setStandard }
               )}
             </div>
             {darfAendern && (
-              <input value={v.anteil ?? ""} inputMode="numeric" placeholder={standard + " %"}
+              <input value={v.anteil ?? ""} inputMode="numeric" placeholder={(standard || "–") + " %"}
                 title="Eigener Anteil an der Gesamtprovision für diesen Versorger, leer = Vorgabe"
                 onChange={(e) => {
                   const w = e.target.value.replace(/[^\d]/g, "");
@@ -9833,7 +9835,7 @@ export default function App() {
   const [bonusSatz, setBonusSatz] = useState("10");
   const [tippgeber, setTippgeber] = useState([]);
   const [bonusziele, setBonusziele] = useState(BONUSZIELE_START);
-  const [firmenanteil, setFirmenanteil] = useState("75");
+  const [firmenanteil, setFirmenanteil] = useState("");
   const [listenAnsicht, setListenAnsicht] = useState(null);
   const [userId, setUserId] = useState(null);
   const [registriert, setRegistriert] = useState(null);
@@ -9969,7 +9971,7 @@ export default function App() {
     const t = setTimeout(async () => {
       const f = (await einstellungSpeichern("bonus", String(bonusSatz)))
         || (await einstellungSpeichern("bonusziele", bonusziele))
-        || (await einstellungSpeichern("firmenanteil", String(firmenanteil)));
+        || (firmenanteil !== "" && (await einstellungSpeichern("firmenanteil", String(firmenanteil))));
       if (f) setMeldung("Einstellung nicht gespeichert: " + f);
     }, 500);
     return () => clearTimeout(t);
