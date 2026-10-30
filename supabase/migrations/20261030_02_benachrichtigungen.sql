@@ -12,9 +12,9 @@
 --    bestaetigt   Versorger hat den Abschluss bestätigt → Partner
 --    ausgezahlt   Provision für ein Lieferjahr gezahlt → Empfänger
 --
---  Das gemeinsame Geheimnis liegt im Tresor (vault) unter dem Namen
---  benachrichtigung_geheimnis und als Geheimnis der Server-Funktion.
---  Es steht bewusst nicht in dieser Datei.
+--  Das gemeinsame Geheimnis erzeugt die Datenbank selbst und legt es im
+--  Tresor (vault) ab. Die Funktion prüft es über
+--  public.benachrichtigung_geheimnis_ok – nur mit dem Dienstschlüssel aufrufbar.
 -- ====================================================================
 
 create extension if not exists pg_net;
@@ -62,3 +62,19 @@ revoke all on function intern.anfragen_benachrichtigen() from public, anon, auth
 
 create trigger benachrichtigen after insert or update on public.anfragen
   for each row execute function intern.anfragen_benachrichtigen();
+
+-- ---------- Geheimnis: einmal erzeugen, nie im Klartext in Dateien ------
+do $$
+begin
+  if not exists (select 1 from vault.secrets where name = 'benachrichtigung_geheimnis') then
+    perform vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'benachrichtigung_geheimnis');
+  end if;
+end $$;
+
+create or replace function public.benachrichtigung_geheimnis_ok(p text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select decrypted_secret = p from vault.decrypted_secrets
+                   where name = 'benachrichtigung_geheimnis'), false)
+$$;
+revoke all on function public.benachrichtigung_geheimnis_ok(text) from public, anon, authenticated;
+grant execute on function public.benachrichtigung_geheimnis_ok(text) to service_role;

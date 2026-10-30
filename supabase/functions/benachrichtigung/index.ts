@@ -4,8 +4,10 @@
    Versand über das Strato-Postfach portal@egc-energie.de (SMTP, Port 465)
    an die im CRM hinterlegte E-Mail-Adresse.
 
+   Aufrufe prüft die Funktion gegen das Geheimnis im Tresor der Datenbank
+   (public.benachrichtigung_geheimnis_ok).
+
    Geheimnisse der Funktion:
-   - BENACHRICHTIGUNG_GEHEIMNIS  gleicher Wert wie im Tresor der Datenbank
    - SMTP_PASSWORT               Passwort des Postfachs portal@egc-energie.de
    - SMTP_BENUTZER               optional, Vorgabe portal@egc-energie.de */
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
@@ -48,8 +50,6 @@ Automatische Nachricht aus dem Vertriebsportal von EGC-Energie.
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return antwort(405, { fehler: "Nur POST" });
-  const geheimnis = Deno.env.get("BENACHRICHTIGUNG_GEHEIMNIS") || "";
-  if (!geheimnis || req.headers.get("x-geheimnis") !== geheimnis) return antwort(401, { fehler: "Nicht berechtigt" });
 
   let eingabe: { id?: string; ereignisse?: Ereignis[] };
   try { eingabe = await req.json(); } catch { return antwort(400, { fehler: "Ungültige Anfrage" }); }
@@ -60,6 +60,8 @@ Deno.serve(async (req) => {
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
     auth: { persistSession: false },
   });
+  const { data: ok } = await db.rpc("benachrichtigung_geheimnis_ok", { p: req.headers.get("x-geheimnis") || "" });
+  if (ok !== true) return antwort(401, { fehler: "Nicht berechtigt" });
   const { data: vorgang } = await db.from("anfragen").select("id, daten").eq("id", id).maybeSingle();
   if (!vorgang) return antwort(404, { fehler: "Vorgang nicht gefunden" });
   const a = vorgang.daten || {};
@@ -99,6 +101,15 @@ Deno.serve(async (req) => {
         titel: "Glückwunsch zum Abschluss",
         text: [`Der Versorger hat den Vertrag für <strong>${kunde}</strong> bestätigt.`,
                "Die Provision ist damit vorgemerkt. Sobald sie fällig ist, wird sie ausgezahlt."] });
+    if (e.art === "test" && e.schluessel) {
+      const empf = person(e.schluessel);
+      if (aktivMitMail(empf))
+        mails.push({ an: [empf!.daten.email], betreff: "Testmail aus dem Vertriebsportal",
+          titel: "Die E-Mail-Benachrichtigungen funktionieren",
+          text: ["Diese Testmail kommt aus dem Vertriebsportal von EGC-Energie.",
+                 "Ab jetzt erhalten Kalkulation und Vertriebspartner automatisch eine Nachricht bei neuen Anfragen, " +
+                 "Angeboten, fehlenden Unterlagen, Abschlüssen und ausgezahlten Provisionen."] });
+    }
     if (e.art === "ausgezahlt" && e.schluessel) {
       const [mid, jahr] = e.schluessel.split(":");
       const empf = person(mid);
