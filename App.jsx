@@ -1885,8 +1885,8 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         return (
           <p className="text-xs py-1.5" style={{ color: C.muted, borderTop: "1px solid " + C.line }}>
             {meinJahr ? "Darin abgezogen: " + eur(meinJahr) + " je Lieferjahr für deinen Tippgeber. " : ""}
-            {meinEinmal ? "Im ersten Lieferjahr werden einmalig " + eur(meinEinmal.betrag) +
-              " für deinen Tippgeber abgezogen." : ""}
+            {meinEinmal ? "Einmalig " + eur(meinEinmal.betrag) + " für deinen Tippgeber: Abzug im ersten " +
+              "Lieferjahr; reicht die Provision dort nicht, geht der Rest ins nächste Lieferjahr." : ""}
           </p>
         );
       })()}
@@ -9612,11 +9612,18 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
     }
     personen.forEach((x0) => {
       if (wer !== "alle" && x0.id !== wer) return;
-      plan.forEach((f) => {
+      /* einmaliger Tippgeber-Festbetrag: ab dem ersten Lieferjahr beim Träger abziehen.
+         Reicht die Provision eines Jahres nicht, geht der Rest ins nächste Lieferjahr;
+         im letzten Lieferjahr wird abgezogen, was noch offen ist. */
+      let rest = v.tippgeberEinmal
+        ? (v.tippgeberEinmal.traeger.find((t) => t.id === x0.id) || {}).betrag || 0 : 0;
+      plan.forEach((f, fi) => {
         if (x0.nurJahr1 && f.jahr !== 1) return;
-        /* einmaliger Tippgeber-Festbetrag: im ersten Lieferjahr beim Träger abziehen */
-        const einmal = f.jahr === 1 && v.tippgeberEinmal
-          ? (v.tippgeberEinmal.traeger.find((t) => t.id === x0.id) || {}).betrag || 0 : 0;
+        let einmal = 0;
+        if (rest > 0) {
+          einmal = fi === plan.length - 1 ? rest : Math.min(rest, Math.max(0, x0.betrag));
+          rest -= einmal;
+        }
         const x = einmal ? { ...x0, betrag: x0.betrag - einmal, tippgeber: (x0.tippgeber || 0) + einmal } : x0;
         const schluessel = x.id + ":" + f.jahr;
         const alt = (a.ausgezahlt || {})[x.id];
