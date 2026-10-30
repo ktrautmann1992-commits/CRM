@@ -10135,7 +10135,9 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
         if (notieren) notieren("Auszahlung",
           "Auszahlung zurückgenommen: " + z.person.name + ", " + a.kunde.firma + ", Jahr " + z.jahr);
       } else {
-        aus[z.schluessel] = { datum: heute(), von: user.name, jahr: z.jahr };
+        /* Betrag mitspeichern: steht in der E-Mail an den Empfänger */
+        aus[z.schluessel] = { datum: heute(), von: user.name, jahr: z.jahr,
+                              betrag: Math.round(z.person.betrag * 100) / 100 };
         if (notieren) notieren("Auszahlung",
           eur(z.person.betrag) + " an " + z.person.name + " für " + a.kunde.firma + ", Jahr " + z.jahr);
       }
