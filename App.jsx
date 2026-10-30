@@ -620,7 +620,7 @@ function erzeugePdf(dateiname, titel, zeilen) {
      Das Eurozeichen liegt dort auf Position 128. */
   const sauber = (t) =>
     String(t)
-      .replace(/[\\()]/g, "")
+      .replace(/\\/g, "/")
       .replace(/€/g, String.fromCharCode(128))
       .replace(/[„""]/g, '"')
       .replace(/[–—]/g, "-")
@@ -629,6 +629,8 @@ function erzeugePdf(dateiname, titel, zeilen) {
       .split("")
       .filter((z) => z.charCodeAt(0) < 256)
       .join("");
+  /* Klammern im PDF-Text maskieren statt löschen */
+  const pdfText = (t) => sauber(t).replace(/\(/g, "\\(").replace(/\)/g, "\\)");
   const umbrechen = (t, breite) => {
     const worte = sauber(t).split(" ");
     const raus = [];
@@ -674,7 +676,7 @@ function erzeugePdf(dateiname, titel, zeilen) {
     const h = 26, b = (LOGO_PDF_BREITE / LOGO_PDF_HOEHE) * h;
     c += "q " + b.toFixed(2) + " 0 0 " + h + " 48 796 cm /Im0 Do Q\n";
     /* Titel in Weiß */
-    c += "BT 1 1 1 rg /F1 15 Tf 48 770 Td (" + sauber(titel) + ") Tj ET\n";
+    c += "BT 1 1 1 rg /F1 15 Tf 48 770 Td (" + pdfText(titel) + ") Tj ET\n";
     /* Grüne Linie unter dem Kopf */
     c += "q " + gruen + " rg 0 748 595 4 re f Q\n";
 
@@ -690,10 +692,10 @@ function erzeugePdf(dateiname, titel, zeilen) {
       if (z.gross) {
         y -= 12;
         c += "q " + gruen + " rg 48 " + (y + 15) + " 52 2 re f Q\n";
-        c += "BT 0.086 0.129 0.173 rg /F1 12.5 Tf 48 " + y + " Td (" + sauber(z.text) + ") Tj ET\n";
+        c += "BT 0.086 0.129 0.173 rg /F1 12.5 Tf 48 " + y + " Td (" + pdfText(z.text) + ") Tj ET\n";
         y -= 6;
       } else {
-        c += "BT 0.086 0.129 0.173 rg /F1 9.5 Tf 48 " + y + " Td (" + sauber(z.text) + ") Tj ET\n";
+        c += "BT 0.086 0.129 0.173 rg /F1 9.5 Tf 48 " + y + " Td (" + pdfText(z.text) + ") Tj ET\n";
       }
       y -= 15;
     });
@@ -4789,11 +4791,152 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
   );
 }
 
-/* ---------- Handelsvertretervertrag (Eckdaten, Vertragstext folgt) ----------
-   Liegt beim Mitarbeiter unter `vertrag` und damit in den geschützten Stammdaten. */
+/* ---------- Vertragstexte ----------
+   Wortlaut der Geschäftsführung (Handelsvertretervertrag, Tippgebervertrag).
+   Platzhalter in geschweiften Klammern werden beim Erzeugen ersetzt.
+   Die Firmendaten von EGC (vertreten durch, Anschrift) pflegt die Geschäftsführung. */
+let FIRMENDATEN = { vertreter: "", strasse: "", ort: "" };
+const setzeFirmendaten = (f) => { FIRMENDATEN = { vertreter: "", strasse: "", ort: "", ...(f || {}) }; };
+
+const HV_PARAGRAFEN = [
+ { h: "§ 1 Vertragsverhältnis", n: [
+  "Der Handelsvertreter wird für EGC als selbstständiger Handelsvertreter im Sinne von § 84 Abs. 1 HGB tätig. Er ist in der Gestaltung seiner Tätigkeit und Arbeitszeit frei und an keinen festen Arbeitsort gebunden.",
+  "Gegenstand der Tätigkeit ist die Vermittlung von Verträgen über die Energiebeschaffungsberatung von EGC sowie über Strom- und Erdgaslieferverträge gewerblicher Kunden, die EGC mit Energieversorgern abschließt.",
+  "Der Handelsvertreter ist Vermittlungsvertreter. Er ist nicht berechtigt, Verträge im Namen von EGC oder eines Energieversorgers abzuschließen, Erklärungen für sie abzugeben oder Zahlungen entgegenzunehmen.",
+  "Ein Anstellungsverhältnis wird durch diesen Vertrag nicht begründet."] },
+ { h: "§ 2 Pflichten des Handelsvertreters", n: [
+  "Der Handelsvertreter wahrt die Interessen von EGC mit der Sorgfalt eines ordentlichen Kaufmanns (§ 86 HGB).",
+  "Er reicht Anfragen vollständig über das Vertriebsportal von EGC ein, insbesondere mit Versorger, Zählernummer, Marktlokations-ID, Jahresverbrauch und Lastgang bei RLM-Kunden, sowie der Maklervollmacht des Kunden.",
+  "Er legt Kunden nur Angebote vor, die die Kalkulation von EGC erstellt und freigegeben hat. Zusagen zu Preisen, Einsparungen oder Leistungen darüber hinaus macht er nicht.",
+  "Er verwendet Namen, Logo und Unterlagen von EGC nur in der von EGC bereitgestellten oder freigegebenen Form.",
+  "Er informiert EGC unverzüglich über alle Umstände, die für die Kundenbeziehung wesentlich sind, insbesondere über Beschwerden und Kündigungsabsichten von Kunden."] },
+ { h: "§ 3 Pflichten von EGC", n: [
+  "EGC stellt dem Handelsvertreter die erforderlichen Unterlagen, Schulungen und einen Zugang zum Vertriebsportal zur Verfügung (§ 86a HGB).",
+  "EGC informiert den Handelsvertreter über das Zustandekommen oder Scheitern vermittelter Verträge sowie über Kündigungen durch Energieversorger.",
+  "Ob und mit welchem Inhalt EGC oder ein Energieversorger einen Vertrag mit einem Kunden schließt, entscheidet EGC bzw. der Energieversorger frei."] },
+ { h: "§ 4 Kundenschutz", n: [
+  "Ein Gebietsschutz besteht nicht. Ein Anspruch auf Bezirksprovision nach § 87 Abs. 2 HGB ist ausgeschlossen.",
+  "Ein Kunde ist dem Handelsvertreter für 12 Monate ab seiner Registrierung im Vertriebsportal zugeordnet (Kundenschutz). Maßgeblich ist der Zeitpunkt der Registrierung. Kommt innerhalb dieser Frist ein Vertrag mit dem Kunden zustande, steht die Provision dem Handelsvertreter zu.",
+  "Kein Kundenschutz besteht für Kunden, die bereits Kunde von EGC sind oder mit denen EGC oder ein anderer Vertriebspartner in den letzten 12 Monaten vor der Registrierung nachweislich in Kontakt stand."] },
+ { h: "§ 5 Provision", n: [
+  /* angepasst: Gesamtprovision ist die vereinbarte, nicht die bei EGC eingehende Provision */
+  "Der Handelsvertreter erhält für jeden von ihm vermittelten Vertrag eine Provision von {P} der Gesamtprovision je Lieferjahr. Gesamtprovision ist die für den Vertrag vereinbarte Provision, in der Regel Aufschlag in ct/kWh × Jahresverbrauch (ohne Umsatzsteuer).",
+  "Der Provisionsanspruch für das erste Lieferjahr entsteht, sobald der Energieversorger den Vertragsabschluss bestätigt hat. Für jedes weitere Lieferjahr entsteht er, sobald der Energieversorger die Provision für dieses Lieferjahr an EGC gezahlt hat.",
+  "Die Provision für das erste Lieferjahr wird in der Regel innerhalb von 8 Wochen nach der Bestätigung durch den Energieversorger ausgezahlt, für jedes weitere Lieferjahr nach Zahlungseingang bei EGC. EGC rechnet monatlich über die entstandenen Provisionen ab. Die Rechte des Handelsvertreters nach § 87c HGB bleiben unberührt.",
+  "Provision fällt auch für Verlängerungen und Folgeverträge der vermittelten Kunden an, solange EGC hieraus Provision vom Energieversorger erhält.",
+  "Kündigt der Energieversorger den Liefervertrag des Kunden, entfällt der Provisionsanspruch für diesen Kunden ab dem Zeitpunkt der Kündigung.",
+  "Muss EGC eine erhaltene Provision an den Energieversorger zurückzahlen (z. B. durch Storno oder Rückbelastung), entfällt der darauf entfallende Provisionsanspruch des Handelsvertreters. Bereits gezahlte Beträge werden mit der nächsten Abrechnung verrechnet oder sind zurückzuzahlen.",
+  "Ist der Handelsvertreter umsatzsteuerpflichtig, zahlt EGC die Provision zuzüglich der gesetzlichen Umsatzsteuer im Gutschriftverfahren. Kleinunternehmer nach § 19 UStG erhalten die Provision ohne Umsatzsteuer."],
+  extra: "Bankverbindung des Handelsvertreters (IBAN): {IBAN}" },
+ { h: "§ 6 Vertriebsstruktur und Overhead", n: [
+  "Der Handelsvertreter kann mit vorheriger Zustimmung von EGC in Textform weitere Vertriebspartner gewinnen. Diese schließen einen eigenen Vertrag mit EGC und werden der Struktur des Handelsvertreters zugeordnet.",
+  "Für Verträge, die Vertriebspartner seiner Struktur vermitteln, erhält der Handelsvertreter als Overhead die Differenz zwischen seinem eigenen Provisionssatz und dem Provisionssatz des jeweiligen Vertriebspartners, bezogen auf die Gesamtprovision nach § 5. Für den Overhead gelten § 5 Nr. 2 bis 7 entsprechend.",
+  "Die Provisionssätze der Vertriebspartner und ihre Zuordnung zur Struktur legt die Geschäftsführung von EGC fest. Ist der Satz eines Vertriebspartners gleich hoch oder höher als der des Handelsvertreters, entsteht kein Overhead."] },
+ { h: "§ 7 Wettbewerbsverbot", n: [
+  "Während der Laufzeit dieses Vertrags vermittelt der Handelsvertreter weder unmittelbar noch mittelbar Strom- oder Erdgaslieferverträge oder Energieberatungsleistungen für andere Unternehmen. Er beteiligt sich auch nicht an Unternehmen, die mit EGC in diesem Bereich im Wettbewerb stehen.",
+  "Tätigkeiten in anderen Branchen bleiben erlaubt. Der Handelsvertreter zeigt EGC eine weitere Vertretung vor deren Aufnahme in Textform an.",
+  "Ein nachvertragliches Wettbewerbsverbot wird nicht vereinbart."] },
+ { h: "§ 8 Kosten, Steuern und Sozialversicherung", n: [
+  "Der Handelsvertreter trägt die Kosten seiner Tätigkeit selbst (§ 87d HGB), sofern nichts anderes in Textform vereinbart ist.",
+  "Er ist für Gewerbeanmeldung, Versteuerung seiner Einkünfte und seine soziale Absicherung selbst verantwortlich."] },
+ { h: "§ 9 Vertraulichkeit, Datenschutz und Unterlagen", n: [
+  "Beide Parteien behandeln Geschäftsgeheimnisse, Konditionen und Kundendaten vertraulich, auch nach Vertragsende.",
+  "Personenbezogene Daten werden nur zur Durchführung dieses Vertrags und nach den Vorgaben der DSGVO verarbeitet. Kundendaten werden im Vertriebsportal von EGC geführt.",
+  "Bei Vertragsende gibt der Handelsvertreter alle Unterlagen und Daten von EGC zurück bzw. löscht sie, soweit keine gesetzliche Aufbewahrungspflicht besteht. Der Zugang zum Vertriebsportal wird beendet."] },
+ { h: "§ 10 Laufzeit und Kündigung", n: [
+  "Der Vertrag beginnt mit Unterzeichnung und läuft auf unbestimmte Zeit.",
+  "Er kann im ersten Vertragsjahr mit einer Frist von 1 Monat, im zweiten mit 2 Monaten und im dritten bis fünften mit 3 Monaten gekündigt werden; danach beträgt die Frist 6 Monate. Die Kündigung ist jeweils nur zum Ende eines Kalendermonats und in Textform möglich (§ 89 HGB).",
+  "Das Recht zur fristlosen Kündigung aus wichtigem Grund (§ 89a HGB) bleibt unberührt, insbesondere bei einem Verstoß gegen § 2, § 7 oder § 9.",
+  "Für Verträge, die während der Vertragslaufzeit vermittelt wurden, zahlt EGC die Provision nach § 5 auch nach Vertragsende fort. Der Ausgleichsanspruch nach § 89b HGB bleibt unberührt."] },
+ { h: "§ 11 Schlussbestimmungen", n: [
+  "Änderungen und Ergänzungen bedürfen der Textform. Das gilt auch für die Aufhebung dieser Klausel.",
+  "Mündliche Nebenabreden bestehen nicht.",
+  "Ist eine Bestimmung unwirksam, bleiben die übrigen wirksam. An ihre Stelle tritt eine Regelung, die dem wirtschaftlichen Zweck am nächsten kommt.",
+  "Es gilt deutsches Recht. Gerichtsstand ist, soweit gesetzlich zulässig, der Sitz von EGC."] },
+];
+
+/* § 3 des Tippgebervertrags hängt von der Vergütungsart ab */
+const TG_VERGUETUNG = {
+  prozent: {
+    /* angepasst: Grundlage ist die Provision des zuständigen Vertriebspartners */
+    n1: "Der Tippgeber erhält für jeden Kunden aus einem erfolgreichen Tipp eine jährliche Vergütung von {W} der Provision, die der zuständige Vertriebspartner von EGC ({PARTNER}) für diesen Kunden im jeweiligen Lieferjahr erhält (ohne Umsatzsteuer).",
+    n2: "Die Vergütung wird je Lieferjahr einmal jährlich ausgeschüttet. Für das erste Lieferjahr erfolgt die Auszahlung in der Regel innerhalb von 8 Wochen nach der Bestätigung durch den Energieversorger. Für jedes weitere Lieferjahr zahlt EGC aus, nachdem der Energieversorger die Vergütung für dieses Lieferjahr an EGC ausgezahlt hat. EGC erstellt dazu jeweils eine Abrechnung.",
+    n3: "Der Anspruch besteht für die gesamte Laufzeit der Lieferverträge des Kunden, einschließlich Verlängerungen und Folgeverträgen, solange EGC hieraus Vergütung erhält. Er besteht auch nach Beendigung dieses Vertrags für Kunden fort, deren Tipp während der Vertragslaufzeit gemeldet wurde und innerhalb der Schutzfrist erfolgreich war.",
+    n4: "Kündigt der Energieversorger den Liefervertrag des Kunden, entfällt der Anspruch auf Vergütung für diesen Kunden ab dem Zeitpunkt der Kündigung.",
+  },
+  kwh: {
+    n1: "Der Tippgeber erhält für jeden Kunden aus einem erfolgreichen Tipp eine einmalige Vergütung von {W} je 100.000 kWh Jahresverbrauch des Kunden. Maßgeblich ist der im Liefervertrag für das erste Lieferjahr zugrunde gelegte Jahresverbrauch aller Lieferstellen des Kunden (Strom und Erdgas). Die Vergütung wird anteilig berechnet: Jahresverbrauch in kWh ÷ 100.000 × {W}. Beispiel: Bei einem Jahresverbrauch von 10.000 kWh beträgt die Vergütung {BSP}.",
+    n2: "Die Vergütung wird einmalig gezahlt, in der Regel innerhalb von 8 Wochen nach der Bestätigung durch den Energieversorger. EGC erstellt dazu eine Abrechnung.",
+    n3: "Mit der einmaligen Vergütung ist der Tipp vollständig abgegolten. Für weitere Lieferjahre, Verlängerungen und Folgeverträge des Kunden besteht kein weiterer Vergütungsanspruch.",
+    n4: "Kündigt der Energieversorger den Liefervertrag des Kunden vor der Auszahlung, entfällt der Anspruch auf Vergütung für diesen Kunden.",
+  },
+};
+
+const TG_PARAGRAFEN = [
+ { h: "§ 1 Vertragsgegenstand", n: [
+  "EGC berät gewerbliche Kunden bei der Beschaffung von Strom und Erdgas und übernimmt die Versorgerauswahl.",
+  "Der Tippgeber benennt EGC potenzielle Kunden, die an einer Energiebeschaffungsberatung interessiert sein könnten (\"Tipp\").",
+  "Der Tippgeber führt keine Beratung, Verhandlung oder Vermittlung durch. Er ist nicht berechtigt, EGC zu vertreten oder Erklärungen in deren Namen abzugeben.",
+  "Der Tippgeber ist weder Arbeitnehmer noch Handelsvertreter von EGC. Er ist in der Gestaltung seiner Tätigkeit frei und nicht verpflichtet, eine bestimmte Anzahl an Tipps zu liefern."] },
+ { h: "§ 2 Tipp-Meldung und Abschluss", n: [
+  "Der Tippgeber meldet einen Tipp in Textform (E-Mail oder Vertriebsportal) mit Firmenname, Ansprechpartner und Kontaktdaten des potenziellen Kunden.",
+  "Ein Tipp gilt als erfolgreich, sobald der Kunde einen Vertrag über EGC abgeschlossen hat und der Energieversorger den Abschluss bestätigt hat. EGC informiert den Tippgeber darüber in Textform.",
+  "Ein Vergütungsanspruch entsteht nicht, wenn der Kunde bereits Kunde von EGC ist oder EGC in den letzten 12 Monaten vor der Meldung bereits nachweislich in Kontakt mit ihm stand.",
+  "Ein gemeldeter Tipp ist für 12 Monate ab Meldung dem Tippgeber zugeordnet (Schutzfrist). Kommt innerhalb dieser Frist ein Vertrag zustande, entsteht der Vergütungsanspruch nach § 3.",
+  "Ob und mit welchem Inhalt ein Vertrag mit dem Kunden geschlossen wird, entscheidet EGC frei."] },
+ { h: "§ 3 Vergütung", n: [
+  "{N1}", "{N2}", "{N3}", "{N4}",
+  "Erstattet EGC eine bereits vereinnahmte Vergütung zurück (z. B. durch Storno oder Rückbelastung des Versorgers), wird der darauf entfallende Anteil mit der nächsten Abrechnung verrechnet oder ist vom Tippgeber zurückzuzahlen.",
+  "Ist der Tippgeber umsatzsteuerpflichtig, zahlt EGC die Vergütung zuzüglich der gesetzlichen Umsatzsteuer gegen ordnungsgemäße Rechnung oder Gutschrift. Kleinunternehmer nach § 19 UStG erhalten die Vergütung ohne Umsatzsteuer.",
+  "Mit der Vergütung sind alle Aufwendungen des Tippgebers abgegolten."],
+  extra: "Bankverbindung des Tippgebers (IBAN): ________________________________" },
+ { h: "§ 4 Pflichten des Tippgebers", n: [
+  "Der Tippgeber gibt Kontaktdaten nur weiter, wenn der potenzielle Kunde damit einverstanden ist, von EGC kontaktiert zu werden.",
+  "Er macht gegenüber Dritten keine Zusagen zu Preisen, Einsparungen oder Leistungen von EGC.",
+  "Er tritt nicht unter dem Namen oder Logo von EGC auf, sofern EGC dem nicht in Textform zugestimmt hat."] },
+ { h: "§ 5 Steuern und Sozialversicherung", p:
+  "Der Tippgeber ist für die Versteuerung seiner Vergütung und etwaige Sozialversicherungsbeiträge selbst verantwortlich. Bei einer gewerblichen Tätigkeit sorgt er selbst für eine erforderliche Gewerbeanmeldung." },
+ { h: "§ 6 Vertraulichkeit und Datenschutz", n: [
+  "Beide Parteien behandeln Geschäftsgeheimnisse und Kundendaten, die sie aus diesem Vertrag erfahren, vertraulich. Dies gilt auch nach Vertragsende.",
+  "Personenbezogene Daten werden nur zur Durchführung dieses Vertrags und nach den Vorgaben der DSGVO verarbeitet."] },
+ { h: "§ 7 Laufzeit und Kündigung", n: [
+  "Der Vertrag beginnt mit Unterzeichnung und läuft auf unbestimmte Zeit.",
+  "Jede Partei kann ihn mit einer Frist von 3 Monaten zum Monatsende in Textform kündigen.",
+  "Das Recht zur fristlosen Kündigung aus wichtigem Grund bleibt unberührt, insbesondere bei einem Verstoß gegen § 4 oder § 6."] },
+ { h: "§ 8 Schlussbestimmungen", n: [
+  "Änderungen und Ergänzungen bedürfen der Textform. Das gilt auch für die Aufhebung dieser Klausel.",
+  "Mündliche Nebenabreden bestehen nicht.",
+  "Ist eine Bestimmung unwirksam, bleiben die übrigen wirksam. An ihre Stelle tritt eine Regelung, die dem wirtschaftlichen Zweck am nächsten kommt.",
+  "Es gilt deutsches Recht. Gerichtsstand ist, soweit gesetzlich zulässig, der Sitz von EGC."] },
+];
+
+/* Paragrafen in PDF-Zeilen umsetzen; `ersetze` füllt die Platzhalter */
+function vertragsZeilen(titel, parteiZeilen, paragrafen, ersetze) {
+  const leer = "______________________";
+  const f = FIRMENDATEN;
+  const z = [];
+  z.push("Auftraggeber: EGC-Energie, vertreten durch " + (f.vertreter || leer) + ", "
+    + (f.strasse || leer) + ", " + (f.ort || leer) + ", nachfolgend \"EGC\"");
+  z.push("und");
+  parteiZeilen.forEach((x) => z.push(x));
+  z.push("schließen folgenden " + titel + ".");
+  paragrafen.forEach((s) => {
+    z.push(" ");
+    z.push({ text: s.h, gross: true });
+    if (s.p) z.push(ersetze(s.p));
+    if (s.n) s.n.forEach((t, i) => z.push((i + 1) + ". " + ersetze(t)));
+    if (s.extra) { z.push(" "); z.push(ersetze(s.extra)); }
+  });
+  return z;
+}
+
+/* ---------- Handelsvertretervertrag ----------
+   Liegt beim Mitarbeiter unter `vertrag` und damit in den geschützten Stammdaten.
+   Anschrift, Steuernummer und IBAN kommen aus den Stammdaten des Partners. */
 async function vertragPdf(m, mitarbeiter) {
   const v = m.vertrag || {};
-  const kopf = mitarbeiter.find((x) => x.id === (v.upline || m.upline));
+  const sd = m.stammdaten || {};
+  const leer = "______________________";
   const bild = async (d) => {
     if (!d) return null;
     try { return { bild: await dateiInhalt(d), breite: d.breite, hoehe: d.hoehe }; }
@@ -4801,36 +4944,25 @@ async function vertragPdf(m, mitarbeiter) {
   };
   const gf = await bild(v.gfUnterschrift);
   const vp = await bild(v.partnerUnterschrift);
-  const z = [];
-  z.push({ text: "Handelsvertretervertrag - Eckdaten", gross: true });
-  z.push("Zwischen EGC-Energie (Energate-Consulting) und dem nachstehenden Handelsvertreter.");
-  z.push(" ");
-  z.push({ text: "Handelsvertreter", gross: true });
-  z.push(m.name);
-  if (m.email) z.push(m.email);
-  const sd = m.stammdaten || {};
-  if (sd.firma) z.push(sd.firma);
-  if (sd.strasse || sd.ort) z.push([sd.strasse, [sd.plz, sd.ort].filter(Boolean).join(" ")].filter(Boolean).join(", "));
-  z.push(" ");
-  z.push({ text: "Vergütung und Struktur", gross: true });
-  z.push("Rolle: " + (v.rolle || m.rolle));
-  z.push("Provisionssatz: " + num(parseFloat(v.satz) || 0, 0) + " % der Gesamtprovision je Lieferjahr");
-  z.push("Zugeordnet an: " + (kopf ? kopf.name + " (" + kopf.rolle + ")" : "keine Zuordnung"));
-  if (v.team) z.push("Team: " + v.team);
-  if (v.anfrageVon) z.push("Strukturanfrage von " + v.anfrageVon + " am " + datum(v.anfrageDatum));
-  z.push(" ");
-  z.push("Der vollständige Vertragstext wird von der Geschäftsführung ergänzt.");
+  const satz = num(parseFloat(v.satz) || 0, 0) + " %";
+  const steuer = sd.ustId || sd.steuernummer;
+  const z = vertragsZeilen("Handelsvertretervertrag", [
+    "Handelsvertreter: " + (sd.firma ? sd.firma + " (" + m.name + ")" : m.name) + ", "
+      + (sd.strasse || leer) + ", " + ([sd.plz, sd.ort].filter(Boolean).join(" ") || leer)
+      + (steuer ? ", St.-Nr./USt-IdNr.: " + steuer : "") + ", nachfolgend \"Handelsvertreter\"",
+  ], HV_PARAGRAFEN, (t) => t.replace("{P}", satz)
+    .replace("{IBAN}", sd.iban || "________________________________"));
   z.push(" ");
   z.push({ text: "Unterschriften", gross: true });
-  z.push("Für EGC-Energie:");
+  z.push("Für EGC-Energie, " + (v.gfName || FIRMENDATEN.vertreter || leer) + ":");
   if (gf && gf.bild) z.push(gf); else z.push(" ");
-  z.push((v.gfName || "______________________________") + (v.gfDatum ? ", " + datum(v.gfDatum) : ""));
+  z.push("Ort, Datum: " + (FIRMENDATEN.ort ? FIRMENDATEN.ort.replace(/^\d+\s*/, "") + ", " : "")
+    + (v.gfDatum ? datum(v.gfDatum) : leer));
   z.push(" ");
-  z.push("Handelsvertreter:");
+  z.push("Handelsvertreter, " + m.name + ":");
   if (vp && vp.bild) z.push(vp); else z.push(" ");
-  z.push((v.partnerUnterschrift ? m.name : "______________________________")
-    + (v.partnerDatum ? ", " + datum(v.partnerDatum) : ""));
-  const pdf = erzeugePdf("handelsvertretervertrag_" + m.name.replace(/\W+/g, "_") + ".pdf",
+  z.push("Ort, Datum: " + (v.partnerDatum ? (sd.ort ? sd.ort + ", " : "") + datum(v.partnerDatum) : leer));
+  const pdf = erzeugePdf("Handelsvertretervertrag_" + m.name.replace(/\W+/g, "_") + ".pdf",
     "Handelsvertretervertrag", z);
   if (pdf) dateiLaden(pdf);
 }
@@ -5130,7 +5262,7 @@ function StrukturFreigabe({ anfrage, mitarbeiter, setMitarbeiter, strukturanfrag
 
 /* Verwaltung der Vertriebsmitarbeiter: anlegen, einladen, Sätze setzen, freigeben */
 function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus, setBonus,
-                             strukturanfragen = [], setStrukturanfragen }) {
+                             strukturanfragen = [], setStrukturanfragen, firmendaten, setFirmendaten }) {
   const [auswahl, setAuswahl] = useState(null);
   const [anfrageAuswahl, setAnfrageAuswahl] = useState(null);
   const [gfUnterschrift, setGfUnterschrift] = useState(null);
@@ -5485,6 +5617,24 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
             {eur(10 * (25 + (parseFloat(bonus) || 0)))} statt {eur(250)}.
           </p>
         </div>
+      )}
+
+      {istGF && firmendaten && (
+        <details className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}
+          open={!firmendaten.vertreter}>
+          <summary className="text-sm cursor-pointer">Firmendaten für die Verträge</summary>
+          <p className="text-xs mt-2 mb-3" style={{ color: C.muted, maxWidth: "62ch" }}>
+            Erscheinen im Handelsvertreter- und im Tippgebervertrag unter „Auftraggeber“.
+          </p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Feld label="Vertreten durch" value={firmendaten.vertreter}
+              onChange={(v) => setFirmendaten({ ...firmendaten, vertreter: v })} />
+            <Feld label="Straße und Hausnummer" value={firmendaten.strasse}
+              onChange={(v) => setFirmendaten({ ...firmendaten, strasse: v })} />
+            <Feld label="PLZ und Ort" value={firmendaten.ort}
+              onChange={(v) => setFirmendaten({ ...firmendaten, ort: v })} />
+          </div>
+        </details>
       )}
 
       {istGF && strukturanfragen.some((x) => x.status === "offen") && (
@@ -7625,16 +7775,15 @@ function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
 }
 
 /* Tippgeber des Vertriebspartners */
+/* Zwei Varianten wie im Tippgebervertrag: Festbetrag einmalig, prozentual jährlich */
 const VERGUETUNG = [
-  { value: "kwh", label: "Fester Betrag je 100.000 kWh",
-    text: "Richtet sich nach der Liefermenge des Kunden", einheit: "€ je 100.000 kWh" },
-  { value: "prozent", label: "Prozentual an deiner Provision",
-    text: "Anteil an deiner eigenen Provision, nicht an der Gesamtprovision", einheit: "%" },
+  { value: "kwh", label: "Festbetrag je 100.000 kWh, einmalig",
+    text: "Richtet sich nach dem Jahresverbrauch des Kunden, nur für das erste Lieferjahr",
+    einheit: "€ je 100.000 kWh", zahlweise: "einmal" },
+  { value: "prozent", label: "Prozentual an deiner Provision, jährlich",
+    text: "Anteil an deiner eigenen Provision, für jedes Lieferjahr", einheit: "%", zahlweise: "jaehrlich" },
 ];
-const ZAHLWEISE = [
-  { value: "einmal", label: "Einmalig", text: "Nur für das erste Lieferjahr" },
-  { value: "jaehrlich", label: "Jährlich", text: "Für jedes Lieferjahr des Vertrags" },
-];
+const zahlweiseVon = (art) => (VERGUETUNG.find((v) => v.value === art) || VERGUETUNG[0]).zahlweise;
 const TIPPGEBER_VORSCHLAG_KWH = "250";
 
 const leererTippgeber = (besitzer) => ({
@@ -7673,8 +7822,39 @@ const tippgeberText = (t) => {
    bestehende Abschlüsse nicht. */
 const tippgeberMomentaufnahme = (t) => t ? ({
   id: t.id, name: t.firma || t.name, besitzerId: t.besitzerId,
-  art: t.art, wert: t.wert, zahlweise: t.zahlweise || "einmal", datum: heute(),
+  art: t.art, wert: t.wert, zahlweise: zahlweiseVon(t.art), datum: heute(),
 }) : null;
+
+/* Tippgebervertrag zwischen EGC und dem Tippgeber, mit der freigegebenen Vergütung */
+function tippgeberVertragPdf(t, mitarbeiter, user) {
+  const partner = mitarbeiter.find((m) => m.id === t.besitzerId) || user;
+  const leer = "______________________";
+  const wert = parseFloat(String(t.wert || "").replace(",", ".")) || 0;
+  const art = t.art === "prozent" ? "prozent" : "kwh";
+  const W = art === "prozent" ? num(wert, wert % 1 ? 1 : 0) + " %" : num(wert, wert % 1 ? 2 : 0) + " €";
+  const BSP = num(wert / 10, 2) + " €";
+  const vg = TG_VERGUETUNG[art];
+  const fuell = (x) => x.replace(/\{W\}/g, W).replace("{BSP}", BSP).replace("{PARTNER}", partner.name);
+  const z = vertragsZeilen("Tippgebervertrag", [
+    "Tippgeber: " + (t.firma ? t.firma + (t.name ? " (" + t.name + ")" : "") : t.name) + ", "
+      + (t.adresse || leer) + ", nachfolgend \"Tippgeber\"",
+  ], TG_PARAGRAFEN, (x) => fuell(x === "{N1}" ? vg.n1 : x === "{N2}" ? vg.n2
+    : x === "{N3}" ? vg.n3 : x === "{N4}" ? vg.n4 : x));
+  z.push(" ");
+  z.push({ text: "Unterschriften", gross: true });
+  z.push(" ");
+  z.push("______________________________          ______________________________");
+  z.push("Ort, Datum                                            Ort, Datum");
+  z.push(" ");
+  z.push(" ");
+  z.push("______________________________          ______________________________");
+  z.push("EGC-Energie, " + (FIRMENDATEN.vertreter || "") + "                       Tippgeber, " + (t.name || t.firma));
+  z.push(" ");
+  z.push("Zuständiger Vertriebspartner: " + partner.name);
+  const pdf = erzeugePdf("Tippgebervertrag_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
+    "Tippgebervertrag", z);
+  if (pdf) dateiLaden(pdf);
+}
 
 function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
   const [auswahl, setAuswahl] = useState(null);
@@ -7702,45 +7882,15 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
     /* neue Tippgeber und geänderte Vergütung gehen erneut zur Freigabe */
     const neuPruefen = !alt || alt.status !== "freigegeben"
       || ["art", "wert", "zahlweise", "firma", "name"].some((k) => String(alt[k] ?? "") !== String(entwurf[k] ?? ""));
+    const geprueft = { ...entwurf, zahlweise: zahlweiseVon(entwurf.art) };
     const fertig = neuPruefen
-      ? { ...entwurf, status: "wartet", freigabe: null, ablehnung: "" } : entwurf;
+      ? { ...geprueft, status: "wartet", freigabe: null, ablehnung: "" } : geprueft;
     setTippgeber(alt ? tippgeber.map((t) => (t.id === entwurf.id ? fertig : t))
                      : [...tippgeber, fertig]);
     setEntwurf(null);
   };
 
-  /* Eckdaten der Tippgebervereinbarung. Der Vertragstext folgt von der Geschäftsführung. */
-  const vereinbarungPdf = (t) => {
-    const partner = mitarbeiter.find((m) => m.id === t.besitzerId) || user;
-    const z = [];
-    z.push({ text: "Tippgebervereinbarung - Eckdaten", gross: true });
-    z.push(" ");
-    z.push({ text: "Tippgeber", gross: true });
-    z.push(t.firma || t.name);
-    if (t.firma && t.name) z.push("Ansprechpartner: " + t.name);
-    if (t.adresse) z.push(t.adresse);
-    if (t.telefon || t.email) z.push([t.telefon, t.email].filter(Boolean).join(" · "));
-    z.push(" ");
-    z.push({ text: "Vertriebspartner", gross: true });
-    z.push(partner.name + " · EGC-Energie");
-    z.push(" ");
-    z.push({ text: "Vergütung", gross: true });
-    z.push((VERGUETUNG.find((v) => v.value === t.art) || {}).label + ": " + tippgeberText(t));
-    z.push(t.zahlweise === "jaehrlich"
-      ? "Die Vergütung wird für jedes Lieferjahr eines vermittelten Kunden gezahlt."
-      : "Die Vergütung wird einmalig für das erste Lieferjahr eines vermittelten Kunden gezahlt.");
-    z.push("Fällig erst, wenn der Versorger den Kunden angenommen und die Provision an");
-    z.push("EGC-Energie gezahlt hat. Sie wird mit der Provision des Vertriebspartners verrechnet.");
-    z.push(" ");
-    z.push("Datum: " + datum(heute()));
-    z.push(" ");
-    z.push(" ");
-    z.push("______________________________          ______________________________");
-    z.push("Tippgeber                                         Vertriebspartner");
-    const pdf = erzeugePdf("tippgebervereinbarung_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
-      "Tippgebervereinbarung", z);
-    if (pdf) dateiLaden(pdf);
-  };
+  const vertragPdfTippgeber = (t) => tippgeberVertragPdf(t, mitarbeiter, user);
 
   /* Auswertung: bewusst ohne Vertragsdaten */
   const auswertungPdf = (t) => {
@@ -7779,7 +7929,7 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
           <button key={v.value}
             onClick={() => setEntwurf({ ...entwurf, [feld]: v.value,
               ...(feld === "art" && v.value !== entwurf.art
-                ? { wert: v.value === "kwh" ? TIPPGEBER_VORSCHLAG_KWH : "10" } : {}) })}
+                ? { wert: v.value === "kwh" ? TIPPGEBER_VORSCHLAG_KWH : "10", zahlweise: v.zahlweise } : {}) })}
             className="w-full text-left px-3 py-2 rounded"
             style={{
               background: entwurf[feld] === v.value ? "#F1F5FA" : "#fff",
@@ -7817,15 +7967,10 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
             </div>
             <p className="text-xs mt-2" style={{ color: C.muted }}>
               {entwurf.art === "kwh"
-                ? "Vorschlag: 250 € je 100.000 kWh. Bei 400.000 kWh sind das 1.000 €."
-                : "Beispiel: Bei 10 % und 2.000 € Provision erhält der Tippgeber 200 €."}
+                ? "Vorschlag: 250 € je 100.000 kWh, einmalig. Bei 400.000 kWh sind das 1.000 €."
+                : "Beispiel: Bei 10 % und 2.000 € Provision im Jahr erhält der Tippgeber 200 € je Lieferjahr."}
               {" "}Der Betrag wird von deiner Provision abgezogen.
             </p>
-          </div>
-
-          <div>
-            <span className="block text-xs mb-2" style={{ color: C.muted }}>Wie oft wird gezahlt?</span>
-            <Wahl liste={ZAHLWEISE} feld="zahlweise" />
           </div>
 
           <Feld label="Notiz" value={entwurf.notiz} onChange={(v) => setF("notiz", v)} breit />
@@ -7888,9 +8033,11 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
         </div>
 
         <div className="flex flex-wrap gap-2 mb-5">
-          <Btn icon={FileSignature} onClick={() => vereinbarungPdf(gewaehlt)}>Vereinbarung als PDF</Btn>
+          {tippgeberFrei(gewaehlt) && (
+            <Btn icon={FileSignature} onClick={() => vertragPdfTippgeber(gewaehlt)}>Tippgebervertrag als PDF</Btn>
+          )}
           <Btn variante="hell" icon={FileText} onClick={() => auswertungPdf(gewaehlt)}>Auswertung als PDF</Btn>
-          <Btn variante="hell" onClick={() => setEntwurf({ zahlweise: "einmal", ...gewaehlt })}>Bearbeiten</Btn>
+          <Btn variante="hell" onClick={() => setEntwurf({ ...gewaehlt, zahlweise: zahlweiseVon(gewaehlt.art) })}>Bearbeiten</Btn>
           <Btn variante="gefahr" icon={Trash2}
             onClick={() => { setTippgeber(tippgeber.filter((t) => t.id !== gewaehlt.id)); setAuswahl(null); }}>
             Entfernen
@@ -7929,8 +8076,8 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
 
         <p className="text-xs mt-4" style={{ color: C.muted, maxWidth: "62ch" }}>
           Die Auswertung als PDF enthält ausschließlich Firmennamen und den Betrag für den
-          Tippgeber. Verbrauch, Laufzeit, Versorger und Aufschlag stehen nicht darin. Die
-          Vereinbarung enthält bisher nur die Eckdaten; der Vertragstext folgt.
+          Tippgeber. Verbrauch, Laufzeit, Versorger und Aufschlag stehen nicht darin. Den
+          Tippgebervertrag gibt es, sobald die Geschäftsführung den Tippgeber freigegeben hat.
         </p>
       </div>
     );
@@ -8035,7 +8182,11 @@ function TippgeberFreigabe({ tippgeber, setTippgeber, mitarbeiter, user, notiere
                   </div>
                   {t.notiz && <div className="text-xs mt-1">{t.notiz}</div>}
                 </div>
-                <TippgeberStatus t={t} />
+                <div className="text-right">
+                  <TippgeberStatus t={t} />
+                  <button className="block text-xs mt-2 ml-auto" style={{ color: C.strom }}
+                    onClick={() => tippgeberVertragPdf(t, mitarbeiter, user)}>Tippgebervertrag als PDF</button>
+                </div>
               </div>
               {!tippgeberFrei(t) && t.status !== "abgelehnt" && (
                 <div className="mt-4 pt-3 grid sm:grid-cols-2 gap-3 items-end" style={{ borderTop: "1px solid " + C.line }}>
@@ -10710,6 +10861,7 @@ export default function App() {
   const [bonusSatz, setBonusSatz] = useState("10");
   const [tippgeber, setTippgeber] = useState([]);
   const [strukturanfragen, setStrukturanfragen] = useState([]);
+  const [firmendaten, setFirmendaten] = useState({ vertreter: "", strasse: "", ort: "" });
   const [bonusziele, setBonusziele] = useState(BONUSZIELE_START);
   const [firmenanteil, setFirmenanteil] = useState("");
   const [listenAnsicht, setListenAnsicht] = useState(null);
@@ -10753,6 +10905,7 @@ export default function App() {
     if (e.bonus != null) { setBonusSatz(String(e.bonus)); setzeBonus(e.bonus); }
     if (e.bonusziele) setBonusziele({ ...BONUSZIELE_START, ...e.bonusziele });
     if (e.firmenanteil != null) setFirmenanteil(String(e.firmenanteil));
+    if (e.firmendaten) setFirmendaten({ vertreter: "", strasse: "", ort: "", ...e.firmendaten });
   };
 
   const sammlungLaden = async (n) => {
@@ -10847,11 +11000,14 @@ export default function App() {
     const t = setTimeout(async () => {
       const f = (await einstellungSpeichern("bonus", String(bonusSatz)))
         || (await einstellungSpeichern("bonusziele", bonusziele))
-        || (firmenanteil !== "" && (await einstellungSpeichern("firmenanteil", String(firmenanteil))));
+        || (firmenanteil !== "" && (await einstellungSpeichern("firmenanteil", String(firmenanteil))))
+        || (await einstellungSpeichern("firmendaten", firmendaten));
       if (f) setMeldung("Einstellung nicht gespeichert: " + f);
     }, 500);
     return () => clearTimeout(t);
-  }, [bonusSatz, bonusziele, firmenanteil, geladen, userId]);
+  }, [bonusSatz, bonusziele, firmenanteil, firmendaten, geladen, userId]);
+
+  useEffect(() => { setzeFirmendaten(firmendaten); }, [firmendaten]);
 
   /* wieder online: Liegengebliebenes speichern */
   useEffect(() => {
@@ -11536,6 +11692,7 @@ export default function App() {
     inhalt = <Partnerverwaltung mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
                user={user} notieren={notieren} bonus={bonusSatz}
                strukturanfragen={strukturanfragen} setStrukturanfragen={setStrukturanfragen}
+               firmendaten={firmendaten} setFirmendaten={setFirmendaten}
                setBonus={(v) => { setBonusSatz(v); setzeBonus(v);
                  notieren("Provisionssatz", "Bonus für Eigenakquise auf " + v + " Prozentpunkte gesetzt"); }} />;
   } else if (ansicht === "tippgeber-freigabe") {
