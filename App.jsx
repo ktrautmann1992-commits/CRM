@@ -1249,18 +1249,28 @@ const beteiligte = (a) =>
 
 const istBeteiligt = (a, id) => beteiligte(a).some((b) => b.id === id);
 
-/* Was der Tippgeber in einem Lieferjahr bekommt. Grundlage ist die Momentaufnahme
-   im Vorgang (a.tippgeber), damit spätere Änderungen am Tippgeber alte Abschlüsse
-   nicht verändern. Prozentual: Anteil an der Provision des Partners.
-   Je 100.000 kWh: fester Betrag nach Liefermenge. Einmalig: nur im 1. Lieferjahr. */
-function tippgeberBetrag(tg, partnerBetrag, a, jahr) {
-  if (!tg) return 0;
-  if (tg.zahlweise === "einmal" && (jahr || 1) > 1) return 0;
-  const wert = parseFloat(String(tg.wert || "").replace(",", ".")) || 0;
-  const b = tg.art === "prozent" ? (partnerBetrag * wert) / 100
-    : tg.art === "kwh" ? (wert * (bestaetigteMenge(a) || verbrauchGesamt(a))) / 100000
-    : 0;
-  return Math.max(0, Math.min(b, partnerBetrag));
+/* Tippgeber-Vergütung eines Vorgangs. Grundlage ist die Vergütung, die der Server beim
+   Auswählen am Vorgang ablegt (a.tippgeber: art, wert, traegerId) – so bleiben alte
+   Abschlüsse unverändert und es rechnet auch für Partner, die sie nicht sehen dürfen.
+   - prozent (jährlich): Anteil an der Provision des Trägers, je Lieferjahr.
+   - kwh (einmalig): Betrag je 100.000 kWh, im 1. Lieferjahr voll an den Tippgeber.
+     Vom Träger wird je Lieferjahr höchstens seine Provision abgezogen; der Rest geht
+     ins nächste Lieferjahr. Was nach dem letzten Jahr offen ist, trägt EGC.
+   - Ohne Vertriebspartner am Vorgang (Kunde der Geschäftsführung) zahlt EGC;
+     prozentual dann auf die Gesamtprovision. */
+const tgZahl = (w) => parseFloat(String(w ?? "").replace(",", ".")) || 0;
+const tippgeberMenge = (a) => bestaetigteMenge(a) || verbrauchGesamt(a);
+
+/* wer trägt den Tippgeber? der Partner, der ihn gewählt hat, sonst der erste Vertriebspartner */
+function tippgeberTraeger(a, mitarbeiter) {
+  const tg = a && a.tippgeber;
+  if (!tg) return null;
+  const vertrieb = beteiligte(a).filter((b) => {
+    const m = mitarbeiter.find((x) => x.id === b.id);
+    return m && ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle);
+  });
+  const gewaehlt = vertrieb.find((b) => b.id === tg.traegerId);
+  return (gewaehlt || vertrieb[0] || {}).id || null;
 }
 
 function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
@@ -1296,18 +1306,28 @@ function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
     }
   });
 
-  /* Tippgeber: geht vom Anteil seines Vertriebspartners ab, nicht von der Firma
-     und nicht von der Struktur darüber. Ausgezahlt wird er trotzdem von EGC. */
+  /* Tippgeber: geht vom Anteil des Trägers ab, nicht von der Struktur darüber.
+     Ausgezahlt wird er von EGC; ohne Träger trägt ihn EGC selbst. */
   let tippgeber = null;
   const tg = a && a.tippgeber;
-  if (tg && map[tg.besitzerId] && teile.some((b) => b.id === tg.besitzerId)) {
-    const p = map[tg.besitzerId];
-    const t = tippgeberBetrag(tg, p.betrag, a, jahr);
-    if (t > 0) {
-      p.betrag -= t;
-      p.tippgeberAbzug = t;
+  if (tg && tg.art) {
+    const j = jahr || 1;
+    const wert = tgZahl(tg.wert);
+    const traeger = tippgeberTraeger(a, mitarbeiter);
+    const p = traeger && map[traeger];
+    const basis = p ? p.betrag : 0;
+    let auszahlung = 0, abzug = 0;
+    if (tg.art === "prozent") {
+      auszahlung = ((p ? basis : g) * wert) / 100;
+      abzug = p ? Math.min(auszahlung, basis) : 0;
+    } else if (tg.art === "kwh") {
+      const gesamtTG = (wert * tippgeberMenge(a)) / 100000;
+      auszahlung = j === 1 ? gesamtTG : 0;
+      /* bei gleich hoher Provision je Jahr: bisher abgezogen (j-1) × basis */
+      abzug = p ? Math.max(0, Math.min(basis, gesamtTG - (j - 1) * basis)) : 0;
     }
-    tippgeber = { ...tg, betrag: t };
+    if (p && abzug > 0) { p.betrag -= abzug; p.tippgeberAbzug = abzug; }
+    tippgeber = { ...tg, betrag: auszahlung, abzug, traegerId: p ? traeger : null };
   }
 
   const ausgeschuettet = Object.values(map).reduce((t, x) => t + x.betrag, 0)
@@ -1804,7 +1824,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         kopfVon(i ? gesamtverteilung(a, mitarbeiter, gesamt, i + 1) : v)).reduce((t, x) => t + x, 0)
     : 0;
   const tg = v.tippgeber;
-  const sichtTippgeber = tg && (sichtStruktur || tg.besitzerId === user.id);
+  const sichtTippgeber = tg && (sichtStruktur || tg.besitzerId === user.id || tg.traegerId === user.id);
 
   return (
     <div className="rounded p-4" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
@@ -1840,9 +1860,13 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
 
       {sichtTippgeber && (
         <div className="text-xs mb-3 px-2 py-1.5 rounded" style={{ background: "#FFF8EC", color: C.gas }}>
-          Über Tippgeber gewonnen: {tg.name} · {tippgeberText(tg)}
-          {tg.betrag > 0 && <> · {eur(tg.betrag)} im 1. Lieferjahr, vom Anteil des Vertriebspartners abgezogen</>}
-          {tg.zahlweise === "einmal" && jahre > 1 ? ". Ab dem 2. Lieferjahr kein Abzug mehr." : ""}
+          Über Tippgeber gewonnen: {tg.name}{tg.art ? " · " + tippgeberText(tg) : ""}
+          {tg.art === "kwh" && tg.betrag > 0 && <> · erhält einmalig {eur(tg.betrag)}</>}
+          {tg.art === "prozent" && tg.betrag > 0 && <> · erhält {eur(tg.betrag)} je Lieferjahr</>}
+          {tg.traegerId
+            ? (tg.abzug > 0 ? <>. Vom Anteil des Vertriebspartners abgezogen: {eur(tg.abzug)} im 1. Lieferjahr
+                {tg.art === "kwh" && tg.abzug < tg.betrag ? ", der Rest in den folgenden Lieferjahren" : ""}.</> : ".")
+            : ". Kein Vertriebspartner am Vorgang: EGC trägt die Vergütung."}
         </div>
       )}
 
@@ -2102,15 +2126,15 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                     ...(v !== "Tippgeber" ? { tippgeberId: null, tippgeber: null } : {}) })}
                   options={HERKUNFT} />
                 {a.herkunft === "Tippgeber" ? (
-                  (tippgeber || []).filter((t) => t.besitzerId === user.id && tippgeberFrei(t)).length > 0 ? (
+                  tippgeberFuer(tippgeber, user.id).length > 0 ? (
                     <Select label="Welcher Tippgeber?" value={a.tippgeberId || ""}
                       onChange={(v) => {
                         const t = (tippgeber || []).find((x) => x.id === v);
-                        setA({ ...a, tippgeberId: v || null, tippgeber: tippgeberMomentaufnahme(t),
+                        setA({ ...a, tippgeberId: v || null, tippgeber: tippgeberMomentaufnahme(t, user.id),
                                herkunftDetail: t ? (t.firma || t.name) : "" });
                       }}
                       options={[{ value: "", label: "Bitte wählen" },
-                        ...(tippgeber || []).filter((t) => t.besitzerId === user.id && tippgeberFrei(t))
+                        ...tippgeberFuer(tippgeber, user.id)
                           .map((t) => ({ value: t.id, label: t.firma || t.name }))]} />
                   ) : (
                     <div>
@@ -2881,14 +2905,14 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
     tippgeberId: (a.tippgeber && a.tippgeber.id) || a.tippgeberId || "",
   });
   /* zur Auswahl stehen nur eigene, von der Geschäftsführung freigegebene Tippgeber */
-  const meineTippgeber = (tippgeber || []).filter((t) => t.besitzerId === user.id && tippgeberFrei(t));
+  const meineTippgeber = tippgeberFuer(tippgeber, user.id);
   const fragtTippgeber = istBeteiligt(a, user.id);
 
   const abschlussSenden = () => {
     const tgNeu = !fragtTippgeber ? null
       : annahme.tippgeberId
       ? (a.tippgeber && a.tippgeber.id === annahme.tippgeberId ? a.tippgeber
-         : tippgeberMomentaufnahme(meineTippgeber.find((t) => t.id === annahme.tippgeberId)))
+         : tippgeberMomentaufnahme(meineTippgeber.find((t) => t.id === annahme.tippgeberId), user.id))
       : null;
     const { tippgeberId, ...annahmeDaten } = annahme;
     onUpdate({
@@ -2955,7 +2979,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       </p>
 
       <div className="grid lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5">
+        <div className="lg:col-span-2 space-y-5 min-w-0">
           {/* Nachrichten zum Vorgang */}
           <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="flex items-baseline justify-between px-4 py-3"
@@ -3983,7 +4007,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                       onChange={(v) => setAnnahme({ ...annahme, tippgeberId: v })}
                       options={[{ value: "", label: "Nein" },
                         ...meineTippgeber.map((t) => ({ value: t.id,
-                          label: "Ja, über " + (t.firma || t.name) + " · " + tippgeberText(t) }))]} />
+                          label: "Ja, über " + tippgeberLabel(t) }))]} />
                     <p className="text-xs mt-1" style={{ color: C.muted }}>
                       {annahme.tippgeberId
                         ? "Die Vergütung des Tippgebers wird von deiner Provision abgezogen."
@@ -4177,7 +4201,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         </div>
 
         {/* Seitenspalte */}
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="text-sm mb-3">Kunde</div>
             <Zeile k="Ansprechpartner" v={a.kunde.ansprechpartner} />
@@ -5619,24 +5643,6 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
         </div>
       )}
 
-      {istGF && firmendaten && (
-        <details className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}
-          open={!firmendaten.vertreter}>
-          <summary className="text-sm cursor-pointer">Firmendaten für die Verträge</summary>
-          <p className="text-xs mt-2 mb-3" style={{ color: C.muted, maxWidth: "62ch" }}>
-            Erscheinen im Handelsvertreter- und im Tippgebervertrag unter „Auftraggeber“.
-          </p>
-          <div className="grid sm:grid-cols-3 gap-3">
-            <Feld label="Vertreten durch" value={firmendaten.vertreter}
-              onChange={(v) => setFirmendaten({ ...firmendaten, vertreter: v })} />
-            <Feld label="Straße und Hausnummer" value={firmendaten.strasse}
-              onChange={(v) => setFirmendaten({ ...firmendaten, strasse: v })} />
-            <Feld label="PLZ und Ort" value={firmendaten.ort}
-              onChange={(v) => setFirmendaten({ ...firmendaten, ort: v })} />
-          </div>
-        </details>
-      )}
-
       {istGF && strukturanfragen.some((x) => x.status === "offen") && (
         <div className="rounded overflow-hidden mb-5" style={{ background: C.card, border: "1px solid " + C.gas }}>
           <div className="px-4 py-3 text-sm" style={{ color: C.gas, borderBottom: "1px solid " + C.line }}>
@@ -6070,7 +6076,7 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
         </div>
 
         <div className="grid lg:grid-cols-3 gap-5">
-          <div className="lg:col-span-2 space-y-5">
+          <div className="lg:col-span-2 space-y-5 min-w-0">
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
               <div className="text-sm mb-3">Verbrauch und Versorgung</div>
               <div className="grid sm:grid-cols-2 gap-x-8">
@@ -6115,7 +6121,7 @@ function Leads({ leads, setLeads, mitarbeiter, user, onUebernehmen, onGelesen })
             </div>
           </div>
 
-          <div className="space-y-5">
+          <div className="space-y-5 min-w-0">
             <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
               <div className="text-sm mb-3">Kontakt</div>
               <Zeile k="Ansprechpartner" v={lead.ansprechpartner} />
@@ -7790,7 +7796,7 @@ const leererTippgeber = (besitzer) => ({
   id: "TG" + uid(), besitzerId: besitzer,
   name: "", firma: "", telefon: "", email: "", adresse: "",
   art: "kwh", wert: TIPPGEBER_VORSCHLAG_KWH, zahlweise: "einmal", notiz: "", aktiv: true,
-  angelegt: heute(), status: "wartet", freigabe: null,
+  angelegt: heute(), status: "wartet", freigabe: null, zugeordnet: [],
 });
 
 /* Jeder Tippgeber braucht die Freigabe der Geschäftsführung, bevor er auswählbar ist.
@@ -7818,12 +7824,18 @@ const tippgeberText = (t) => {
   return was + (t.zahlweise === "jaehrlich" ? ", jährlich" : ", einmalig");
 };
 
-/* Was im Vorgang festgehalten wird. Spätere Änderungen am Tippgeber ändern
-   bestehende Abschlüsse nicht. */
-const tippgeberMomentaufnahme = (t) => t ? ({
-  id: t.id, name: t.firma || t.name, besitzerId: t.besitzerId,
-  art: t.art, wert: t.wert, zahlweise: zahlweiseVon(t.art), datum: heute(),
+/* Was im Vorgang festgehalten wird. Die Vergütung (art, wert) trägt der Server
+   beim Speichern aus tippgeber_intern ein; spätere Änderungen am Tippgeber ändern
+   bestehende Abschlüsse nicht. Träger ist, wer ihn auswählt. */
+const tippgeberMomentaufnahme = (t, traegerId) => t ? ({
+  id: t.id, name: t.firma || t.name, besitzerId: t.besitzerId, traegerId: traegerId || null,
+  datum: heute(),
 }) : null;
+
+/* auswählbar: eigene oder von der Geschäftsführung zugeordnete, jeweils freigegeben */
+const tippgeberFuer = (liste, userId) => (liste || []).filter((t) => tippgeberFrei(t)
+  && (t.besitzerId === userId || (t.zugeordnet || []).includes(userId)));
+const tippgeberLabel = (t) => (t.firma || t.name) + (t.art ? " · " + tippgeberText(t) : "");
 
 /* Tippgebervertrag zwischen EGC und dem Tippgeber, mit der freigegebenen Vergütung */
 function tippgeberVertragPdf(t, mitarbeiter, user) {
@@ -8083,9 +8095,26 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
     );
   }
 
+  const zugeordnete = tippgeber.filter((t) => t.besitzerId !== user.id && (t.zugeordnet || []).includes(user.id));
+
   /* ---------- Liste ---------- */
   return (
     <div>
+      {zugeordnete.length > 0 && (
+        <div className="rounded overflow-hidden mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="px-4 py-3 text-xs" style={{ color: C.muted, borderBottom: "1px solid " + C.line }}>
+            Dir von der Geschäftsführung zugeordnet
+          </div>
+          {zugeordnete.map((t, i) => (
+            <div key={t.id} className="px-4 py-3" style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <div className="text-sm">{t.firma || t.name}</div>
+              <div className="text-xs" style={{ color: C.muted }}>
+                {[t.firma && t.name ? t.name : null, t.telefon, t.email].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <p className="text-sm" style={{ color: C.muted, maxWidth: "52ch" }}>
           Deine Tippgeber und was sie für vermittelte Kunden erhalten. Die Vergütung legst du je
@@ -8135,75 +8164,119 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
   );
 }
 
-/* Freigabe der Tippgeber durch die Geschäftsführung */
-function TippgeberFreigabe({ tippgeber, setTippgeber, mitarbeiter, user, notieren }) {
+/* Verträge (Geschäftsführung): Tippgeber freigeben und Partnern zuordnen,
+   Handelsvertreterverträge und Struktur, Firmendaten für die Verträge */
+function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfragen, user, notieren,
+                     firmendaten, setFirmendaten }) {
+  const [reiter, setReiter] = useState("tippgeber");
   const [grund, setGrund] = useState({});
-  const [alle, setAlle] = useState(false);
-  const wartend = tippgeber.filter((t) => !tippgeberFrei(t) && t.status !== "abgelehnt");
-  const liste = alle ? tippgeber : wartend;
-  const partnerVon = (t) => (mitarbeiter.find((m) => m.id === t.besitzerId) || {}).name || "unbekannt";
+  const [offenId, setOffenId] = useState(null);
+  const vertrieb = mitarbeiter.filter((m) => ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle));
+  const koepfe = mitarbeiter.filter((m) => ["Teamleiter", "Leitung Vertrieb"].includes(m.rolle));
+  const name = (id) => (mitarbeiter.find((m) => m.id === id) || {}).name || "unbekannt";
+  const kunden = (t) => anfragen.filter((a) => a.tippgeber && a.tippgeber.id === t.id
+    && ["bestaetigt", "abgeschlossen"].includes(a.status)).length;
+  const wartend = tippgeber.filter((t) => t.status !== "freigegeben" && t.status !== "abgelehnt");
 
-  const setz = (t, aend, text) => {
+  const setTG = (t, aend, text) => {
     setTippgeber(tippgeber.map((x) => (x.id === t.id ? { ...x, ...aend } : x)));
-    if (notieren) notieren("Tippgeber", text);
+    if (notieren && text) notieren("Tippgeber", text);
   };
+  const freigeben = (t, an) => setTG(t,
+    an ? { status: "freigegeben", freigabe: { von: user.name, datum: heute() }, ablehnung: "" }
+       : { status: "wartet", freigabe: null },
+    (t.firma || t.name) + " von " + name(t.besitzerId) + (an ? " freigegeben (" + tippgeberText(t) + ")" : ": Freigabe zurückgenommen"));
+  const ablehnen = (t) => setTG(t, { status: "abgelehnt", ablehnung: (grund[t.id] || "").trim(), freigabe: null },
+    (t.firma || t.name) + " von " + name(t.besitzerId) + " abgelehnt");
+  const zuordnen = (t, id, an) => {
+    const alt = t.zugeordnet || [];
+    setTG(t, { zugeordnet: an ? [...new Set([...alt, id])] : alt.filter((x) => x !== id) },
+      (t.firma || t.name) + (an ? " zugeordnet an " : " nicht mehr zugeordnet an ") + name(id));
+  };
+  /* keine Kreise in der Struktur: niemand unter sich selbst oder seinen eigenen Leuten */
+  const moeglicheKoepfe = (m) => {
+    const unter = new Set(strukturUnter(m.id, mitarbeiter).map((x) => x.id));
+    return koepfe.filter((k) => k.id !== m.id && !unter.has(k.id));
+  };
+  const strukturSetzen = (m, upline) => {
+    setMitarbeiter(mitarbeiter.map((x) => (x.id === m.id ? { ...x, upline: upline || null } : x)));
+    if (notieren) notieren("Struktur", m.name + " zugeordnet an " + (upline ? name(upline) : "niemanden"));
+  };
+  const Reiter = ({ id, children }) => (
+    <button onClick={() => { setReiter(id); setOffenId(null); }} className="px-3 py-1.5 rounded text-sm"
+      style={reiter === id ? { background: C.ink, color: "#fff" } : { background: "#fff", color: C.text, border: "1px solid " + C.line }}>
+      {children}
+    </button>
+  );
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <p className="text-sm" style={{ color: C.muted, maxWidth: "56ch" }}>
-          Tippgeber, die Vertriebspartner angelegt oder deren Vergütung sie geändert haben. Erst nach
-          deiner Freigabe können sie beim Abschluss ausgewählt werden.
-        </p>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={alle} onChange={(e) => setAlle(e.target.checked)}
-            style={{ accentColor: C.ink }} />
-          Alle Tippgeber zeigen
-        </label>
+      <div className="flex flex-wrap gap-2 mb-5">
+        <Reiter id="tippgeber">Tippgeber ({tippgeber.length}{wartend.length ? ", " + wartend.length + " offen" : ""})</Reiter>
+        <Reiter id="partner">Handelsvertreter ({vertrieb.length})</Reiter>
+        <Reiter id="firma">Firmendaten</Reiter>
       </div>
 
-      {liste.length === 0 ? (
+      {reiter === "tippgeber" && (tippgeber.length === 0 ? (
         <div className="rounded p-8 text-center text-sm" style={{ border: "1px dashed " + C.line, color: C.muted }}>
-          {alle ? "Noch keine Tippgeber angelegt." : "Keine Tippgeber warten auf Freigabe."}
+          Noch keine Tippgeber angelegt.
         </div>
       ) : (
         <div className="space-y-3">
-          {liste.map((t) => (
-            <div key={t.id} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
+          {[...wartend, ...tippgeber.filter((t) => !wartend.includes(t))].map((t) => (
+            <div key={t.id} className="rounded p-4" style={{ background: C.card,
+                 border: "1px solid " + (wartend.includes(t) ? C.gas : C.line) }}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex-1 min-w-48">
                   <div className="text-sm">{t.firma || t.name}</div>
                   <div className="text-xs" style={{ color: C.muted }}>
                     {[t.firma && t.name ? t.name : null, t.telefon, t.email, t.adresse].filter(Boolean).join(" · ")}
                   </div>
-                  <div className="text-sm mt-2">{tippgeberText(t)}</div>
+                  <div className="text-sm mt-1">{t.art ? tippgeberText(t) : "Vergütung nicht hinterlegt"}</div>
                   <div className="text-xs" style={{ color: C.muted }}>
-                    Vertriebspartner: {partnerVon(t)} · angelegt am {datum(t.angelegt)}
+                    angelegt von {name(t.besitzerId)} am {datum(t.angelegt)} · {kunden(t)} Kunden
+                    {(t.zugeordnet || []).length ? " · auch bei " + t.zugeordnet.map(name).join(", ") : ""}
                   </div>
-                  {t.notiz && <div className="text-xs mt-1">{t.notiz}</div>}
+                  {t.status === "abgelehnt" && t.ablehnung && (
+                    <div className="text-xs mt-1" style={{ color: C.warn }}>Abgelehnt: {t.ablehnung}</div>
+                  )}
                 </div>
-                <div className="text-right">
+                <div className="text-right space-y-2">
+                  <label className="flex items-center justify-end gap-2 text-sm">
+                    <input type="checkbox" checked={tippgeberFrei(t)} onChange={(e) => freigeben(t, e.target.checked)}
+                      disabled={!t.art} style={{ accentColor: C.ok, width: 18, height: 18 }} />
+                    Freigegeben
+                  </label>
                   <TippgeberStatus t={t} />
-                  <button className="block text-xs mt-2 ml-auto" style={{ color: C.strom }}
+                  <button className="block text-xs ml-auto" style={{ color: C.strom }}
                     onClick={() => tippgeberVertragPdf(t, mitarbeiter, user)}>Tippgebervertrag als PDF</button>
+                  <button className="block text-xs ml-auto" style={{ color: C.strom }}
+                    onClick={() => setOffenId(offenId === t.id ? null : t.id)}>
+                    {offenId === t.id ? "Schließen" : "Zuordnen oder ablehnen"}
+                  </button>
                 </div>
               </div>
-              {!tippgeberFrei(t) && t.status !== "abgelehnt" && (
-                <div className="mt-4 pt-3 grid sm:grid-cols-2 gap-3 items-end" style={{ borderTop: "1px solid " + C.line }}>
+              {offenId === t.id && (
+                <div className="mt-4 pt-3 grid sm:grid-cols-2 gap-4" style={{ borderTop: "1px solid " + C.line }}>
                   <div>
-                    <Btn variante="ok" icon={Check} onClick={() => setz(t,
-                      { status: "freigegeben", freigabe: { von: user.name, datum: heute() }, ablehnung: "" },
-                      "Tippgeber " + (t.firma || t.name) + " von " + partnerVon(t) + " freigegeben (" + tippgeberText(t) + ")")}>
-                      Freigeben
-                    </Btn>
+                    <div className="text-xs mb-2" style={{ color: C.muted }}>
+                      Weiteren Partnern zuordnen (sie sehen nur Name und Kontakt)
+                    </div>
+                    <div className="space-y-1.5">
+                      {vertrieb.filter((m) => m.id !== t.besitzerId).map((m) => (
+                        <label key={m.id} className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={(t.zugeordnet || []).includes(m.id)}
+                            onChange={(e) => zuordnen(t, m.id, e.target.checked)} style={{ accentColor: C.ink }} />
+                          {m.name} <span className="text-xs" style={{ color: C.muted }}>{m.rolle}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                   <div>
                     <Feld label="Begründung bei Ablehnung" value={grund[t.id] || ""}
                       onChange={(v) => setGrund({ ...grund, [t.id]: v })} />
                     <div className="mt-2">
-                      <Btn variante="gefahr" disabled={!(grund[t.id] || "").trim()} onClick={() => setz(t,
-                        { status: "abgelehnt", ablehnung: grund[t.id].trim(), freigabe: null },
-                        "Tippgeber " + (t.firma || t.name) + " von " + partnerVon(t) + " abgelehnt")}>
+                      <Btn variante="gefahr" disabled={!(grund[t.id] || "").trim()} onClick={() => ablehnen(t)}>
                         Ablehnen
                       </Btn>
                     </div>
@@ -8212,6 +8285,59 @@ function TippgeberFreigabe({ tippgeber, setTippgeber, mitarbeiter, user, notiere
               )}
             </div>
           ))}
+        </div>
+      ))}
+
+      {reiter === "partner" && (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {vertrieb.map((m, i) => {
+            const v = m.vertrag || {};
+            return (
+              <div key={m.id} className="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2"
+                   style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+                <div className="flex-1 min-w-40">
+                  <div className="text-sm">{m.name}</div>
+                  <div className="text-xs" style={{ color: C.muted }}>{m.rolle} · {num(m.satz || 0, 0)} %</div>
+                </div>
+                <div className="w-52 text-xs">
+                  <div style={{ color: v.gfUnterschrift ? C.ok : C.warn }}>
+                    {v.gfUnterschrift ? "✓ von EGC unterschrieben " + datum(v.gfDatum) : "EGC hat noch nicht unterschrieben"}
+                  </div>
+                  <div style={{ color: v.partnerUnterschrift ? C.ok : C.muted }}>
+                    {v.partnerUnterschrift ? "✓ vom Partner unterschrieben " + datum(v.partnerDatum) : "Partner hat noch nicht unterschrieben"}
+                  </div>
+                </div>
+                <div className="w-56">
+                  <Select label="Struktur" value={m.upline || ""} onChange={(x) => strukturSetzen(m, x)}
+                    options={[{ value: "", label: "Keine Zuordnung" },
+                      ...moeglicheKoepfe(m).map((k) => ({ value: k.id, label: k.name + " · " + k.rolle }))]} />
+                </div>
+                {v.gfUnterschrift && (
+                  <button className="text-xs" style={{ color: C.strom }}
+                    onClick={() => vertragPdf(m, mitarbeiter)}>Vertrag als PDF</button>
+                )}
+              </div>
+            );
+          })}
+          <p className="px-4 py-3 text-xs" style={{ color: C.muted, borderTop: "1px solid " + C.line }}>
+            Unterschreiben kannst du unter „Vertriebsmitarbeiter“ beim jeweiligen Partner.
+          </p>
+        </div>
+      )}
+
+      {reiter === "firma" && firmendaten && (
+        <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "62ch" }}>
+            Erscheinen im Handelsvertreter- und im Tippgebervertrag unter „Auftraggeber“.
+          </p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Feld label="Vertreten durch" value={firmendaten.vertreter}
+              onChange={(v) => setFirmendaten({ ...firmendaten, vertreter: v })} />
+            <Feld label="Straße und Hausnummer" value={firmendaten.strasse}
+              onChange={(v) => setFirmendaten({ ...firmendaten, strasse: v })} />
+            <Feld label="PLZ und Ort" value={firmendaten.ort}
+              onChange={(v) => setFirmendaten({ ...firmendaten, ort: v })} />
+          </div>
         </div>
       )}
     </div>
@@ -11066,7 +11192,7 @@ export default function App() {
   const offeneStrukturanfragen = user && user.rolle === "Geschäftsführung"
     ? strukturanfragen.filter((x) => x.status === "offen").length : 0;
   const wartendeTippgeber = user && user.rolle === "Geschäftsführung"
-    ? tippgeber.filter((t) => !tippgeberFrei(t) && t.status !== "abgelehnt").length : 0;
+    ? tippgeber.filter((t) => t.status !== "freigegeben" && t.status !== "abgelehnt").length : 0;
   const offeneTickets = user
     ? tickets.filter((t) => t.empfaenger === user.rolle && t.status !== "abgeschlossen").length : 0;
   const neueAuftraege = anfragen.filter((a) => a.status === "uebermittelt").length;
@@ -11408,7 +11534,7 @@ export default function App() {
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users, badge: offeneStrukturanfragen },
-      { id: "tippgeber-freigabe", label: "Tippgeber-Freigaben", icon: Users, badge: wartendeTippgeber },
+      { id: "vertraege-gf", label: "Verträge", icon: FileSignature, badge: wartendeTippgeber },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
       { id: "ziele", label: "Ziele", icon: Target },
@@ -11697,9 +11823,10 @@ export default function App() {
                firmendaten={firmendaten} setFirmendaten={setFirmendaten}
                setBonus={(v) => { setBonusSatz(v); setzeBonus(v);
                  notieren("Provisionssatz", "Bonus für Eigenakquise auf " + v + " Prozentpunkte gesetzt"); }} />;
-  } else if (ansicht === "tippgeber-freigabe") {
-    inhalt = <TippgeberFreigabe tippgeber={tippgeber} setTippgeber={setTippgeber}
-               mitarbeiter={mitarbeiter} user={user} notieren={notieren} />;
+  } else if (ansicht === "vertraege-gf") {
+    inhalt = <Vertraege tippgeber={tippgeber} setTippgeber={setTippgeber} mitarbeiter={mitarbeiter}
+               setMitarbeiter={setMitarbeiter} anfragen={anfragen} user={user} notieren={notieren}
+               firmendaten={firmendaten} setFirmendaten={setFirmendaten} />;
   } else if (ansicht === "struktur") {
     inhalt = <Strukturanfragen anfragen={strukturanfragen} setAnfragen={setStrukturanfragen} user={user} />;
   } else if (ansicht === "meine-daten") {

@@ -24,7 +24,8 @@ const BUCKET = "dateien";
 /* ---------- Sammlungen und ihre Tabellen ----------
    Jede Sammlung ist im Zustand eine Liste von Datensätzen mit `id`.
    In der Datenbank steht je Datensatz eine Zeile (id, daten).
-   `abspalten`: Felder, die in einer eigenen, strenger geschützten Tabelle liegen. */
+   `abspalten`: Felder, die in einer eigenen, strenger geschützten Tabelle liegen.
+   `buendeln`: mehrere Felder gemeinsam in einer solchen Tabelle (flach abgelegt). */
 export const SAMMLUNGEN = {
   anfragen:   { tabelle: "anfragen", neuOben: true, abspalten: { provisionErhalten: "anfragen_intern" } },
   leads:      { tabelle: "leads", neuOben: true },
@@ -37,7 +38,7 @@ export const SAMMLUNGEN = {
   akquise:    { tabelle: "akquise", neuOben: true },
   aufgaben:   { tabelle: "aufgaben" },
   protokoll:  { tabelle: "protokoll" },
-  tippgeber:  { tabelle: "tippgeber" },
+  tippgeber:  { tabelle: "tippgeber", buendeln: { tippgeber_intern: ["art", "wert", "zahlweise"] } },
   strukturanfragen: { tabelle: "strukturanfragen", neuOben: true },
 };
 
@@ -171,6 +172,11 @@ function zeilenVon(name, liste) {
       delete haupt[feld];
       zeilen.push({ tabelle: tab, id: x.id, daten: wert == null ? {} : { [feld]: wert } });
     }
+    for (const [tab, felder] of Object.entries(s.buendeln || {})) {
+      const teil = {};
+      for (const f of felder) { if (haupt[f] !== undefined) teil[f] = haupt[f]; delete haupt[f]; }
+      zeilen.push({ tabelle: tab, id: x.id, daten: teil });
+    }
     zeilen.unshift({ tabelle: s.tabelle, id: x.id, daten: haupt });
   }
   return zeilen;
@@ -181,7 +187,7 @@ function tabellenVon(name) {
   if (name === "mitarbeiter")
     return ["mitarbeiter", "mitarbeiter_konditionen", "mitarbeiter_stammdaten", "einladungen"];
   const s = SAMMLUNGEN[name];
-  return [s.tabelle, ...Object.values(s.abspalten || {})];
+  return [s.tabelle, ...Object.values(s.abspalten || {}), ...Object.keys(s.buendeln || {})];
 }
 
 /* leer: nichts drin außer Vorgabewerten (z. B. Stammdaten oder Sätze anderer,
