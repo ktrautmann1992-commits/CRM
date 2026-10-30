@@ -292,7 +292,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.8.3 · 29.10.2026 · Firmenanteil nur noch aus der Datenbank";
+const VERSION = "v5.9 · 30.10.2026 · Verträge für Tippgeber und Handelsvertreter";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -613,12 +613,12 @@ const LOGO_PDF_BREITE = 420;
 const LOGO_PDF_HOEHE = 196;
 
 /* Erzeugt ein mehrseitiges PDF im EGC-Design aus Textzeilen */
-function erzeugePdf(dateiname, titel, zeilen) {
+function erzeugePdf(dateiname, titel, zeilen, fusszeile = "EGC-Energie  ·  Energate-Consulting") {
   /* Zeichen auf die Schriftbelegung des Dokuments abbilden.
      Das Eurozeichen liegt dort auf Position 128. */
   const sauber = (t) =>
     String(t)
-      .replace(/[\\()]/g, "")
+      .replace(/\\/g, "")
       .replace(/€/g, String.fromCharCode(128))
       .replace(/[„""]/g, '"')
       .replace(/[–—]/g, "-")
@@ -627,6 +627,8 @@ function erzeugePdf(dateiname, titel, zeilen) {
       .split("")
       .filter((z) => z.charCodeAt(0) < 256)
       .join("");
+  /* Klammern im PDF-Text maskieren, statt sie zu entfernen */
+  const pdfText = (t) => sauber(t).replace(/([()])/g, "\\$1");
   const umbrechen = (t, breite) => {
     const worte = sauber(t).split(" ");
     const raus = [];
@@ -647,9 +649,14 @@ function erzeugePdf(dateiname, titel, zeilen) {
   });
 
   const proSeite = 38;
+  /* Seiten füllen; eine Überschrift rutscht mit auf die nächste Seite, statt allein unten zu stehen */
   const seiten = [];
-  for (let i = 0; i < alle.length; i += proSeite) seiten.push(alle.slice(i, i + proSeite));
-  if (!seiten.length) seiten.push([]);
+  let seite = [];
+  alle.forEach((z) => {
+    if (seite.length >= proSeite || (z.gross && seite.length >= proSeite - 3)) { seiten.push(seite); seite = []; }
+    seite.push(z);
+  });
+  if (seite.length || !seiten.length) seiten.push(seite);
 
   /* Farben: Navy #0A1626, Grün #6CB43B, Grau #6B7787 */
   const navy = "0.039 0.086 0.149";
@@ -664,7 +671,7 @@ function erzeugePdf(dateiname, titel, zeilen) {
     const h = 26, b = (LOGO_PDF_BREITE / LOGO_PDF_HOEHE) * h;
     c += "q " + b.toFixed(2) + " 0 0 " + h + " 48 796 cm /Im0 Do Q\n";
     /* Titel in Weiß */
-    c += "BT 1 1 1 rg /F1 15 Tf 48 770 Td (" + sauber(titel) + ") Tj ET\n";
+    c += "BT 1 1 1 rg /F1 15 Tf 48 770 Td (" + pdfText(titel) + ") Tj ET\n";
     /* Grüne Linie unter dem Kopf */
     c += "q " + gruen + " rg 0 748 595 4 re f Q\n";
 
@@ -673,17 +680,17 @@ function erzeugePdf(dateiname, titel, zeilen) {
       if (z.gross) {
         y -= 12;
         c += "q " + gruen + " rg 48 " + (y + 15) + " 52 2 re f Q\n";
-        c += "BT 0.086 0.129 0.173 rg /F1 12.5 Tf 48 " + y + " Td (" + sauber(z.text) + ") Tj ET\n";
+        c += "BT 0.086 0.129 0.173 rg /F1 12.5 Tf 48 " + y + " Td (" + pdfText(z.text) + ") Tj ET\n";
         y -= 6;
       } else {
-        c += "BT 0.086 0.129 0.173 rg /F1 9.5 Tf 48 " + y + " Td (" + sauber(z.text) + ") Tj ET\n";
+        c += "BT 0.086 0.129 0.173 rg /F1 9.5 Tf 48 " + y + " Td (" + pdfText(z.text) + ") Tj ET\n";
       }
       y -= 15;
     });
 
     /* Fußzeile */
     c += "q 0.85 0.87 0.89 rg 48 52 499 0.8 re f Q\n";
-    c += "BT " + grau + " rg /F1 8 Tf 48 38 Td (EGC-Energie  ·  Energate-Consulting) Tj ET\n";
+    c += "BT " + grau + " rg /F1 8 Tf 48 38 Td (" + pdfText(fusszeile) + ") Tj ET\n";
     c += "BT " + grau + " rg /F1 8 Tf 470 38 Td (Seite " + (nr + 1) + " von " + seiten.length + ") Tj ET\n";
     return c;
   });
@@ -1223,6 +1230,36 @@ const beteiligte = (a) =>
 
 const istBeteiligt = (a, id) => beteiligte(a).some((b) => b.id === id);
 
+const VERTRIEBSROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
+const zahlTG = (w) => parseFloat(String(w == null ? "" : w).replace(",", ".")) || 0;
+const mengeFuerTippgeber = (a) => (a.bestaetigung ? bestaetigteMenge(a) : verbrauchGesamt(a));
+
+/* Tippgeber-Vergütung eines Vorgangs, wie im Tippgebervertrag:
+   prozent = Prozent der Gesamtprovision, je Lieferjahr;
+   fest    = einmalig, Betrag je 100.000 kWh Jahresverbrauch (anteilig).
+   Grundlage ist die Vergütung, die der Server beim Auswählen am Vorgang ablegt
+   (tippgeberVerguetung) – so rechnet es auch für Partner, die sie nicht sehen dürfen. */
+function tippgeberAnteil(a, g) {
+  const tv = a && a.tippgeberId && a.tippgeberVerguetung;
+  if (!tv) return null;
+  const wert = zahlTG(tv.wert);
+  if (tv.art === "fest")
+    return { art: "fest", wert, betrag: (wert * mengeFuerTippgeber(a)) / 100000, einmalig: true };
+  return { art: "prozent", wert, betrag: (g * wert) / 100, einmalig: false };
+}
+
+/* Wer trägt den Tippgeber-Anteil? Hat ein Vertriebspartner den Kunden angelegt, er
+   (bei mehreren Betreuern anteilig). Ohne Handelsvertreter (Geschäftsführung) die Firma: leere Liste. */
+function tippgeberTraeger(a, mitarbeiter, betrag) {
+  const teile = beteiligte(a).filter((b) => {
+    const m = mitarbeiter.find((x) => x.id === b.id);
+    return m && VERTRIEBSROLLEN.includes(m.rolle);
+  });
+  const summe = teile.reduce((t, b) => t + (parseFloat(b.anteil) || 0), 0);
+  if (!teile.length || !summe) return [];
+  return teile.map((b) => ({ id: b.id, betrag: (betrag * (parseFloat(b.anteil) || 0)) / summe }));
+}
+
 function gesamtverteilung(a, mitarbeiter, betrag) {
   const g = betrag != null ? betrag : gesamtprovision(a);
   const quote = firmenanteilVon(a && a.bestaetigung ? a.bestaetigung.versorger : null);
@@ -1256,13 +1293,32 @@ function gesamtverteilung(a, mitarbeiter, betrag) {
     }
   });
 
+  /* Tippgeber: jährlicher Anteil wird vom Partner abgezogen, der den Kunden angelegt hat.
+     Der einmalige Festbetrag wird im ersten Lieferjahr abgezogen (siehe Abrechnung). */
+  const tg = tippgeberAnteil(a, g);
+  let tippgeberJahr = 0, tippgeberEinmal = null;
+  if (tg) {
+    const traeger = tippgeberTraeger(a, mitarbeiter, tg.betrag);
+    if (tg.einmalig) tippgeberEinmal = { betrag: tg.betrag, traeger };
+    else {
+      tippgeberJahr = tg.betrag;
+      traeger.forEach((t) => {
+        if (!map[t.id]) map[t.id] = { id: t.id, name: "", rolle: "", satz: 0, betrag: 0, bonus: 0 };
+        map[t.id].betrag -= t.betrag;
+        map[t.id].tippgeber = (map[t.id].tippgeber || 0) + t.betrag;
+      });
+    }
+  }
+
   const ausgeschuettet = Object.values(map).reduce((t, x) => t + x.betrag, 0);
   return {
     anteile: Object.values(map).sort((x, y) => y.betrag - x.betrag),
     /* Was der Firma bleibt: ihr Anteil an der Gesamtprovision abzüglich
-       aller Auszahlungen, die auf die volle Gesamtprovision gerechnet werden. */
-    firma: beiEgc - ausgeschuettet,
+       aller Auszahlungen, die auf die volle Gesamtprovision gerechnet werden,
+       und abzüglich des jährlichen Tippgeber-Anteils (den zahlt EGC aus). */
+    firma: beiEgc - ausgeschuettet - tippgeberJahr,
     beiEgc, quote, ausgeschuettet,
+    tippgeber: tg, tippgeberJahr, tippgeberEinmal,
     bonus: bonusGesamt, eigenakquise: eigen,
   };
 }
@@ -1805,6 +1861,36 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         </div>
       ))}
 
+      {v.tippgeber && (() => {
+        const einmal = v.tippgeberEinmal;
+        const meinEinmal = einmal ? einmal.traeger.find((t) => t.id === user.id) : null;
+        const meinJahr = eigen && eigen.tippgeber ? eigen.tippgeber : 0;
+        const zahltFirma = einmal ? !einmal.traeger.length
+          : !v.anteile.some((x) => x.tippgeber > 0);
+        if (sichtStruktur)
+          return (
+            <div className="flex items-center gap-3 py-1.5 text-sm" style={{ borderTop: "1px solid " + C.line }}>
+              <span className="flex-1">Tippgeber {a.herkunftDetail ? "· " + a.herkunftDetail : ""}
+                <span className="block text-xs" style={{ color: C.muted }}>
+                  {v.tippgeber.einmalig
+                    ? "einmalig, " + euroText(v.tippgeber.wert) + " je 100.000 kWh"
+                    : prozentText(v.tippgeber.wert) + " der Gesamtprovision, je Lieferjahr"}
+                  {zahltFirma ? " · trägt EGC" : " · wird vom Partner abgezogen"}
+                </span>
+              </span>
+              <span style={{ fontVariantNumeric: "tabular-nums" }}>{eur(v.tippgeber.betrag)}</span>
+            </div>
+          );
+        if (!meinJahr && !meinEinmal) return null;
+        return (
+          <p className="text-xs py-1.5" style={{ color: C.muted, borderTop: "1px solid " + C.line }}>
+            {meinJahr ? "Darin abgezogen: " + eur(meinJahr) + " je Lieferjahr für deinen Tippgeber. " : ""}
+            {meinEinmal ? "Im ersten Lieferjahr werden einmalig " + eur(meinEinmal.betrag) +
+              " für deinen Tippgeber abgezogen." : ""}
+          </p>
+        );
+      })()}
+
       {a.bestaetigung && a.bestaetigung.bonusArt !== "keine" && parseFloat(a.bestaetigung.bonus) > 0 && (
         <div className="flex items-center gap-3 py-1.5 text-sm" style={{ borderTop: "1px solid " + C.line }}>
           <span className="flex-1">Bonuszahlung Versorger
@@ -2013,23 +2099,27 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                 <Select label="Herkunft des Kunden" value={a.herkunft || "Eigenes Netzwerk"}
                   onChange={(v) => setA({ ...a, herkunft: v })} options={HERKUNFT} />
                 {a.herkunft === "Tippgeber" ? (
-                  (tippgeber || []).filter((t) => t.besitzerId === user.id).length > 0 ? (
+                  waehlbareTippgeber(tippgeber, user).length > 0 ? (
                     <Select label="Welcher Tippgeber?" value={a.tippgeberId || ""}
                       onChange={(v) => {
                         const t = (tippgeber || []).find((x) => x.id === v);
-                        setA({ ...a, tippgeberId: v || null,
+                        /* Die Vergütung legt der Server beim Speichern am Vorgang ab.
+                           Ist sie hier schon bekannt (eigener Tippgeber), sofort mitrechnen. */
+                        const tv = t && t.verguetung ? { art: t.verguetung.art, wert: t.verguetung.wert } : undefined;
+                        setA({ ...a, tippgeberId: v || null, tippgeberVerguetung: v ? tv : undefined,
                                herkunftDetail: t ? (t.firma || t.name) : "" });
                       }}
                       options={[{ value: "", label: "Bitte wählen" },
-                        ...(tippgeber || []).filter((t) => t.besitzerId === user.id)
+                        ...waehlbareTippgeber(tippgeber, user)
                           .map((t) => ({ value: t.id, label: t.firma || t.name }))]} />
                   ) : (
                     <div>
                       <Feld label="Name des Tippgebers" value={a.herkunftDetail || ""}
                         onChange={(v) => setA({ ...a, herkunftDetail: v })} />
                       <p className="text-xs mt-1" style={{ color: C.muted }}>
-                        Lege deine Tippgeber unter „Tippgeber" an, dann rechnet das Portal deren
-                        Vergütung automatisch mit.
+                        Lege deine Tippgeber unter „Tippgeber" an. Sobald die Geschäftsführung
+                        sie freigegeben hat, kannst du sie hier auswählen und das Portal rechnet
+                        ihre Vergütung automatisch mit.
                       </p>
                     </div>
                   )
@@ -6947,89 +7037,279 @@ function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
   );
 }
 
-/* Tippgeber des Vertriebspartners */
+/* ------------------------------------------------------------------ */
+/*  Verträge: Tippgebervertrag und Handelsvertretervertrag             */
+/*  Die Texte stehen hier einmal und gehen als PDF im EGC-Design raus. */
+/*  Struktur und Zuordnung stehen nur im Portal, nicht im Vertrag.     */
+/* ------------------------------------------------------------------ */
+const FIRMA_VERTRAG_LEER = { vertreter: "", strasse: "", ort: "" };
+const LINIE = "______________________________";
+
+const prozentText = (w) => num(zahlTG(w), zahlTG(w) % 1 ? 2 : 0) + " %";
+const euroText = (w) => num(zahlTG(w), zahlTG(w) % 1 ? 2 : 0) + " €";
+
+function tippgeberVertragsTexte(art, wert) {
+  const fest = art === "fest";
+  return [
+    { h: "§ 1 Vertragsgegenstand", n: [
+      "EGC berät gewerbliche Kunden bei der Beschaffung von Strom und Erdgas und übernimmt die Versorgerauswahl.",
+      "Der Tippgeber benennt EGC potenzielle Kunden, die an einer Energiebeschaffungsberatung interessiert sein könnten (Tipp).",
+      "Der Tippgeber führt keine Beratung, Verhandlung oder Vermittlung durch. Er ist nicht berechtigt, EGC zu vertreten oder Erklärungen in deren Namen abzugeben.",
+      "Der Tippgeber ist weder Arbeitnehmer noch Handelsvertreter von EGC. Er ist in der Gestaltung seiner Tätigkeit frei und nicht verpflichtet, eine bestimmte Anzahl an Tipps zu liefern."] },
+    { h: "§ 2 Tipp-Meldung und Abschluss", n: [
+      "Der Tippgeber meldet einen Tipp in Textform (E-Mail oder Vertriebsportal) mit Firmenname, Ansprechpartner und Kontaktdaten des potenziellen Kunden.",
+      "Ein Tipp gilt als erfolgreich, sobald der Kunde einen Vertrag über EGC abgeschlossen hat und der Energieversorger den Abschluss bestätigt hat. EGC informiert den Tippgeber darüber in Textform.",
+      "Ein Vergütungsanspruch entsteht nicht, wenn der Kunde bereits Kunde von EGC ist oder EGC in den letzten 12 Monaten vor der Meldung bereits nachweislich in Kontakt mit ihm stand.",
+      "Ein gemeldeter Tipp ist für 12 Monate ab Meldung dem Tippgeber zugeordnet (Schutzfrist). Kommt innerhalb dieser Frist ein Vertrag zustande, entsteht der Vergütungsanspruch nach § 3.",
+      "Ob und mit welchem Inhalt ein Vertrag mit dem Kunden geschlossen wird, entscheidet EGC frei."] },
+    { h: "§ 3 Vergütung", n: [
+      fest
+        ? "Der Tippgeber erhält für jeden Kunden aus einem erfolgreichen Tipp eine einmalige Vergütung von " + euroText(wert) +
+          " je 100.000 kWh Jahresverbrauch des Kunden. Maßgeblich ist der im Liefervertrag für das erste Lieferjahr zugrunde gelegte Jahresverbrauch aller Lieferstellen des Kunden (Strom und Erdgas). Die Vergütung wird anteilig berechnet: Jahresverbrauch in kWh ÷ 100.000 × " +
+          euroText(wert) + ". Beispiel: Bei einem Jahresverbrauch von 10.000 kWh beträgt die Vergütung " + euroText(zahlTG(wert) / 10) + "."
+        : "Der Tippgeber erhält für jeden Kunden aus einem erfolgreichen Tipp eine jährliche Vergütung von " + prozentText(wert) +
+          " der Gesamtprovision des Kunden je Lieferjahr. Gesamtprovision ist der vereinbarte Aufschlag in ct/kWh multipliziert mit dem bestätigten Jahresverbrauch des Kunden, ohne Umsatzsteuer.",
+      fest
+        ? "Die Vergütung wird einmalig gezahlt, in der Regel innerhalb von 8 Wochen nach der Bestätigung durch den Energieversorger. EGC erstellt dazu eine Abrechnung."
+        : "Die Vergütung wird je Lieferjahr einmal jährlich ausgeschüttet. Für das erste Lieferjahr erfolgt die Auszahlung in der Regel innerhalb von 8 Wochen nach der Bestätigung durch den Energieversorger. Für jedes weitere Lieferjahr zahlt EGC aus, nachdem der Energieversorger die Vergütung für dieses Lieferjahr an EGC ausgezahlt hat. EGC erstellt dazu jeweils eine Abrechnung.",
+      fest
+        ? "Mit der einmaligen Vergütung ist der Tipp vollständig abgegolten. Für weitere Lieferjahre, Verlängerungen und Folgeverträge des Kunden besteht kein weiterer Vergütungsanspruch."
+        : "Der Anspruch besteht für die gesamte Laufzeit der Lieferverträge des Kunden, einschließlich Verlängerungen und Folgeverträgen, solange EGC hieraus Vergütung erhält. Er besteht auch nach Beendigung dieses Vertrags für Kunden fort, deren Tipp während der Vertragslaufzeit gemeldet wurde und innerhalb der Schutzfrist erfolgreich war.",
+      fest
+        ? "Kündigt der Energieversorger den Liefervertrag des Kunden vor der Auszahlung, entfällt der Anspruch auf Vergütung für diesen Kunden."
+        : "Kündigt der Energieversorger den Liefervertrag des Kunden, entfällt der Anspruch auf Vergütung für diesen Kunden ab dem Zeitpunkt der Kündigung.",
+      "Erstattet EGC eine bereits vereinnahmte Vergütung zurück (z. B. durch Storno oder Rückbelastung des Versorgers), wird der darauf entfallende Anteil mit der nächsten Abrechnung verrechnet oder ist vom Tippgeber zurückzuzahlen.",
+      "Ist der Tippgeber umsatzsteuerpflichtig, zahlt EGC die Vergütung zuzüglich der gesetzlichen Umsatzsteuer gegen ordnungsgemäße Rechnung oder Gutschrift. Kleinunternehmer nach § 19 UStG erhalten die Vergütung ohne Umsatzsteuer.",
+      "Mit der Vergütung sind alle Aufwendungen des Tippgebers abgegolten."],
+      extra: "Bankverbindung des Tippgebers (IBAN): " + LINIE },
+    { h: "§ 4 Pflichten des Tippgebers", n: [
+      "Der Tippgeber gibt Kontaktdaten nur weiter, wenn der potenzielle Kunde damit einverstanden ist, von EGC kontaktiert zu werden.",
+      "Er macht gegenüber Dritten keine Zusagen zu Preisen, Einsparungen oder Leistungen von EGC.",
+      "Er tritt nicht unter dem Namen oder Logo von EGC auf, sofern EGC dem nicht in Textform zugestimmt hat."] },
+    { h: "§ 5 Steuern und Sozialversicherung", p:
+      "Der Tippgeber ist für die Versteuerung seiner Vergütung und etwaige Sozialversicherungsbeiträge selbst verantwortlich. Bei einer gewerblichen Tätigkeit sorgt er selbst für eine erforderliche Gewerbeanmeldung." },
+    { h: "§ 6 Vertraulichkeit und Datenschutz", n: [
+      "Beide Parteien behandeln Geschäftsgeheimnisse und Kundendaten, die sie aus diesem Vertrag erfahren, vertraulich. Dies gilt auch nach Vertragsende.",
+      "Personenbezogene Daten werden nur zur Durchführung dieses Vertrags und nach den Vorgaben der DSGVO verarbeitet."] },
+    { h: "§ 7 Laufzeit und Kündigung", n: [
+      "Der Vertrag beginnt mit Unterzeichnung und läuft auf unbestimmte Zeit.",
+      "Jede Partei kann ihn mit einer Frist von 3 Monaten zum Monatsende in Textform kündigen.",
+      "Das Recht zur fristlosen Kündigung aus wichtigem Grund bleibt unberührt, insbesondere bei einem Verstoß gegen § 4 oder § 6."] },
+    { h: "§ 8 Schlussbestimmungen", n: SCHLUSS },
+  ];
+}
+
+const SCHLUSS = [
+  "Änderungen und Ergänzungen bedürfen der Textform. Das gilt auch für die Aufhebung dieser Klausel.",
+  "Mündliche Nebenabreden bestehen nicht.",
+  "Ist eine Bestimmung unwirksam, bleiben die übrigen wirksam. An ihre Stelle tritt eine Regelung, die dem wirtschaftlichen Zweck am nächsten kommt.",
+  "Es gilt deutsches Recht. Gerichtsstand ist, soweit gesetzlich zulässig, der Sitz von EGC."];
+
+function handelsvertreterVertragsTexte(satz) {
+  return [
+    { h: "§ 1 Vertragsverhältnis", n: [
+      "Der Handelsvertreter wird für EGC als selbstständiger Handelsvertreter im Sinne von § 84 Abs. 1 HGB tätig. Er ist in der Gestaltung seiner Tätigkeit und Arbeitszeit frei und an keinen festen Arbeitsort gebunden.",
+      "Gegenstand der Tätigkeit ist die Vermittlung von Verträgen über die Energiebeschaffungsberatung von EGC sowie über Strom- und Erdgaslieferverträge gewerblicher Kunden, die EGC mit Energieversorgern abschließt.",
+      "Der Handelsvertreter ist Vermittlungsvertreter. Er ist nicht berechtigt, Verträge im Namen von EGC oder eines Energieversorgers abzuschließen, Erklärungen für sie abzugeben oder Zahlungen entgegenzunehmen.",
+      "Ein Anstellungsverhältnis wird durch diesen Vertrag nicht begründet."] },
+    { h: "§ 2 Pflichten des Handelsvertreters", n: [
+      "Der Handelsvertreter wahrt die Interessen von EGC mit der Sorgfalt eines ordentlichen Kaufmanns (§ 86 HGB).",
+      "Er reicht Anfragen vollständig über das Vertriebsportal von EGC ein, insbesondere mit Versorger, Zählernummer, Marktlokations-ID, Jahresverbrauch und Lastgang bei RLM-Kunden, sowie der Maklervollmacht des Kunden.",
+      "Er legt Kunden nur Angebote vor, die die Kalkulation von EGC erstellt und freigegeben hat. Zusagen zu Preisen, Einsparungen oder Leistungen darüber hinaus macht er nicht.",
+      "Er verwendet Namen, Logo und Unterlagen von EGC nur in der von EGC bereitgestellten oder freigegebenen Form.",
+      "Er informiert EGC unverzüglich über alle Umstände, die für die Kundenbeziehung wesentlich sind, insbesondere über Beschwerden und Kündigungsabsichten von Kunden."] },
+    { h: "§ 3 Pflichten von EGC", n: [
+      "EGC stellt dem Handelsvertreter die erforderlichen Unterlagen, Schulungen und einen Zugang zum Vertriebsportal zur Verfügung (§ 86a HGB).",
+      "EGC informiert den Handelsvertreter über das Zustandekommen oder Scheitern vermittelter Verträge sowie über Kündigungen durch Energieversorger.",
+      "Ob und mit welchem Inhalt EGC oder ein Energieversorger einen Vertrag mit einem Kunden schließt, entscheidet EGC bzw. der Energieversorger frei."] },
+    { h: "§ 4 Kundenschutz", n: [
+      "Ein Gebietsschutz besteht nicht. Ein Anspruch auf Bezirksprovision nach § 87 Abs. 2 HGB ist ausgeschlossen.",
+      "Ein Kunde ist dem Handelsvertreter für 12 Monate ab seiner Registrierung im Vertriebsportal zugeordnet (Kundenschutz). Kommt innerhalb dieser Frist ein Vertrag mit dem Kunden zustande, steht die Provision dem Handelsvertreter zu.",
+      "Kein Kundenschutz besteht für Kunden, die bereits Kunde von EGC sind oder mit denen EGC oder ein anderer Vertriebspartner in den letzten 12 Monaten vor der Registrierung nachweislich in Kontakt stand."] },
+    { h: "§ 5 Provision", n: [
+      "Der Handelsvertreter erhält für jeden von ihm vermittelten Vertrag eine Provision von " + prozentText(satz) +
+        " der Gesamtprovision je Lieferjahr. Gesamtprovision ist der vereinbarte Aufschlag in ct/kWh multipliziert mit dem bestätigten Jahresverbrauch des Kunden, ohne Umsatzsteuer.",
+      "Der Provisionsanspruch für das erste Lieferjahr entsteht, sobald der Energieversorger den Vertragsabschluss bestätigt hat. Für jedes weitere Lieferjahr entsteht er, sobald der Energieversorger die Provision für dieses Lieferjahr an EGC gezahlt hat.",
+      "Die Provision für das erste Lieferjahr wird in der Regel innerhalb von 8 Wochen nach der Bestätigung durch den Energieversorger ausgezahlt, für jedes weitere Lieferjahr nach Zahlungseingang bei EGC. EGC rechnet monatlich über die entstandenen Provisionen ab. Die Rechte des Handelsvertreters nach § 87c HGB bleiben unberührt.",
+      "Provision fällt auch für Verlängerungen und Folgeverträge der vermittelten Kunden an, solange EGC hieraus Provision vom Energieversorger erhält.",
+      "Kündigt der Energieversorger den Liefervertrag des Kunden, entfällt der Provisionsanspruch für diesen Kunden ab dem Zeitpunkt der Kündigung.",
+      "Muss EGC eine erhaltene Provision an den Energieversorger zurückzahlen (z. B. durch Storno oder Rückbelastung), entfällt der darauf entfallende Provisionsanspruch des Handelsvertreters. Bereits gezahlte Beträge werden mit der nächsten Abrechnung verrechnet oder sind zurückzuzahlen.",
+      "Hat der Handelsvertreter einen Kunden über einen Tippgeber gewonnen, trägt er dessen Vergütung. EGC zahlt sie an den Tippgeber aus und verrechnet sie mit der Provision des Handelsvertreters.",
+      "Ist der Handelsvertreter umsatzsteuerpflichtig, zahlt EGC die Provision zuzüglich der gesetzlichen Umsatzsteuer im Gutschriftverfahren. Kleinunternehmer nach § 19 UStG erhalten die Provision ohne Umsatzsteuer."],
+      extra: "Bankverbindung des Handelsvertreters (IBAN): " + LINIE },
+    { h: "§ 6 Vertriebsstruktur und Overhead", n: [
+      "Der Handelsvertreter kann mit vorheriger Zustimmung von EGC in Textform weitere Vertriebspartner gewinnen. Diese schließen einen eigenen Vertrag mit EGC.",
+      "Für Verträge, die Vertriebspartner seiner Struktur vermitteln, erhält der Handelsvertreter als Overhead die Differenz zwischen seinem eigenen Provisionssatz und dem Provisionssatz des jeweiligen Vertriebspartners, bezogen auf die Gesamtprovision nach § 5. Für den Overhead gelten § 5 Nr. 2 bis 6 entsprechend.",
+      "Die Provisionssätze der Vertriebspartner und ihre Zuordnung zur Struktur legt die Geschäftsführung von EGC fest. Ist der Satz eines Vertriebspartners gleich hoch oder höher als der des Handelsvertreters, entsteht kein Overhead."] },
+    { h: "§ 7 Wettbewerbsverbot", n: [
+      "Während der Laufzeit dieses Vertrags vermittelt der Handelsvertreter weder unmittelbar noch mittelbar Strom- oder Erdgaslieferverträge oder Energieberatungsleistungen für andere Unternehmen. Er beteiligt sich auch nicht an Unternehmen, die mit EGC in diesem Bereich im Wettbewerb stehen.",
+      "Tätigkeiten in anderen Branchen bleiben erlaubt. Der Handelsvertreter zeigt EGC eine weitere Vertretung vor deren Aufnahme in Textform an.",
+      "Ein nachvertragliches Wettbewerbsverbot wird nicht vereinbart."] },
+    { h: "§ 8 Kosten, Steuern und Sozialversicherung", n: [
+      "Der Handelsvertreter trägt die Kosten seiner Tätigkeit selbst (§ 87d HGB), sofern nichts anderes in Textform vereinbart ist.",
+      "Er ist für Gewerbeanmeldung, Versteuerung seiner Einkünfte und seine soziale Absicherung selbst verantwortlich."] },
+    { h: "§ 9 Vertraulichkeit, Datenschutz und Unterlagen", n: [
+      "Beide Parteien behandeln Geschäftsgeheimnisse, Konditionen und Kundendaten vertraulich, auch nach Vertragsende.",
+      "Personenbezogene Daten werden nur zur Durchführung dieses Vertrags und nach den Vorgaben der DSGVO verarbeitet. Kundendaten werden im Vertriebsportal von EGC geführt.",
+      "Bei Vertragsende gibt der Handelsvertreter alle Unterlagen und Daten von EGC zurück bzw. löscht sie, soweit keine gesetzliche Aufbewahrungspflicht besteht. Der Zugang zum Vertriebsportal wird beendet."] },
+    { h: "§ 10 Laufzeit und Kündigung", n: [
+      "Der Vertrag beginnt mit Unterzeichnung und läuft auf unbestimmte Zeit.",
+      "Er kann im ersten Vertragsjahr mit einer Frist von 1 Monat, im zweiten mit 2 Monaten und im dritten bis fünften mit 3 Monaten gekündigt werden; danach beträgt die Frist 6 Monate. Die Kündigung ist jeweils nur zum Ende eines Kalendermonats und in Textform möglich (§ 89 HGB).",
+      "Das Recht zur fristlosen Kündigung aus wichtigem Grund (§ 89a HGB) bleibt unberührt, insbesondere bei einem Verstoß gegen § 2, § 7 oder § 9.",
+      "Für Verträge, die während der Vertragslaufzeit vermittelt wurden, zahlt EGC die Provision nach § 5 auch nach Vertragsende fort. Der Ausgleichsanspruch nach § 89b HGB bleibt unberührt."] },
+    { h: "§ 11 Schlussbestimmungen", n: SCHLUSS },
+  ];
+}
+
+/* Zeilen für erzeugePdf: Parteien, Paragrafen, Unterschriften */
+function vertragsPdf(titel, dateiname, firma, partei, rolle, texte) {
+  const f = { ...FIRMA_VERTRAG_LEER, ...(firma || {}) };
+  const z = [];
+  z.push({ text: titel, gross: true });
+  z.push("Zwischen");
+  z.push("EGC-Energie, vertreten durch " + (f.vertreter || LINIE));
+  z.push((f.strasse || LINIE) + ", " + (f.ort || LINIE));
+  z.push("- nachfolgend EGC -");
+  z.push("und");
+  partei.forEach((x) => z.push(x || LINIE));
+  z.push("- nachfolgend " + rolle + " -");
+  z.push("wird folgender " + titel + " geschlossen.");
+  texte.forEach((s) => {
+    z.push(" ");
+    z.push({ text: s.h, gross: true });
+    if (s.p) z.push(s.p);
+    (s.n || []).forEach((t, i) => z.push((i + 1) + ". " + t));
+    if (s.extra) { z.push(" "); z.push(s.extra); }
+  });
+  z.push(" ");
+  z.push({ text: "Unterschriften", gross: true });
+  z.push(" ");
+  z.push("Ort, Datum: " + LINIE + "          Ort, Datum: " + LINIE);
+  z.push(" ");
+  z.push(" ");
+  z.push(LINIE + "          " + LINIE);
+  z.push("EGC-Energie, " + (f.vertreter || "") + "          " + rolle + ", " + (partei[0] || ""));
+  const pdf = erzeugePdf(dateiname.replace(/[^\wÄÖÜäöüß.-]+/g, "_") + ".pdf", titel, z, "EGC-Energie  ·  " + titel);
+  if (pdf) dateiLaden(pdf);
+}
+
+const tippgeberVertragPdf = (t, firma) => {
+  const vg = t.verguetung || {};
+  vertragsPdf("Tippgebervertrag", "Tippgebervertrag_" + (t.firma || t.name), firma,
+    [t.firma ? t.firma + (t.name ? ", " + t.name : "") : t.name, t.strasse || t.adresse, t.plzort],
+    "Tippgeber", tippgeberVertragsTexte(vg.art, vg.wert));
+};
+
+const handelsvertreterVertragPdf = (m, firma) => {
+  const sd = m.stammdaten || {};
+  vertragsPdf("Handelsvertretervertrag", "Handelsvertretervertrag_" + m.name, firma,
+    [sd.firma ? sd.firma + ", " + m.name : m.name, sd.strasse, [sd.plz, sd.ort].filter(Boolean).join(" "),
+     sd.ustId ? "USt-IdNr.: " + sd.ustId : sd.steuernummer ? "Steuernummer: " + sd.steuernummer : ""].filter((x, i) => i < 3 || x),
+    "Handelsvertreter", handelsvertreterVertragsTexte(m.satz));
+};
+
+/* ------------------------------------------------------------------ */
+/*  Tippgeber des Vertriebspartners                                    */
+/* ------------------------------------------------------------------ */
 const VERGUETUNG = [
-  { value: "prozent", label: "Prozentual an der Provision",
-    text: "Anteil an der Provision des Partners, je Lieferjahr", einheit: "%" },
-  { value: "fest", label: "Fester Betrag je Lieferjahr",
-    text: "Gleichbleibender Betrag für jedes Lieferjahr", einheit: "€" },
-  { value: "einmal", label: "Einmalzahlung",
-    text: "Einmalig bei Abschluss des Kunden", einheit: "€" },
+  { value: "prozent", label: "Prozentual, jährlich",
+    text: "Prozent der Gesamtprovision des Kunden, je Lieferjahr", einheit: "%" },
+  { value: "fest", label: "Festbetrag, einmalig",
+    text: "Einmaliger Betrag je 100.000 kWh Jahresverbrauch, anteilig", einheit: "€ je 100.000 kWh" },
 ];
 
 const leererTippgeber = (besitzer) => ({
   id: "TG" + uid(), besitzerId: besitzer,
-  name: "", firma: "", telefon: "", email: "", adresse: "",
-  art: "prozent", wert: "10", notiz: "", aktiv: true,
-  angelegt: heute(),
+  name: "", firma: "", telefon: "", email: "", strasse: "", plzort: "",
+  notiz: "", aktiv: true, angelegt: heute(), freigabe: null, zugeordnet: [],
+  verguetung: { art: "prozent", wert: "10", vertrag: null },
 });
 
-/* Was bekommt der Tippgeber für einen Kunden je Lieferjahr? */
-function tippgeberProvision(t, a, mitarbeiter) {
-  const eigen = anteilVon(a, t.besitzerId, mitarbeiter);
-  const wert = parseFloat(String(t.wert).replace(",", ".")) || 0;
-  if (t.art === "prozent") return (eigen * wert) / 100;
-  if (t.art === "fest") return wert;
-  return 0;
-}
+const tgFreigegeben = (t) => !!(t && t.freigabe);
+const tgName = (t) => (t ? t.firma || t.name || "Tippgeber" : "Tippgeber");
+const tgVerguetungText = (vg) => !vg ? "–"
+  : vg.art === "fest" ? euroText(vg.wert) + " je 100.000 kWh, einmalig"
+  : prozentText(vg.wert) + " der Gesamtprovision, jährlich";
 
-function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
+/* Welche Tippgeber kann jemand an einem Vorgang auswählen? Freigegebene,
+   eigene oder zugeordnete; die Geschäftsführung alle freigegebenen. */
+const waehlbareTippgeber = (tippgeber, user) => (tippgeber || []).filter((t) =>
+  tgFreigegeben(t) && (user.rolle === "Geschäftsführung" || t.besitzerId === user.id
+    || (t.zugeordnet || []).includes(user.id)));
+
+/* Was bekommt der Tippgeber für diesen Kunden? */
+const tippgeberBetrag = (a) => {
+  const tg = tippgeberAnteil(a, gesamtprovision(a));
+  return tg ? tg.betrag : 0;
+};
+
+const FreigabeMarke = ({ t }) => (
+  <span className="text-xs px-1.5 py-0.5 rounded whitespace-nowrap"
+    style={tgFreigegeben(t)
+      ? { background: "#F1F7F0", color: C.ok, border: "1px solid " + C.ok }
+      : { background: "#FCF6EE", color: C.gas, border: "1px solid " + C.gas }}>
+    {tgFreigegeben(t) ? "freigegeben" : "Freigabe ausstehend"}
+  </span>
+);
+
+function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user, firmaVertrag }) {
   const [auswahl, setAuswahl] = useState(null);
   const [entwurf, setEntwurf] = useState(null);
 
   const meine = tippgeber.filter((t) => t.besitzerId === user.id);
-  const gewaehlt = tippgeber.find((t) => t.id === auswahl);
+  const zugeordnete = tippgeber.filter((t) => t.besitzerId !== user.id && (t.zugeordnet || []).includes(user.id));
+  const gewaehlt = meine.find((t) => t.id === auswahl);
 
   const kundenVon = (t) => anfragen.filter((a) =>
     a.tippgeberId === t.id && ["bestaetigt", "abgeschlossen"].includes(a.status));
-
-  const summe = (t) => kundenVon(t).reduce((x, a) => x + tippgeberProvision(t, a, mitarbeiter), 0);
-  const einmalSumme = (t) => t.art === "einmal"
-    ? kundenVon(t).length * (parseFloat(String(t.wert).replace(",", ".")) || 0) : 0;
+  const summe = (t) => kundenVon(t).reduce((x, a) => x + tippgeberBetrag(a), 0);
+  const einmalig = (t) => (t.verguetung || {}).art === "fest";
 
   const speichern = () => {
     const da = tippgeber.some((t) => t.id === entwurf.id);
     setTippgeber(da ? tippgeber.map((t) => (t.id === entwurf.id ? entwurf : t))
                     : [...tippgeber, entwurf]);
+    setAuswahl(entwurf.id);
     setEntwurf(null);
+  };
+
+  const vertragErstellen = (t) => {
+    tippgeberVertragPdf(t, firmaVertrag);
+    const neu = { ...t, verguetung: { ...(t.verguetung || {}), vertrag: heute() } };
+    if (!tgFreigegeben(t)) setTippgeber(tippgeber.map((x) => (x.id === t.id ? neu : x)));
   };
 
   /* Auswertung: bewusst ohne Vertragsdaten */
   const auswertungPdf = (t) => {
     const kunden = kundenVon(t);
     const z = [];
-    z.push({ text: t.firma || t.name, gross: true });
+    z.push({ text: tgName(t), gross: true });
     if (t.firma && t.name) z.push("Ansprechpartner: " + t.name);
-    if (t.adresse) z.push(t.adresse);
+    const ans = [t.strasse || t.adresse, t.plzort].filter(Boolean).join(", ");
+    if (ans) z.push(ans);
     z.push(" ");
-    z.push("Vermittelt über " + (mitarbeiter.find((m) => m.id === t.besitzerId) || {}).name);
-    z.push("Vergütung: " + (VERGUETUNG.find((v) => v.value === t.art) || {}).label +
-           " · " + t.wert + (t.art === "prozent" ? " %" : " €"));
+    z.push("Vergütung: " + tgVerguetungText(t.verguetung));
     z.push(" ");
     z.push({ text: "Vermittelte Kunden", gross: true });
     if (!kunden.length) z.push("Noch keine abgeschlossenen Kunden.");
-    kunden.forEach((a) => {
-      const betrag = t.art === "einmal"
-        ? (parseFloat(String(t.wert).replace(",", ".")) || 0)
-        : tippgeberProvision(t, a, mitarbeiter);
-      z.push(a.kunde.firma + "   " + eur(betrag) +
-             (t.art === "einmal" ? "  (einmalig)" : "  je Lieferjahr"));
-    });
+    kunden.forEach((a) => z.push(a.kunde.firma + "   " + eur(tippgeberBetrag(a)) +
+      (einmalig(t) ? "  einmalig" : "  je Lieferjahr")));
     z.push(" ");
-    const gesamt = t.art === "einmal" ? einmalSumme(t) : summe(t);
-    z.push({ text: "Gesamt " + eur(gesamt) +
-             (t.art === "einmal" ? " einmalig" : " je Lieferjahr"), gross: true });
+    z.push({ text: "Gesamt " + eur(summe(t)) + (einmalig(t) ? " einmalig" : " je Lieferjahr"), gross: true });
     z.push(" ");
     z.push("Erstellt am " + datum(heute()) + " · EGC-Energie");
-    const pdf = erzeugePdf("tippgeber_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
-      "Tippgeberabrechnung", z);
+    const pdf = erzeugePdf("tippgeber_" + tgName(t).replace(/\W+/g, "_") + ".pdf",
+      "Tippgeberabrechnung", z, "EGC-Energie");
     if (pdf) dateiLaden(pdf);
   };
 
   /* ---------- Formular ---------- */
   if (entwurf) {
     const setF = (k, v) => setEntwurf({ ...entwurf, [k]: v });
-    const art = VERGUETUNG.find((v) => v.value === entwurf.art) || VERGUETUNG[0];
+    const vg = entwurf.verguetung || { art: "prozent", wert: "" };
+    const setV = (k, v) => setEntwurf({ ...entwurf, verguetung: { ...vg, [k]: v } });
+    const gesperrt = tgFreigegeben(entwurf) && user.rolle !== "Geschäftsführung";
+    const art = VERGUETUNG.find((v) => v.value === vg.art) || VERGUETUNG[0];
     return (
       <div>
         <div className="flex items-center gap-3 mb-5">
@@ -7042,20 +7322,25 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
           <div className="grid sm:grid-cols-2 gap-4">
             <Feld label="Firma" value={entwurf.firma} onChange={(v) => setF("firma", v)} />
             <Feld label="Ansprechpartner" value={entwurf.name} onChange={(v) => setF("name", v)} />
+            <Feld label="Straße und Hausnummer" value={entwurf.strasse || entwurf.adresse || ""}
+              onChange={(v) => setF("strasse", v)} />
+            <Feld label="PLZ und Ort" value={entwurf.plzort || ""} onChange={(v) => setF("plzort", v)} />
             <Feld label="Telefon" value={entwurf.telefon} onChange={(v) => setF("telefon", v)} />
             <Feld label="E-Mail" value={entwurf.email} onChange={(v) => setF("email", v)} />
-            <Feld label="Anschrift" value={entwurf.adresse} onChange={(v) => setF("adresse", v)} breit />
           </div>
 
           <div>
-            <span className="block text-xs mb-2" style={{ color: C.muted }}>Wie wird vergütet?</span>
-            <div className="space-y-2">
+            <span className="block text-xs mb-2" style={{ color: C.muted }}>Vergütung laut Vertrag</span>
+            <div className="grid sm:grid-cols-2 gap-2">
               {VERGUETUNG.map((v) => (
-                <button key={v.value} onClick={() => setF("art", v.value)}
+                <button key={v.value} disabled={gesperrt}
+                  onClick={() => setEntwurf({ ...entwurf, verguetung: { ...vg, art: v.value,
+                    wert: v.value === vg.art ? vg.wert : v.value === "fest" ? "250" : "10" } })}
                   className="w-full text-left px-3 py-2 rounded"
                   style={{
-                    background: entwurf.art === v.value ? "#F1F5FA" : "#fff",
-                    border: "1px solid " + (entwurf.art === v.value ? C.strom : C.line),
+                    background: vg.art === v.value ? "#F1F5FA" : "#fff",
+                    border: "1px solid " + (vg.art === v.value ? C.strom : C.line),
+                    opacity: gesperrt && vg.art !== v.value ? 0.5 : 1,
                   }}>
                   <span className="text-sm">{v.label}</span>
                   <span className="block text-xs" style={{ color: C.muted }}>{v.text}</span>
@@ -7063,21 +7348,22 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
               ))}
             </div>
             <div className="sm:max-w-xs mt-4">
-              <Feld label={"Wert in " + art.einheit} value={entwurf.wert}
-                onChange={(v) => setF("wert", v)} />
+              <Feld label={"Wert in " + art.einheit} value={vg.wert} gesperrt={gesperrt}
+                onChange={(v) => setV("wert", v)} />
             </div>
-            <p className="text-xs mt-2" style={{ color: C.muted }}>
-              {entwurf.art === "prozent"
-                ? "Anteil an deiner eigenen Provision, nicht an der Gesamtprovision."
-                : entwurf.art === "fest"
-                ? "Wird für jedes Lieferjahr des Vertrags fällig."
-                : "Wird einmalig beim Abschluss fällig."}
+            <p className="text-xs mt-2" style={{ color: C.muted, maxWidth: "62ch" }}>
+              {vg.art === "fest"
+                ? "Einmalig, anteilig nach Jahresverbrauch: 10.000 kWh = " + euroText(zahlTG(vg.wert) / 10) +
+                  " · 100.000 kWh = " + euroText(vg.wert) + " · 1 GWh = " + euroText(zahlTG(vg.wert) * 10) + "."
+                : "Prozent der Gesamtprovision des Kunden, für jedes Lieferjahr."}
+              {" "}Die Vergütung wird von deiner Provision für diesen Kunden abgezogen.
+              {gesperrt ? " Nach der Freigabe ändert nur die Geschäftsführung die Vergütung." : ""}
             </p>
           </div>
 
           <Feld label="Notiz" value={entwurf.notiz} onChange={(v) => setF("notiz", v)} breit />
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Btn icon={Check} onClick={speichern} disabled={!entwurf.firma && !entwurf.name}>
               Speichern
             </Btn>
@@ -7088,25 +7374,33 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
     );
   }
 
-  /* ---------- Einzelansicht ---------- */
+  /* ---------- Einzelansicht (nur eigene Tippgeber) ---------- */
   if (gewaehlt) {
     const kunden = kundenVon(gewaehlt);
-    const art = VERGUETUNG.find((v) => v.value === gewaehlt.art) || VERGUETUNG[0];
+    const vg = gewaehlt.verguetung || {};
     return (
       <div>
         <div className="flex items-center gap-3 mb-1">
           <button onClick={() => setAuswahl(null)} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
-          <h2 className="text-lg">{gewaehlt.firma || gewaehlt.name}</h2>
+          <h2 className="text-lg">{tgName(gewaehlt)}</h2>
+          <FreigabeMarke t={gewaehlt} />
         </div>
         <p className="text-sm mb-5 ml-8" style={{ color: C.muted }}>
           {[gewaehlt.name, gewaehlt.telefon, gewaehlt.email].filter(Boolean).join(" · ")}
         </p>
 
+        {!tgFreigegeben(gewaehlt) && (
+          <div className="rounded p-4 mb-5 text-sm" style={{ background: "#FCF6EE", border: "1px solid " + C.gas }}>
+            Erstelle den Vertrag als PDF und lass ihn unterschreiben. Sobald die Geschäftsführung den
+            Tippgeber freigegeben hat, kannst du ihn an deinen Vorgängen auswählen.
+            {vg.vertrag ? " Vertrag erstellt am " + datum(vg.vertrag) + "." : ""}
+          </div>
+        )}
+
         <div className="grid sm:grid-cols-3 gap-3 mb-5">
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="text-xs mb-2" style={{ color: C.muted }}>Vergütung</div>
-            <div className="text-lg">{gewaehlt.wert} {art.einheit}</div>
-            <div className="text-xs mt-1" style={{ color: C.muted }}>{art.label}</div>
+            <div className="text-sm">{tgVerguetungText(vg)}</div>
           </div>
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="text-xs mb-2" style={{ color: C.muted }}>Vermittelte Kunden</div>
@@ -7114,21 +7408,24 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
           </div>
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.ok }}>
             <div className="text-xs mb-2" style={{ color: C.muted }}>
-              {gewaehlt.art === "einmal" ? "Summe einmalig" : "Summe je Lieferjahr"}
+              {einmalig(gewaehlt) ? "Summe einmalig" : "Summe je Lieferjahr"}
             </div>
             <div className="text-2xl" style={{ color: C.ok, fontVariantNumeric: "tabular-nums" }}>
-              {num(gewaehlt.art === "einmal" ? einmalSumme(gewaehlt) : summe(gewaehlt), 2)} €
+              {eur(summe(gewaehlt))}
             </div>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-5">
-          <Btn icon={FileText} onClick={() => auswertungPdf(gewaehlt)}>Auswertung als PDF</Btn>
+          <Btn icon={FileSignature} onClick={() => vertragErstellen(gewaehlt)}>Vertrag als PDF</Btn>
+          <Btn variante="hell" icon={FileText} onClick={() => auswertungPdf(gewaehlt)}>Auswertung als PDF</Btn>
           <Btn variante="hell" onClick={() => setEntwurf(gewaehlt)}>Bearbeiten</Btn>
-          <Btn variante="gefahr" icon={Trash2}
-            onClick={() => { setTippgeber(tippgeber.filter((t) => t.id !== gewaehlt.id)); setAuswahl(null); }}>
-            Entfernen
-          </Btn>
+          {!tgFreigegeben(gewaehlt) && (
+            <Btn variante="gefahr" icon={Trash2}
+              onClick={() => { setTippgeber(tippgeber.filter((t) => t.id !== gewaehlt.id)); setAuswahl(null); }}>
+              Entfernen
+            </Btn>
+          )}
         </div>
 
         <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
@@ -7146,11 +7443,7 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
               <span className="flex-1">{a.kunde.firma}
                 <span className="block text-xs" style={{ color: C.muted }}>{a.kunde.ort}</span>
               </span>
-              <span style={{ fontVariantNumeric: "tabular-nums", color: C.ok }}>
-                {eur(gewaehlt.art === "einmal"
-                  ? (parseFloat(String(gewaehlt.wert).replace(",", ".")) || 0)
-                  : tippgeberProvision(gewaehlt, a, mitarbeiter))}
-              </span>
+              <span style={{ fontVariantNumeric: "tabular-nums", color: C.ok }}>{eur(tippgeberBetrag(a))}</span>
             </div>
           ))}
         </div>
@@ -7167,9 +7460,9 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <p className="text-sm" style={{ color: C.muted, maxWidth: "52ch" }}>
-          Deine Tippgeber und was sie für vermittelte Kunden erhalten. Die Vergütung legst du je
-          Tippgeber selbst fest.
+        <p className="text-sm" style={{ color: C.muted, maxWidth: "56ch" }}>
+          Lege deine Tippgeber an und erstelle den Vertrag. Nach der Freigabe durch die
+          Geschäftsführung kannst du sie an deinen Vorgängen auswählen.
         </p>
         <Btn icon={Plus} onClick={() => setEntwurf(leererTippgeber(user.id))}>Tippgeber anlegen</Btn>
       </div>
@@ -7177,34 +7470,29 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
       {meine.length === 0 ? (
         <div className="rounded p-8 text-center text-sm"
              style={{ border: "1px dashed " + C.line, color: C.muted }}>
-          Noch keine Tippgeber angelegt.
+          Noch keine eigenen Tippgeber angelegt.
         </div>
       ) : (
         <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
           {meine.map((t, i) => {
-            const art = VERGUETUNG.find((v) => v.value === t.art) || VERGUETUNG[0];
             const anzahl = kundenVon(t).length;
             return (
               <button key={t.id} onClick={() => setAuswahl(t.id)}
                 className="w-full text-left px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1"
                 style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
                 <div className="flex-1 min-w-40">
-                  <div className="text-sm">{t.firma || t.name}</div>
+                  <div className="text-sm flex flex-wrap items-center gap-2">{tgName(t)} <FreigabeMarke t={t} /></div>
                   <div className="text-xs" style={{ color: C.muted }}>
-                    {[t.name && t.firma ? t.name : null, t.telefon].filter(Boolean).join(" · ")}
-                    {t.notiz ? " · " + t.notiz : ""}
+                    {[t.name && t.firma ? t.name : null, t.telefon, tgVerguetungText(t.verguetung)]
+                      .filter(Boolean).join(" · ")}
                   </div>
                 </div>
-                <span className="text-xs w-40" style={{ color: C.muted }}>
-                  {t.wert} {art.einheit} · {art.value === "einmal" ? "einmalig"
-                    : art.value === "fest" ? "je Lieferjahr" : "der Provision"}
-                </span>
                 <span className="text-sm w-24 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
                   {anzahl} {anzahl === 1 ? "Kunde" : "Kunden"}
                 </span>
                 <span className="text-sm w-28 text-right"
                       style={{ color: C.ok, fontVariantNumeric: "tabular-nums" }}>
-                  {eur(t.art === "einmal" ? einmalSumme(t) : summe(t))}
+                  {eur(summe(t))}
                 </span>
                 <ChevronRight size={15} style={{ color: C.muted }} />
               </button>
@@ -7212,11 +7500,239 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
           })}
         </div>
       )}
+
+      {zugeordnete.length > 0 && (
+        <div className="mt-6">
+          <div className="text-xs mb-2" style={{ color: C.muted }}>Dir zugeordnet von der Geschäftsführung</div>
+          <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+            {zugeordnete.map((t, i) => (
+              <div key={t.id} className="px-4 py-3 text-sm" style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+                <div className="flex flex-wrap items-center gap-2">{tgName(t)} <FreigabeMarke t={t} /></div>
+                <div className="text-xs" style={{ color: C.muted }}>
+                  {[t.firma && t.name ? t.name : null, t.telefon, t.email].filter(Boolean).join(" · ") || "keine Kontaktdaten"}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-/* Vom Versorger bestätigte Aufträge, bei denen die Provision noch aussteht */
+/* ------------------------------------------------------------------ */
+/*  Verträge (Geschäftsführung)                                        */
+/*  Übersicht über alle Tippgeber und Vertriebspartner, Freigabe,      */
+/*  Zuordnung und Struktur. Steht nur im Portal, nicht im Vertrag.     */
+/* ------------------------------------------------------------------ */
+function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfragen, user, notieren,
+                     firmaVertrag, setFirmaVertrag }) {
+  const [reiter, setReiter] = useState("tippgeber");
+  const [offenId, setOffenId] = useState(null);
+  const [suche, setSuche] = useState("");
+
+  const vertrieb = mitarbeiter.filter((m) => VERTRIEBSROLLEN.includes(m.rolle));
+  const koepfe = mitarbeiter.filter((m) => ["Teamleiter", "Leitung Vertrieb"].includes(m.rolle));
+  const name = (id) => (mitarbeiter.find((m) => m.id === id) || {}).name || "–";
+  const passt = (txt) => !suche.trim() || txt.toLowerCase().includes(suche.trim().toLowerCase());
+  const kunden = (t) => anfragen.filter((a) => a.tippgeberId === t.id &&
+    ["bestaetigt", "abgeschlossen"].includes(a.status)).length;
+  const setTG = (id, aend) => setTippgeber(tippgeber.map((t) => (t.id === id ? { ...t, ...aend } : t)));
+  const f = { ...FIRMA_VERTRAG_LEER, ...(firmaVertrag || {}) };
+
+  const freigeben = (t, an) => {
+    setTG(t.id, { freigabe: an ? { von: user.name, datum: heute() } : null });
+    if (notieren) notieren("Tippgeber", tgName(t) + (an ? " freigegeben" : " Freigabe zurückgenommen"));
+  };
+  const zuordnen = (t, id, an) => {
+    const alt = t.zugeordnet || [];
+    const neu = an ? [...new Set([...alt, id])] : alt.filter((x) => x !== id);
+    setTG(t.id, { zugeordnet: neu });
+    if (notieren) notieren("Tippgeber", tgName(t) + (an ? " zugeordnet an " : " nicht mehr zugeordnet an ") + name(id));
+  };
+  const strukturSetzen = (m, upline) => {
+    setMitarbeiter(mitarbeiter.map((x) => (x.id === m.id ? { ...x, upline: upline || null } : x)));
+    if (notieren) notieren("Struktur", m.name + " zugeordnet an " + (upline ? name(upline) : "niemanden"));
+  };
+  const hvVertrag = (m) => {
+    handelsvertreterVertragPdf(m, f);
+    setMitarbeiter(mitarbeiter.map((x) => (x.id === m.id ? { ...x, vertrag: { datum: heute() } } : x)));
+  };
+
+  /* keine Kreise in der Struktur: niemand unter sich selbst oder seinen eigenen Leuten */
+  const moeglicheKoepfe = (m) => {
+    const unter = new Set(strukturUnter(m.id, mitarbeiter).map((x) => x.id));
+    return koepfe.filter((k) => k.id !== m.id && !unter.has(k.id));
+  };
+
+  const offeneFreigaben = tippgeber.filter((t) => !tgFreigegeben(t)).length;
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-4">
+        {[["tippgeber", "Tippgeber (" + tippgeber.length + ")"],
+          ["partner", "Vertriebspartner (" + vertrieb.length + ")"],
+          ["firma", "Firmendaten für Verträge"]].map(([id, label]) => (
+          <button key={id} onClick={() => { setReiter(id); setOffenId(null); }}
+            className="px-3 py-1.5 rounded text-sm"
+            style={reiter === id ? { background: C.ink, color: "#fff" }
+              : { background: "#fff", color: C.text, border: "1px solid " + C.line }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {reiter !== "firma" && (
+        <div className="mb-4 sm:max-w-sm">
+          <Feld label="Suchen" value={suche} onChange={setSuche} placeholder="Name, Firma, Ort" />
+        </div>
+      )}
+
+      {reiter === "firma" && (
+        <div className="rounded p-5 space-y-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <p className="text-sm" style={{ color: C.muted, maxWidth: "62ch" }}>
+            Diese Angaben stehen in jedem Vertrag als Vertragspartei EGC-Energie. Sie gelten auch für
+            die Tippgeberverträge, die Vertriebspartner selbst erstellen.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Feld label="Vertreten durch" value={f.vertreter} breit
+              onChange={(v) => setFirmaVertrag({ ...f, vertreter: v })} />
+            <Feld label="Straße und Hausnummer" value={f.strasse}
+              onChange={(v) => setFirmaVertrag({ ...f, strasse: v })} />
+            <Feld label="PLZ und Ort" value={f.ort} onChange={(v) => setFirmaVertrag({ ...f, ort: v })} />
+          </div>
+        </div>
+      )}
+
+      {reiter === "tippgeber" && (
+        <>
+          {offeneFreigaben > 0 && (
+            <p className="text-sm mb-3" style={{ color: C.gas }}>
+              {offeneFreigaben} {offeneFreigaben === 1 ? "Tippgeber wartet" : "Tippgeber warten"} auf Freigabe.
+            </p>
+          )}
+          {tippgeber.length === 0 ? (
+            <div className="rounded p-8 text-center text-sm" style={{ border: "1px dashed " + C.line, color: C.muted }}>
+              Noch keine Tippgeber. Vertriebspartner legen sie unter „Tippgeber" an.
+            </div>
+          ) : (
+            <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+              {[...tippgeber]
+                .sort((x, y) => Number(tgFreigegeben(x)) - Number(tgFreigegeben(y)) || tgName(x).localeCompare(tgName(y)))
+                .filter((t) => passt([tgName(t), t.name, t.plzort, name(t.besitzerId)].join(" ")))
+                .map((t, i) => {
+                  const offen = offenId === t.id;
+                  return (
+                    <div key={t.id} style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+                      <button onClick={() => setOffenId(offen ? null : t.id)}
+                        className="w-full text-left px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                        <div className="flex-1 min-w-40">
+                          <div className="text-sm flex flex-wrap items-center gap-2">{tgName(t)} <FreigabeMarke t={t} /></div>
+                          <div className="text-xs" style={{ color: C.muted }}>
+                            angelegt von {name(t.besitzerId)} · {tgVerguetungText(t.verguetung)}
+                            {(t.zugeordnet || []).length ? " · auch bei " + t.zugeordnet.map(name).join(", ") : ""}
+                          </div>
+                        </div>
+                        <span className="text-sm w-24 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
+                          {kunden(t)} {kunden(t) === 1 ? "Kunde" : "Kunden"}
+                        </span>
+                        <ChevronRight size={15} style={{ color: C.muted, transform: offen ? "rotate(90deg)" : "none" }} />
+                      </button>
+                      {offen && (
+                        <div className="px-4 pb-4 space-y-4">
+                          <div className="text-xs" style={{ color: C.muted }}>
+                            {[t.name && t.firma ? t.name : null, t.strasse || t.adresse, t.plzort, t.telefon, t.email]
+                              .filter(Boolean).join(" · ")}
+                            {(t.verguetung || {}).vertrag ? " · Vertrag erstellt am " + datum(t.verguetung.vertrag) : ""}
+                          </div>
+                          <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={tgFreigegeben(t)} onChange={(e) => freigeben(t, e.target.checked)}
+                              style={{ accentColor: C.ok, width: 18, height: 18 }} />
+                            Tippgeber freigeben
+                            {t.freigabe ? <span className="text-xs" style={{ color: C.muted }}>
+                              ({t.freigabe.von}, {datum(t.freigabe.datum)})</span> : null}
+                          </label>
+                          <div>
+                            <div className="text-xs mb-2" style={{ color: C.muted }}>
+                              Weiteren Vertriebspartnern zuordnen (sie sehen nur Name und Kontakt)
+                            </div>
+                            <div className="grid sm:grid-cols-2 gap-1">
+                              {vertrieb.filter((m) => m.id !== t.besitzerId).map((m) => (
+                                <label key={m.id} className="flex items-center gap-2 text-sm py-1">
+                                  <input type="checkbox" checked={(t.zugeordnet || []).includes(m.id)}
+                                    onChange={(e) => zuordnen(t, m.id, e.target.checked)}
+                                    style={{ accentColor: C.ink, width: 16, height: 16 }} />
+                                  {m.name} <span className="text-xs" style={{ color: C.muted }}>{m.rolle}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Btn icon={FileSignature} onClick={() => tippgeberVertragPdf(t, f)}>Vertrag als PDF</Btn>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </>
+      )}
+
+      {reiter === "partner" && (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {vertrieb.length === 0 && (
+            <div className="px-4 py-6 text-sm" style={{ color: C.muted }}>Noch keine Vertriebspartner angelegt.</div>
+          )}
+          {vertrieb
+            .filter((m) => passt([m.name, m.rolle, m.team, name(m.upline)].join(" ")))
+            .sort((x, y) => x.name.localeCompare(y.name))
+            .map((m, i) => {
+              const offen = offenId === m.id;
+              const anzahlTG = tippgeber.filter((t) => t.besitzerId === m.id || (t.zugeordnet || []).includes(m.id)).length;
+              return (
+                <div key={m.id} style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+                  <button onClick={() => setOffenId(offen ? null : m.id)}
+                    className="w-full text-left px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <div className="flex-1 min-w-40">
+                      <div className="text-sm">{m.name}</div>
+                      <div className="text-xs" style={{ color: C.muted }}>
+                        {m.rolle} · {num(m.satz || 0, 0)} % · unter {m.upline ? name(m.upline) : "niemandem"}
+                        {anzahlTG ? " · " + anzahlTG + " Tippgeber" : ""}
+                      </div>
+                    </div>
+                    <span className="text-xs w-32 text-right" style={{ color: m.vertrag ? C.ok : C.muted }}>
+                      {m.vertrag ? "Vertrag " + datum(m.vertrag.datum) : "kein Vertrag erstellt"}
+                    </span>
+                    <ChevronRight size={15} style={{ color: C.muted, transform: offen ? "rotate(90deg)" : "none" }} />
+                  </button>
+                  {offen && (
+                    <div className="px-4 pb-4 space-y-4">
+                      <div className="sm:max-w-sm">
+                        <Select label="Struktur: direkt unter" value={m.upline || ""}
+                          onChange={(v) => strukturSetzen(m, v)}
+                          options={[{ value: "", label: "niemandem (direkt unter EGC)" },
+                            ...moeglicheKoepfe(m).map((k) => ({ value: k.id, label: k.name + " · " + k.rolle + " · " + num(k.satz || 0, 0) + " %" }))]} />
+                      </div>
+                      <p className="text-xs" style={{ color: C.muted, maxWidth: "62ch" }}>
+                        Provisionssatz {num(m.satz || 0, 0)} % · ändern unter „Vertriebsmitarbeiter".
+                        Die Struktur steht nur im Portal, nicht im Vertrag.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Btn icon={FileSignature} onClick={() => hvVertrag(m)}>Handelsvertretervertrag als PDF</Btn>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProvisionAusstehend({ anfragen, mitarbeiter, user, onOeffnen }) {
   const [versorgerFilter, setVersorgerFilter] = useState("alle");
   const offen = anfragen.filter((a) => a.status === "bestaetigt");
@@ -9078,7 +9594,7 @@ function faelligkeiten(a) {
   }));
 }
 
-function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeffnen }) {
+function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeffnen, tippgeber }) {
   const [wer, setWer] = useState("alle");
   const [nurOffen, setNurOffen] = useState(false);
   const abg = anfragen.filter((a) => a.status === "abgeschlossen" && a.kalkulation);
@@ -9087,9 +9603,21 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
   abg.forEach((a) => {
     const v = gesamtverteilung(a, mitarbeiter);
     const plan = faelligkeiten(a);
-    v.anteile.forEach((x) => {
-      if (wer !== "alle" && x.id !== wer) return;
+    /* Tippgeber erscheint als eigener Empfänger: jährlich oder einmalig im ersten Lieferjahr */
+    const personen = [...v.anteile];
+    if (v.tippgeber) {
+      const t = (tippgeber || []).find((x) => x.id === a.tippgeberId);
+      personen.push({ id: "tg-" + a.tippgeberId, name: t ? (t.firma || t.name) : (a.herkunftDetail || "Tippgeber"),
+                      rolle: "Tippgeber", betrag: v.tippgeber.betrag, nurJahr1: v.tippgeber.einmalig });
+    }
+    personen.forEach((x0) => {
+      if (wer !== "alle" && x0.id !== wer) return;
       plan.forEach((f) => {
+        if (x0.nurJahr1 && f.jahr !== 1) return;
+        /* einmaliger Tippgeber-Festbetrag: im ersten Lieferjahr beim Träger abziehen */
+        const einmal = f.jahr === 1 && v.tippgeberEinmal
+          ? (v.tippgeberEinmal.traeger.find((t) => t.id === x0.id) || {}).betrag || 0 : 0;
+        const x = einmal ? { ...x0, betrag: x0.betrag - einmal, tippgeber: (x0.tippgeber || 0) + einmal } : x0;
         const schluessel = x.id + ":" + f.jahr;
         const alt = (a.ausgezahlt || {})[x.id];
         const eintrag = (a.ausgezahlt || {})[schluessel] || (f.jahr === 1 ? alt : null);
@@ -9177,6 +9705,7 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
                 <div className="text-xs" style={{ color: C.muted }}>
                   {z.anfrage.id} · {z.person.name} ({z.person.rolle}
                   {z.person.overhead ? ", Overhead" : ""}) · fällig {datum(z.faellig)}
+                  {z.person.tippgeber > 0 ? " · abzgl. Tippgeber " + eur(z.person.tippgeber) : ""}
                 </div>
               </button>
               <span className="text-sm w-28 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -9836,6 +10365,7 @@ export default function App() {
   const [tippgeber, setTippgeber] = useState([]);
   const [bonusziele, setBonusziele] = useState(BONUSZIELE_START);
   const [firmenanteil, setFirmenanteil] = useState("");
+  const [firmaVertrag, setFirmaVertrag] = useState(FIRMA_VERTRAG_LEER);
   const [listenAnsicht, setListenAnsicht] = useState(null);
   const [userId, setUserId] = useState(null);
   const [registriert, setRegistriert] = useState(null);
@@ -9877,6 +10407,7 @@ export default function App() {
     if (e.bonus != null) { setBonusSatz(String(e.bonus)); setzeBonus(e.bonus); }
     if (e.bonusziele) setBonusziele({ ...BONUSZIELE_START, ...e.bonusziele });
     if (e.firmenanteil != null) setFirmenanteil(String(e.firmenanteil));
+    if (e.firmaVertrag) setFirmaVertrag({ ...FIRMA_VERTRAG_LEER, ...e.firmaVertrag });
   };
 
   const sammlungLaden = async (n) => {
@@ -9971,11 +10502,12 @@ export default function App() {
     const t = setTimeout(async () => {
       const f = (await einstellungSpeichern("bonus", String(bonusSatz)))
         || (await einstellungSpeichern("bonusziele", bonusziele))
-        || (firmenanteil !== "" && (await einstellungSpeichern("firmenanteil", String(firmenanteil))));
+        || (firmenanteil !== "" && (await einstellungSpeichern("firmenanteil", String(firmenanteil))))
+        || (await einstellungSpeichern("firmaVertrag", firmaVertrag));
       if (f) setMeldung("Einstellung nicht gespeichert: " + f);
     }, 500);
     return () => clearTimeout(t);
-  }, [bonusSatz, bonusziele, firmenanteil, geladen, userId]);
+  }, [bonusSatz, bonusziele, firmenanteil, firmaVertrag, geladen, userId]);
 
   /* wieder online: Liegengebliebenes speichern */
   useEffect(() => {
@@ -10033,6 +10565,7 @@ export default function App() {
     ? tickets.filter((t) => t.empfaenger === user.rolle && t.status !== "abgeschlossen").length : 0;
   const neueAuftraege = anfragen.filter((a) => a.status === "uebermittelt").length;
   const provisionOffen = anfragen.filter((a) => a.status === "bestaetigt").length;
+  const offeneTippgeberFreigaben = tippgeber.filter((t) => !t.freigabe).length;
   /* Smartmeter: die Kalkulation sieht eingereichte, der Vertrieb die eigenen Klärfälle */
   const offeneSmartmeter = !user ? 0
     : ["Kalkulation", "Geschäftsführung"].includes(user.rolle)
@@ -10369,6 +10902,7 @@ export default function App() {
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
+      { id: "vertraege", label: "Verträge", icon: FileSignature, badge: offeneTippgeberFreigaben },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
       { id: "ziele", label: "Ziele", icon: Target },
@@ -10608,7 +11142,11 @@ export default function App() {
                onOeffnen={(id) => setOffen(id)} />;
   } else if (ansicht === "tippgeber") {
     inhalt = <Tippgeber tippgeber={tippgeber} setTippgeber={setTippgeber}
-               anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} />;
+               anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} firmaVertrag={firmaVertrag} />;
+  } else if (ansicht === "vertraege" && rolle === "Geschäftsführung") {
+    inhalt = <Vertraege tippgeber={tippgeber} setTippgeber={setTippgeber} mitarbeiter={mitarbeiter}
+               setMitarbeiter={setMitarbeiter} anfragen={anfragen} user={user} notieren={notieren}
+               firmaVertrag={firmaVertrag} setFirmaVertrag={setFirmaVertrag} />;
   } else if (ansicht === "pruefung") {
     inhalt = <Kundenpruefung anfragen={anfragen} leads={leads} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "aufgaben") {
@@ -10642,7 +11180,8 @@ export default function App() {
                anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "abrechnung") {
     inhalt = <Abrechnung anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
-               setAnfragen={setAnfragen} notieren={notieren} onOeffnen={(id) => setOffen(id)} />;
+               setAnfragen={setAnfragen} notieren={notieren} onOeffnen={(id) => setOffen(id)}
+               tippgeber={tippgeber} />;
   } else if (ansicht === "versorgerliste") {
     inhalt = <Versorgerliste versorger={versorger} setVersorger={setVersorger} user={user}
                standard={firmenanteil}

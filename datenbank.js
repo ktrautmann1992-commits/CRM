@@ -37,7 +37,7 @@ export const SAMMLUNGEN = {
   akquise:    { tabelle: "akquise", neuOben: true },
   aufgaben:   { tabelle: "aufgaben" },
   protokoll:  { tabelle: "protokoll" },
-  tippgeber:  { tabelle: "tippgeber" },
+  tippgeber:  { tabelle: "tippgeber", abspalten: { verguetung: "tippgeber_intern" } },
 };
 
 /* Mitarbeiter sind auf drei Tabellen verteilt:
