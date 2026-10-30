@@ -38,13 +38,14 @@ export const SAMMLUNGEN = {
   aufgaben:   { tabelle: "aufgaben" },
   protokoll:  { tabelle: "protokoll" },
   tippgeber:  { tabelle: "tippgeber" },
+  strukturanfragen: { tabelle: "strukturanfragen", neuOben: true },
 };
 
 /* Mitarbeiter sind auf drei Tabellen verteilt:
    mitarbeiter (für alle sichtbar), mitarbeiter_konditionen (Sätze, Ziele)
    und mitarbeiter_stammdaten (Bank, Ausweis). Die Einladungscodes liegen in `einladungen`. */
 const MA_KONDITIONEN = ["satz", "eigenBonus", "ziele"];
-const MA_STAMMDATEN = ["stammdaten", "pruefHinweis"];
+const MA_STAMMDATEN = ["stammdaten", "pruefHinweis", "vertrag"];
 const MA_EINLADUNG = ["einladung"];
 const MA_NICHT_SPEICHERN = ["passwort"];
 

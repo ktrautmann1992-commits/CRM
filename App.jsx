@@ -292,7 +292,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.8.3 · 29.10.2026 · Firmenanteil nur noch aus der Datenbank";
+const VERSION = "v5.9 · 30.10.2026 · Tippgeber, Strukturanfragen, Folgeprovisionen";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -612,7 +612,9 @@ const LOGO_PDF = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDAwMDAgQDAwMEBAQFBgoGBgUFBg
 const LOGO_PDF_BREITE = 420;
 const LOGO_PDF_HOEHE = 196;
 
-/* Erzeugt ein mehrseitiges PDF im EGC-Design aus Textzeilen */
+/* Erzeugt ein mehrseitiges PDF im EGC-Design aus Textzeilen.
+   Eine Zeile kann auch ein Bild sein: { bild: "data:image/jpeg;base64,…", breite, hoehe }
+   (nur JPEG, z. B. eine Unterschrift). Es wird 40 Punkt hoch eingesetzt. */
 function erzeugePdf(dateiname, titel, zeilen) {
   /* Zeichen auf die Schriftbelegung des Dokuments abbilden.
      Das Eurozeichen liegt dort auf Position 128. */
@@ -640,7 +642,15 @@ function erzeugePdf(dateiname, titel, zeilen) {
   };
 
   const alle = [];
+  const bilder = [];
   zeilen.forEach((z) => {
+    if (z && typeof z === "object" && z.bild) {
+      const roh = atob(String(z.bild).split(",")[1] || "");
+      bilder.push({ roh, breite: z.breite || 600, hoehe: z.hoehe || 200 });
+      /* ein Bild belegt drei Zeilen Platz */
+      alle.push({ bildNr: bilder.length }, { text: "" }, { text: "" });
+      return;
+    }
     const text = typeof z === "string" ? z : z.text;
     const gross = typeof z === "object" && z.gross;
     umbrechen(text, gross ? 58 : 88).forEach((t, i) => alle.push({ text: t, gross: gross && i === 0 }));
@@ -670,6 +680,13 @@ function erzeugePdf(dateiname, titel, zeilen) {
 
     let y = 712;
     zs.forEach((z) => {
+      if (z.bildNr) {
+        const bb = bilder[z.bildNr - 1];
+        const h = 40, b = Math.min(200, (bb.breite / bb.hoehe) * h);
+        c += "q " + b.toFixed(2) + " 0 0 " + h + " 48 " + (y - 28) + " cm /Im" + z.bildNr + " Do Q\n";
+        y -= 15;
+        return;
+      }
       if (z.gross) {
         y -= 12;
         c += "q " + gruen + " rg 48 " + (y + 15) + " 52 2 re f Q\n";
@@ -698,14 +715,21 @@ function erzeugePdf(dateiname, titel, zeilen) {
       "/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length " + bildRoh.length +
       ">>\nstream\n" + bildRoh + "\nendstream",
   ];
+  /* weitere Bilder liegen hinter den Seiten */
+  const erstesBild = 5 + seiten.length * 2;
+  const bildRefs = bilder.map((_, i) => "/Im" + (i + 1) + " " + (erstesBild + i) + " 0 R").join("");
   const kids = seiten.map((_, i) => 5 + i * 2 + " 0 R").join(" ");
   objekte[1] = "<</Type/Pages/Kids[" + kids + "]/Count " + seiten.length + ">>";
 
   inhalte.forEach((c, i) => {
     objekte.push("<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]/Contents " + (6 + i * 2) +
-      " 0 R/Resources<</Font<</F1 3 0 R>>/XObject<</Im0 4 0 R>>>>>>");
+      " 0 R/Resources<</Font<</F1 3 0 R>>/XObject<</Im0 4 0 R" + bildRefs + ">>>>>>");
     objekte.push("<</Length " + c.length + ">>\nstream\n" + c + "\nendstream");
   });
+  bilder.forEach((bb) => objekte.push(
+    "<</Type/XObject/Subtype/Image/Width " + bb.breite + "/Height " + bb.hoehe +
+    "/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length " + bb.roh.length +
+    ">>\nstream\n" + bb.roh + "\nendstream"));
 
   let pdf = "%PDF-1.4\n";
   const stellen = [];
@@ -1223,7 +1247,21 @@ const beteiligte = (a) =>
 
 const istBeteiligt = (a, id) => beteiligte(a).some((b) => b.id === id);
 
-function gesamtverteilung(a, mitarbeiter, betrag) {
+/* Was der Tippgeber in einem Lieferjahr bekommt. Grundlage ist die Momentaufnahme
+   im Vorgang (a.tippgeber), damit spätere Änderungen am Tippgeber alte Abschlüsse
+   nicht verändern. Prozentual: Anteil an der Provision des Partners.
+   Je 100.000 kWh: fester Betrag nach Liefermenge. Einmalig: nur im 1. Lieferjahr. */
+function tippgeberBetrag(tg, partnerBetrag, a, jahr) {
+  if (!tg) return 0;
+  if (tg.zahlweise === "einmal" && (jahr || 1) > 1) return 0;
+  const wert = parseFloat(String(tg.wert || "").replace(",", ".")) || 0;
+  const b = tg.art === "prozent" ? (partnerBetrag * wert) / 100
+    : tg.art === "kwh" ? (wert * (bestaetigteMenge(a) || verbrauchGesamt(a))) / 100000
+    : 0;
+  return Math.max(0, Math.min(b, partnerBetrag));
+}
+
+function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
   const g = betrag != null ? betrag : gesamtprovision(a);
   const quote = firmenanteilVon(a && a.bestaetigung ? a.bestaetigung.versorger : null);
   const beiEgc = (g * quote) / 100;
@@ -1256,14 +1294,29 @@ function gesamtverteilung(a, mitarbeiter, betrag) {
     }
   });
 
-  const ausgeschuettet = Object.values(map).reduce((t, x) => t + x.betrag, 0);
+  /* Tippgeber: geht vom Anteil seines Vertriebspartners ab, nicht von der Firma
+     und nicht von der Struktur darüber. Ausgezahlt wird er trotzdem von EGC. */
+  let tippgeber = null;
+  const tg = a && a.tippgeber;
+  if (tg && map[tg.besitzerId] && teile.some((b) => b.id === tg.besitzerId)) {
+    const p = map[tg.besitzerId];
+    const t = tippgeberBetrag(tg, p.betrag, a, jahr);
+    if (t > 0) {
+      p.betrag -= t;
+      p.tippgeberAbzug = t;
+    }
+    tippgeber = { ...tg, betrag: t };
+  }
+
+  const ausgeschuettet = Object.values(map).reduce((t, x) => t + x.betrag, 0)
+    + (tippgeber ? tippgeber.betrag : 0);
   return {
     anteile: Object.values(map).sort((x, y) => y.betrag - x.betrag),
     /* Was der Firma bleibt: ihr Anteil an der Gesamtprovision abzüglich
        aller Auszahlungen, die auf die volle Gesamtprovision gerechnet werden. */
     firma: beiEgc - ausgeschuettet,
     beiEgc, quote, ausgeschuettet,
-    bonus: bonusGesamt, eigenakquise: eigen,
+    bonus: bonusGesamt, eigenakquise: eigen, tippgeber,
   };
 }
 
@@ -1737,9 +1790,19 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
   const jahre = laufzeit ? laufzeit / 12 : 0;
   const eigen = v.anteile.find((x) => x.id === user.id);
   const partner = v.anteile.find((x) => beteiligte(a).some((b) => b.id === x.id));
-  const kopfBetrag = sichtGesamt ? gesamt
-    : istKalkSicht ? (partner ? partner.betrag : 0)
-    : eigen ? eigen.betrag : 0;
+  const kopfVon = (vv) => {
+    const e = vv.anteile.find((x) => x.id === user.id);
+    const p = vv.anteile.find((x) => beteiligte(a).some((b) => b.id === x.id));
+    return sichtGesamt ? gesamt : istKalkSicht ? (p ? p.betrag : 0) : e ? e.betrag : 0;
+  };
+  const kopfBetrag = kopfVon(v);
+  /* über die Laufzeit: ein einmaliger Tippgeber fällt nur im 1. Lieferjahr an */
+  const kopfGesamt = jahre
+    ? Array.from({ length: Math.max(1, Math.round(jahre)) }, (_, i) =>
+        kopfVon(i ? gesamtverteilung(a, mitarbeiter, gesamt, i + 1) : v)).reduce((t, x) => t + x, 0)
+    : 0;
+  const tg = v.tippgeber;
+  const sichtTippgeber = tg && (sichtStruktur || tg.besitzerId === user.id);
 
   return (
     <div className="rounded p-4" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
@@ -1770,8 +1833,16 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
           : sichtGesamt
           ? num(verbrauchGesamt(a)) + " kWh × " + num((variante ? variante.aufschlag : (aktiveVariante(a) ? aktiveVariante(a).aufschlag : a.aufschlag)) || 0, 3) + " ct/kWh"
           : num(user.satz || 0, 0) + " % Provisionssatz auf " + num(verbrauchGesamt(a)) + " kWh"}
-        {jahre ? " · über " + num(jahre, 0) + " Lieferjahre " + eur(kopfBetrag * jahre) : ""}
+        {jahre ? " · über " + num(jahre, 0) + " Lieferjahre " + eur(kopfGesamt) : ""}
       </div>
+
+      {sichtTippgeber && (
+        <div className="text-xs mb-3 px-2 py-1.5 rounded" style={{ background: "#FFF8EC", color: C.gas }}>
+          Über Tippgeber gewonnen: {tg.name} · {tippgeberText(tg)}
+          {tg.betrag > 0 && <> · {eur(tg.betrag)} im 1. Lieferjahr, vom Anteil des Vertriebspartners abgezogen</>}
+          {tg.zahlweise === "einmal" && jahre > 1 ? ". Ab dem 2. Lieferjahr kein Abzug mehr." : ""}
+        </div>
+      )}
 
       {sichtStruktur && zeilen.map((z) => (
         <div key={z.id} className="flex items-center gap-3 py-1.5 text-sm"
@@ -1785,6 +1856,11 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
             {z.bonus > 0 && (
               <span className="block text-xs" style={{ color: C.gruen }}>
                 davon {eur(z.bonus)} Bonus für selbst gewonnenen Kunden
+              </span>
+            )}
+            {z.tippgeberAbzug > 0 && (
+              <span className="block text-xs" style={{ color: C.gas }}>
+                abzüglich {eur(z.tippgeberAbzug)} für den Tippgeber
               </span>
             )}
           </span>
@@ -1804,6 +1880,15 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
           </span>
         </div>
       ))}
+
+      {sichtStruktur && tg && tg.betrag > 0 && (
+        <div className="flex items-center gap-3 py-1.5 text-sm" style={{ borderTop: "1px solid " + C.line }}>
+          <span className="flex-1">{tg.name}
+            <span className="block text-xs" style={{ color: C.muted }}>Tippgeber · {tippgeberText(tg)}</span>
+          </span>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{eur(tg.betrag)}</span>
+        </div>
+      )}
 
       {a.bestaetigung && a.bestaetigung.bonusArt !== "keine" && parseFloat(a.bestaetigung.bonus) > 0 && (
         <div className="flex items-center gap-3 py-1.5 text-sm" style={{ borderTop: "1px solid " + C.line }}>
@@ -2011,13 +2096,15 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
               </div>
               <div className="grid sm:grid-cols-2 gap-4">
                 <Select label="Herkunft des Kunden" value={a.herkunft || "Eigenes Netzwerk"}
-                  onChange={(v) => setA({ ...a, herkunft: v })} options={HERKUNFT} />
+                  onChange={(v) => setA({ ...a, herkunft: v,
+                    ...(v !== "Tippgeber" ? { tippgeberId: null, tippgeber: null } : {}) })}
+                  options={HERKUNFT} />
                 {a.herkunft === "Tippgeber" ? (
                   (tippgeber || []).filter((t) => t.besitzerId === user.id).length > 0 ? (
                     <Select label="Welcher Tippgeber?" value={a.tippgeberId || ""}
                       onChange={(v) => {
                         const t = (tippgeber || []).find((x) => x.id === v);
-                        setA({ ...a, tippgeberId: v || null,
+                        setA({ ...a, tippgeberId: v || null, tippgeber: tippgeberMomentaufnahme(t),
                                herkunftDetail: t ? (t.firma || t.name) : "" });
                       }}
                       options={[{ value: "", label: "Bitte wählen" },
@@ -2530,7 +2617,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
 /*  Anfrage-Detail                                                     */
 /* ------------------------------------------------------------------ */
 function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
-                 onBearbeiten, onVerlaengern, onNotieren }) {
+                 onBearbeiten, onVerlaengern, onNotieren, tippgeber }) {
   const [vars, setVars] = useState(
     a.kalkulation && a.kalkulation.varianten && a.kalkulation.varianten.length
       ? a.kalkulation.varianten
@@ -2788,14 +2875,33 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const [annahme, setAnnahme] = useState({
     variante: null, angebotUnterschrieben: null, vollmacht: null,
     kundeInformiert: false, wieBeschrieben: false, abweichung: "", weitere: [],
+    /* Pflichtangabe beim Abschluss: über einen Tippgeber gewonnen? */
+    tippgeberFrage: a.tippgeber || a.tippgeberId ? "ja" : null,
+    tippgeberId: (a.tippgeber && a.tippgeber.id) || a.tippgeberId || "",
   });
+  const meineTippgeber = (tippgeber || []).filter((t) => t.besitzerId === user.id);
+  const fragtTippgeber = istBeteiligt(a, user.id);
+  const tippgeberOk = !fragtTippgeber || annahme.tippgeberFrage === "nein"
+    || (annahme.tippgeberFrage === "ja" && !!annahme.tippgeberId);
 
   const abschlussSenden = () => {
+    const tgNeu = !fragtTippgeber ? null
+      : annahme.tippgeberFrage === "ja"
+      ? (a.tippgeber && a.tippgeber.id === annahme.tippgeberId ? a.tippgeber
+         : tippgeberMomentaufnahme(meineTippgeber.find((t) => t.id === annahme.tippgeberId)))
+      : null;
+    const { tippgeberFrage, tippgeberId, ...annahmeDaten } = annahme;
     onUpdate({
       ...a,
+      ...(fragtTippgeber ? {
+        tippgeber: tgNeu, tippgeberId: tgNeu ? tgNeu.id : null,
+        ...(tgNeu ? { herkunft: "Tippgeber", herkunftDetail: tgNeu.name }
+          : a.herkunft === "Tippgeber" ? { herkunft: "Eigenes Netzwerk", herkunftDetail: "" } : {}),
+      } : {}),
       status: "uebermittelt",
       kalkulation: { ...a.kalkulation, gewaehlt: annahmeGewaehlt(annahme.variante) },
-      annahme: { ...annahme, von: user.name, datum: heute() },
+      annahme: { ...annahmeDaten, von: user.name, datum: heute(),
+                 tippgeber: fragtTippgeber ? annahme.tippgeberFrage : undefined },
       verlauf: [...a.verlauf, {
         d: heute(),
         t: "Abschluss an die Kalkulation gesendet, Auftrag an Versorger übermittelt",
@@ -3871,15 +3977,55 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   </label>
                 </div>
 
+                {fragtTippgeber && (
+                  <div className="rounded p-3" style={{ background: "#fff",
+                       border: "1px solid " + (tippgeberOk ? C.line : C.gas) }}>
+                    <span className="block text-sm mb-2">Wurde der Kunde über einen Tippgeber gewonnen?</span>
+                    <div className="flex gap-2 mb-2">
+                      {[["ja", "Ja"], ["nein", "Nein"]].map(([w, t]) => (
+                        <button key={w} onClick={() => setAnnahme({ ...annahme, tippgeberFrage: w })}
+                          className="px-4 py-2 rounded text-sm"
+                          style={{ background: annahme.tippgeberFrage === w ? C.ink : "#fff",
+                                   color: annahme.tippgeberFrage === w ? "#fff" : C.text,
+                                   border: "1px solid " + (annahme.tippgeberFrage === w ? C.ink : C.line) }}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                    {annahme.tippgeberFrage === "ja" && (meineTippgeber.length ? (
+                      <>
+                        <Select label="Welcher Tippgeber?" value={annahme.tippgeberId}
+                          onChange={(v) => setAnnahme({ ...annahme, tippgeberId: v })}
+                          options={[{ value: "", label: "Bitte wählen" },
+                            ...meineTippgeber.map((t) => ({ value: t.id,
+                              label: (t.firma || t.name) + " · " + tippgeberText(t) }))]} />
+                        <p className="text-xs mt-1" style={{ color: C.muted }}>
+                          Die Vergütung des Tippgebers wird von deiner Provision abgezogen.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs" style={{ color: C.gas }}>
+                        Du hast noch keinen Tippgeber angelegt. Lege ihn zuerst unter „Tippgeber" an.
+                      </p>
+                    ))}
+                  </div>
+                )}
+
                 <div className="pt-2">
                   <Btn variante="ok" icon={Send} onClick={abschlussSenden}
-                    disabled={!annahme.vollmacht || (!annahme.angebotUnterschrieben && !annahme.kundeInformiert)}>
+                    disabled={!annahme.vollmacht || (!annahme.angebotUnterschrieben && !annahme.kundeInformiert)
+                      || !tippgeberOk}>
                     Abschluss an das Kalkulationsteam senden
                   </Btn>
                   {(!annahme.vollmacht || (!annahme.angebotUnterschrieben && !annahme.kundeInformiert)) && (
                     <p className="text-xs mt-2" style={{ color: C.muted }}>
                       Die unterschriebene Maklervollmacht ist Pflicht. Zusätzlich braucht es entweder das
                       unterschriebene Angebot oder die Bestätigung, dass der Kunde einverstanden ist.
+                    </p>
+                  )}
+                  {!tippgeberOk && (
+                    <p className="text-xs mt-2" style={{ color: C.gas }}>
+                      Bitte angeben, ob der Kunde über einen Tippgeber gewonnen wurde.
                     </p>
                   )}
                 </div>
@@ -4441,8 +4587,11 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
   const [sd, setSd] = useState(user.stammdaten || leereStammdaten());
   const [telefon, setTelefon] = useState(user.telefon || "");
   const [gesendet, setGesendet] = useState(false);
+  const [unterschrift, setUnterschrift] = useState(null);
   const offen = ["registriert", "abgelehnt"].includes(user.status);
-  const luecken = stammdatenLuecken(sd);
+  const vertrag = user.vertrag && user.vertrag.gfUnterschrift ? user.vertrag : null;
+  const luecken = [...stammdatenLuecken(sd),
+    ...(vertrag && !vertrag.partnerUnterschrift ? ["Unterschrift unter den Handelsvertretervertrag"] : [])];
 
   const schreib = (aend) =>
     setMitarbeiter(mitarbeiter.map((m) => (m.id === user.id ? { ...m, ...aend } : m)));
@@ -4501,6 +4650,42 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
         </div>
       )}
 
+      {vertrag && (
+        <div className="rounded p-5" style={{ background: C.card,
+             border: "1px solid " + (vertrag.partnerUnterschrift ? C.line : C.gas) }}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <span className="text-sm">Handelsvertretervertrag</span>
+            <button className="text-sm" style={{ color: C.strom }}
+              onClick={() => vertragPdf(user, mitarbeiter)}>Als PDF</button>
+          </div>
+          <div className="text-sm space-y-1 mb-4">
+            <div>Provisionssatz: {num(parseFloat(vertrag.satz) || 0, 0)} % der Gesamtprovision je Lieferjahr</div>
+            <div style={{ color: C.muted }}>
+              Unterschrieben für EGC-Energie von {vertrag.gfName} am {datum(vertrag.gfDatum)}
+            </div>
+          </div>
+          {vertrag.partnerUnterschrift ? (
+            <div className="text-xs" style={{ color: C.muted }}>
+              <DateiBild datei={vertrag.partnerUnterschrift} hoehe={60} />
+              <div className="mt-1">Von dir unterschrieben am {datum(vertrag.partnerDatum)}</div>
+            </div>
+          ) : (
+            <>
+              <Unterschrift label="Deine Unterschrift" onChange={setUnterschrift} />
+              <div className="mt-3">
+                <Btn icon={Check} disabled={!unterschrift} onClick={() => {
+                  schreib({ vertrag: { ...vertrag, partnerUnterschrift: unterschrift, partnerDatum: heute() } });
+                  setUnterschrift(null);
+                }}>Vertrag unterschreiben</Btn>
+              </div>
+              <p className="text-xs mt-2" style={{ color: C.muted }}>
+                Deine Unterschrift ist nötig, bevor du deine Stammdaten zur Freigabe einreichst.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
         <div className="flex items-baseline justify-between mb-4">
           <span className="text-sm">Stammdaten als Handelsvertreter</span>
@@ -4539,9 +4724,441 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
   );
 }
 
-/* Verwaltung der Vertriebsmitarbeiter: anlegen, einladen, Sätze setzen, freigeben */
-function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus, setBonus }) {
+/* ---------- Unterschrift mit dem Finger ----------
+   Gezeichnet wird auf einer Fläche; gespeichert wird ein JPEG mit festem Format
+   600 × 200, damit es sich ohne Umrechnung ins PDF einsetzen lässt. */
+const UNTERSCHRIFT_B = 600, UNTERSCHRIFT_H = 200;
+
+function DateiBild({ datei, hoehe = 80 }) {
+  const [src, setSrc] = useState(datei && datei.url);
+  useEffect(() => {
+    let aktiv = true;
+    if (datei && !datei.url && datei.pfad)
+      dateiInhalt(datei).then((u) => { if (aktiv) setSrc(u); }).catch(() => {});
+    else setSrc(datei && datei.url);
+    return () => { aktiv = false; };
+  }, [datei && (datei.url || datei.pfad)]);
+  if (!src) return <div className="text-xs" style={{ color: C.muted }}>wird geladen …</div>;
+  return <img src={src} alt="Unterschrift" style={{ height: hoehe, background: "#fff" }} />;
+}
+
+function Unterschrift({ onChange, label = "Unterschrift" }) {
+  const ref = React.useRef(null);
+  const zieht = React.useRef(false);
+  const [leer, setLeer] = useState(true);
+
+  const vorbereiten = () => {
+    const c = ref.current;
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    const f = window.devicePixelRatio || 1;
+    c.width = Math.round(r.width * f);
+    c.height = Math.round(r.height * f);
+    const g = c.getContext("2d");
+    g.setTransform(f, 0, 0, f, 0, 0);
+    g.fillStyle = "#fff";
+    g.fillRect(0, 0, r.width, r.height);
+    g.lineWidth = 2.2; g.lineCap = "round"; g.lineJoin = "round"; g.strokeStyle = "#0A1626";
+  };
+  useEffect(() => { vorbereiten(); }, []);
+
+  const punkt = (e) => {
+    const r = ref.current.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
+  const runter = (e) => {
+    e.preventDefault();
+    ref.current.setPointerCapture && ref.current.setPointerCapture(e.pointerId);
+    zieht.current = true;
+    const g = ref.current.getContext("2d");
+    const [x, y] = punkt(e);
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + 0.1, y + 0.1); g.stroke();
+  };
+  const ziehen = (e) => {
+    if (!zieht.current) return;
+    e.preventDefault();
+    const g = ref.current.getContext("2d");
+    const [x, y] = punkt(e);
+    g.lineTo(x, y); g.stroke();
+  };
+  const hoch = () => {
+    if (!zieht.current) return;
+    zieht.current = false;
+    setLeer(false);
+    /* in festes Format übertragen und als JPEG ablegen */
+    const aus = document.createElement("canvas");
+    aus.width = UNTERSCHRIFT_B; aus.height = UNTERSCHRIFT_H;
+    const g = aus.getContext("2d");
+    g.fillStyle = "#fff"; g.fillRect(0, 0, UNTERSCHRIFT_B, UNTERSCHRIFT_H);
+    g.drawImage(ref.current, 0, 0, UNTERSCHRIFT_B, UNTERSCHRIFT_H);
+    const url = aus.toDataURL("image/jpeg", 0.85);
+    onChange({ name: "unterschrift.jpg", typ: "image/jpeg", groesse: Math.round(url.length * 0.75),
+               breite: UNTERSCHRIFT_B, hoehe: UNTERSCHRIFT_H, url });
+  };
+  const loeschen = () => { vorbereiten(); setLeer(true); onChange(null); };
+
+  return (
+    <div>
+      <span className="block text-xs mb-1" style={{ color: C.muted }}>{label}</span>
+      <canvas ref={ref}
+        onPointerDown={runter} onPointerMove={ziehen} onPointerUp={hoch} onPointerLeave={hoch}
+        onPointerCancel={hoch}
+        className="w-full rounded"
+        style={{ aspectRatio: "3 / 1", maxWidth: 480, display: "block", touchAction: "none",
+                 background: "#fff", border: "1px solid " + C.line }} />
+      <div className="flex items-center gap-3 mt-1 text-xs" style={{ color: C.muted }}>
+        <span>{leer ? "Mit dem Finger im Feld unterschreiben." : "Unterschrift erfasst."}</span>
+        {!leer && <button onClick={loeschen} style={{ color: C.strom }}>Neu unterschreiben</button>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Handelsvertretervertrag (Eckdaten, Vertragstext folgt) ----------
+   Liegt beim Mitarbeiter unter `vertrag` und damit in den geschützten Stammdaten. */
+async function vertragPdf(m, mitarbeiter) {
+  const v = m.vertrag || {};
+  const kopf = mitarbeiter.find((x) => x.id === (v.upline || m.upline));
+  const bild = async (d) => {
+    if (!d) return null;
+    try { return { bild: await dateiInhalt(d), breite: d.breite, hoehe: d.hoehe }; }
+    catch (e) { return null; }
+  };
+  const gf = await bild(v.gfUnterschrift);
+  const vp = await bild(v.partnerUnterschrift);
+  const z = [];
+  z.push({ text: "Handelsvertretervertrag - Eckdaten", gross: true });
+  z.push("Zwischen EGC-Energie (Energate-Consulting) und dem nachstehenden Handelsvertreter.");
+  z.push(" ");
+  z.push({ text: "Handelsvertreter", gross: true });
+  z.push(m.name);
+  if (m.email) z.push(m.email);
+  const sd = m.stammdaten || {};
+  if (sd.firma) z.push(sd.firma);
+  if (sd.strasse || sd.ort) z.push([sd.strasse, [sd.plz, sd.ort].filter(Boolean).join(" ")].filter(Boolean).join(", "));
+  z.push(" ");
+  z.push({ text: "Vergütung und Struktur", gross: true });
+  z.push("Rolle: " + (v.rolle || m.rolle));
+  z.push("Provisionssatz: " + num(parseFloat(v.satz) || 0, 0) + " % der Gesamtprovision je Lieferjahr");
+  z.push("Zugeordnet an: " + (kopf ? kopf.name + " (" + kopf.rolle + ")" : "keine Zuordnung"));
+  if (v.team) z.push("Team: " + v.team);
+  if (v.anfrageVon) z.push("Strukturanfrage von " + v.anfrageVon + " am " + datum(v.anfrageDatum));
+  z.push(" ");
+  z.push("Der vollständige Vertragstext wird von der Geschäftsführung ergänzt.");
+  z.push(" ");
+  z.push({ text: "Unterschriften", gross: true });
+  z.push("Für EGC-Energie:");
+  if (gf && gf.bild) z.push(gf); else z.push(" ");
+  z.push((v.gfName || "______________________________") + (v.gfDatum ? ", " + datum(v.gfDatum) : ""));
+  z.push(" ");
+  z.push("Handelsvertreter:");
+  if (vp && vp.bild) z.push(vp); else z.push(" ");
+  z.push((v.partnerUnterschrift ? m.name : "______________________________")
+    + (v.partnerDatum ? ", " + datum(v.partnerDatum) : ""));
+  const pdf = erzeugePdf("handelsvertretervertrag_" + m.name.replace(/\W+/g, "_") + ".pdf",
+    "Handelsvertretervertrag", z);
+  if (pdf) dateiLaden(pdf);
+}
+
+/* ---------- Strukturanfragen ----------
+   Der Teamleiter schlägt einen neuen Vertriebspartner für seine Struktur vor.
+   Die Geschäftsführung gibt frei, unterschreibt und erzeugt die Einladung. */
+const ANFRAGE_STATUS = {
+  offen: { label: "Wartet auf Geschäftsführung", farbe: C.gas },
+  freigegeben: { label: "Freigegeben", farbe: C.ok },
+  abgelehnt: { label: "Abgelehnt", farbe: C.warn },
+  zurueckgezogen: { label: "Zurückgezogen", farbe: C.muted },
+};
+
+const StrukturStatus = ({ status }) => {
+  const st = ANFRAGE_STATUS[status] || ANFRAGE_STATUS.offen;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: st.farbe }}>
+      <span className="w-2 h-2 rounded-full" style={{ background: st.farbe }} />{st.label}
+    </span>
+  );
+};
+
+function LinkKopieren({ url }) {
+  const [kopiert, setKopiert] = useState(false);
+  return (
+    <div>
+      <div className="p-3 rounded text-sm break-all"
+           style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>{url}</div>
+      <div className="mt-2">
+        <Btn icon={Check} onClick={() => {
+          try { navigator.clipboard.writeText(url); setKopiert(true); } catch (e) { /* manuell kopieren */ }
+        }}>{kopiert ? "Kopiert" : "Link kopieren"}</Btn>
+      </div>
+    </div>
+  );
+}
+
+function Strukturanfragen({ anfragen, setAnfragen, user }) {
+  const leer = () => ({ name: "", email: "", telefon: "", satz: "", notiz: "" });
+  const [neu, setNeu] = useState(null);
   const [auswahl, setAuswahl] = useState(null);
+  const meine = anfragen.filter((x) => x.vonId === user.id);
+  const gewaehlt = meine.find((x) => x.id === auswahl);
+  const eigenerSatz = parseFloat(user.satz) || 0;
+  const satz = parseFloat(String((neu || {}).satz || "").replace(",", "."));
+  const satzOk = !isNaN(satz) && satz > 0 && satz <= eigenerSatz;
+  const mailOk = neu && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(neu.email.trim());
+
+  const senden = () => {
+    setAnfragen([{
+      id: "SA-" + uid(), vonId: user.id, von: user.name, team: user.team || "-",
+      datum: heute(), status: "offen",
+      name: neu.name.trim(), email: neu.email.trim(), telefon: neu.telefon.trim(),
+      rolle: "Vertriebspartner", satz, upline: user.id, notiz: neu.notiz.trim(),
+    }, ...anfragen]);
+    setNeu(null);
+  };
+
+  if (neu)
+    return (
+      <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={() => setNeu(null)} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
+          <h2 className="text-lg">Neuen Vertriebspartner anfragen</h2>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Feld label="Name" value={neu.name} onChange={(v) => setNeu({ ...neu, name: v })} />
+          <Feld label="E-Mail" value={neu.email} onChange={(v) => setNeu({ ...neu, email: v })} />
+          <Feld label="Telefon" value={neu.telefon} onChange={(v) => setNeu({ ...neu, telefon: v })} />
+          <Feld label="Provisionssatz in %" value={neu.satz}
+            onChange={(v) => setNeu({ ...neu, satz: v.replace(/[^\d,.]/g, "") })}
+            fehler={neu.satz !== "" && !satzOk ? "Höchstens dein eigener Satz von " + num(eigenerSatz, 0) + " %" : null} />
+          <Feld label="Begründung oder Hinweise für die Geschäftsführung" value={neu.notiz}
+            onChange={(v) => setNeu({ ...neu, notiz: v })} breit />
+        </div>
+        <p className="text-xs mt-3" style={{ color: C.muted, maxWidth: "62ch" }}>
+          {neu.satz !== "" && !satzOk && (
+            <span className="block mb-1" style={{ color: C.warn }}>
+              Der Satz darf höchstens deinem eigenen Satz von {num(eigenerSatz, 0)} % entsprechen.
+            </span>
+          )}
+          Der neue Partner wird dir zugeordnet. Du erhältst die Differenz zwischen deinem Satz
+          ({num(eigenerSatz, 0)} %) und seinem Satz
+          {satzOk ? ", hier " + num(eigenerSatz - satz, 0) + " Prozentpunkte" : ""}.
+          Die Geschäftsführung prüft die Anfrage, unterschreibt den Handelsvertretervertrag und
+          erzeugt den Einladungslink.
+        </p>
+        <div className="flex gap-2 mt-5">
+          <Btn icon={Send} onClick={senden} disabled={!neu.name.trim() || !mailOk || !satzOk}>
+            An die Geschäftsführung senden
+          </Btn>
+          <Btn variante="hell" onClick={() => setNeu(null)}>Abbrechen</Btn>
+        </div>
+      </div>
+    );
+
+  if (gewaehlt)
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setAuswahl(null)} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
+          <div className="flex-1">
+            <div className="text-lg">{gewaehlt.name}</div>
+            <div className="text-xs" style={{ color: C.muted }}>angefragt am {datum(gewaehlt.datum)}</div>
+          </div>
+          <StrukturStatus status={gewaehlt.status} />
+        </div>
+        <div className="rounded p-5 text-sm space-y-1" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div>{gewaehlt.email}{gewaehlt.telefon ? " · " + gewaehlt.telefon : ""}</div>
+          <div>Provisionssatz: {num(gewaehlt.satz, 0)} %
+            {gewaehlt.freigabe && gewaehlt.freigabe.satz !== gewaehlt.satz
+              ? " · von der Geschäftsführung festgelegt: " + num(gewaehlt.freigabe.satz, 0) + " %" : ""}
+          </div>
+          {gewaehlt.notiz && <div style={{ color: C.muted }}>{gewaehlt.notiz}</div>}
+        </div>
+        {gewaehlt.status === "abgelehnt" && (
+          <div className="p-4 rounded" style={{ background: "#FCF3F0", border: "1px solid " + C.warn }}>
+            <div className="text-sm mb-1" style={{ color: C.warn }}>Abgelehnt</div>
+            <p className="text-sm">{gewaehlt.ablehnung || "ohne Begründung"}</p>
+          </div>
+        )}
+        {gewaehlt.status === "freigegeben" && gewaehlt.link && (
+          <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok }}>
+            <div className="text-sm mb-1">Einladungslink</div>
+            <p className="text-xs mb-3" style={{ color: C.muted }}>
+              Freigegeben von {gewaehlt.freigabe.von} am {datum(gewaehlt.freigabe.datum)}. Schick
+              den Link an {gewaehlt.name}. Er gilt 30 Tage und nur einmal.
+            </p>
+            <LinkKopieren url={gewaehlt.link} />
+          </div>
+        )}
+        {gewaehlt.status === "offen" && (
+          <Btn variante="hell" onClick={() => {
+            setAnfragen(anfragen.map((x) => (x.id === gewaehlt.id ? { ...x, status: "zurueckgezogen" } : x)));
+            setAuswahl(null);
+          }}>Anfrage zurückziehen</Btn>
+        )}
+      </div>
+    );
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <p className="text-sm" style={{ color: C.muted, maxWidth: "52ch" }}>
+          Neue Vertriebspartner für deine Struktur fragst du hier bei der Geschäftsführung an.
+          Nach der Freigabe bekommst du den Einladungslink.
+        </p>
+        <Btn icon={Plus} onClick={() => setNeu(leer())}>Neuen Partner anfragen</Btn>
+      </div>
+      {meine.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm" style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          Noch keine Anfragen.
+        </div>
+      ) : (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {meine.map((x, i) => (
+            <button key={x.id} onClick={() => setAuswahl(x.id)}
+              className="w-full text-left px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1"
+              style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <div className="flex-1 min-w-40">
+                <div className="text-sm">{x.name}</div>
+                <div className="text-xs" style={{ color: C.muted }}>
+                  {num(x.satz, 0)} % · angefragt am {datum(x.datum)}
+                </div>
+              </div>
+              <div className="w-48"><StrukturStatus status={x.status} /></div>
+              <ChevronRight size={15} style={{ color: C.muted }} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Freigabe einer Strukturanfrage durch die Geschäftsführung */
+function StrukturFreigabe({ anfrage, mitarbeiter, setMitarbeiter, strukturanfragen, setStrukturanfragen,
+                            user, notieren, onZurueck }) {
+  const [satz, setSatz] = useState(String(anfrage.satz));
+  const [unterschrift, setUnterschrift] = useState(null);
+  const [grund, setGrund] = useState("");
+  const [fertig, setFertig] = useState(null);
+  const tl = mitarbeiter.find((m) => m.id === anfrage.vonId);
+  const s = parseFloat(String(satz).replace(",", "."));
+  const satzOk = !isNaN(s) && s > 0 && s <= 50;
+  const schonDa = mitarbeiter.some((m) => (m.email || "").toLowerCase() === anfrage.email.toLowerCase());
+
+  const setzAnfrage = (aend) =>
+    setStrukturanfragen(strukturanfragen.map((x) => (x.id === anfrage.id ? { ...x, ...aend } : x)));
+
+  const freigeben = () => {
+    const code = uid().toUpperCase() + uid().toUpperCase();
+    const url = window.location.origin + "/?code=" + code;
+    const id = "vp-" + uid();
+    const m = {
+      id, name: anfrage.name, rolle: "Vertriebspartner", team: anfrage.team || "-",
+      satz: s, upline: anfrage.upline || anfrage.vonId, email: anfrage.email,
+      telefon: anfrage.telefon || "", status: "eingeladen", passwort: "", bild: null, einladung: code,
+      stammdaten: leereStammdaten(),
+      vertrag: {
+        art: "Handelsvertretervertrag", rolle: "Vertriebspartner", satz: s,
+        upline: anfrage.upline || anfrage.vonId, team: anfrage.team || "-",
+        anfrageId: anfrage.id, anfrageVon: anfrage.von, anfrageDatum: anfrage.datum,
+        gfName: user.name, gfDatum: heute(), gfUnterschrift: unterschrift,
+        partnerUnterschrift: null, partnerDatum: null,
+      },
+    };
+    setMitarbeiter([...mitarbeiter, m]);
+    setzAnfrage({ status: "freigegeben", mitarbeiterId: id, link: url,
+                  freigabe: { von: user.name, datum: heute(), satz: s } });
+    if (notieren) notieren("Mitarbeiter", m.name + " auf Anfrage von " + anfrage.von +
+      " angelegt mit " + num(s, 0) + " %, Vertrag unterschrieben von " + user.name);
+    setFertig(url);
+  };
+
+  const ablehnen = () => {
+    setzAnfrage({ status: "abgelehnt", ablehnung: grund.trim(), entschieden: { von: user.name, datum: heute() } });
+    if (notieren) notieren("Struktur", "Anfrage für " + anfrage.name + " von " + anfrage.von + " abgelehnt");
+    onZurueck();
+  };
+
+  if (fertig)
+    return (
+      <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok }}>
+        <div className="flex items-center gap-2 mb-3" style={{ color: C.ok }}>
+          <Check size={16} /><span className="text-sm">{anfrage.name} wurde angelegt</span>
+        </div>
+        <p className="text-sm mb-3" style={{ color: C.muted, maxWidth: "60ch" }}>
+          Der Handelsvertretervertrag ist von dir unterschrieben. {anfrage.von} sieht den Link
+          ebenfalls in seinen Strukturanfragen. Der neue Partner unterschreibt, bevor er seine
+          Stammdaten zur Freigabe einreicht.
+        </p>
+        <LinkKopieren url={fertig} />
+        <div className="mt-3"><Btn variante="hell" onClick={onZurueck}>Fertig</Btn></div>
+      </div>
+    );
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-3">
+        <button onClick={onZurueck} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
+        <div className="flex-1">
+          <div className="text-lg">Strukturanfrage: {anfrage.name}</div>
+          <div className="text-xs" style={{ color: C.muted }}>
+            von {anfrage.von} (Satz {tl ? num(tl.satz, 0) : "?"} %) am {datum(anfrage.datum)}
+          </div>
+        </div>
+        <StrukturStatus status={anfrage.status} />
+      </div>
+
+      <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <div className="text-sm space-y-1 mb-4">
+          <div>{anfrage.email}{anfrage.telefon ? " · " + anfrage.telefon : ""}</div>
+          <div style={{ color: C.muted }}>Vertriebspartner · Team {anfrage.team} · zugeordnet an {anfrage.von}</div>
+          {anfrage.notiz && <div className="pt-2">{anfrage.notiz}</div>}
+        </div>
+        {schonDa && (
+          <p className="text-xs mb-3" style={{ color: C.warn }}>
+            Mit dieser E-Mail gibt es bereits einen Mitarbeiter.
+          </p>
+        )}
+        {anfrage.status === "offen" ? (
+          <>
+            <div className="sm:max-w-xs">
+              <Feld label="Provisionssatz in %" value={satz}
+                onChange={(v) => setSatz(v.replace(/[^\d,.]/g, ""))}
+                fehler={!satzOk ? "Zwischen 1 und 50 %" : null} />
+            </div>
+            <p className="text-xs mt-1 mb-4" style={{ color: C.muted }}>
+              Vorgeschlagen: {num(anfrage.satz, 0)} %.
+              {tl && satzOk ? " " + anfrage.von + " erhält " + num(Math.max(0, (tl.satz || 0) - s), 0) + " Prozentpunkte Overhead." : ""}
+            </p>
+            <Unterschrift label="Unterschrift Geschäftsführung unter den Handelsvertretervertrag"
+              onChange={setUnterschrift} />
+            <div className="flex flex-wrap gap-2 mt-5">
+              <Btn variante="ok" icon={Check} onClick={freigeben} disabled={!unterschrift || !satzOk || schonDa}>
+                Unterschreiben und Einladung erzeugen
+              </Btn>
+            </div>
+            <div className="mt-6 pt-5" style={{ borderTop: "1px solid " + C.line }}>
+              <Feld label="Begründung bei Ablehnung" value={grund} onChange={setGrund} breit />
+              <div className="mt-2">
+                <Btn variante="gefahr" onClick={ablehnen} disabled={!grund.trim()}>Ablehnen</Btn>
+              </div>
+            </div>
+          </>
+        ) : anfrage.status === "freigegeben" && anfrage.link ? (
+          <LinkKopieren url={anfrage.link} />
+        ) : (
+          <p className="text-sm" style={{ color: C.muted }}>{anfrage.ablehnung || ""}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Verwaltung der Vertriebsmitarbeiter: anlegen, einladen, Sätze setzen, freigeben */
+function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus, setBonus,
+                             strukturanfragen = [], setStrukturanfragen }) {
+  const [auswahl, setAuswahl] = useState(null);
+  const [anfrageAuswahl, setAnfrageAuswahl] = useState(null);
+  const [gfUnterschrift, setGfUnterschrift] = useState(null);
   const [neu, setNeu] = useState(null);
   const [link, setLink] = useState(null);
   const [hinweis, setHinweis] = useState("");
@@ -4592,6 +5209,15 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
     setz(gewaehlt.id, { status: "abgelehnt", pruefHinweis: hinweis });
     setHinweis(""); setAuswahl(null);
   };
+
+  /* ---------- Strukturanfrage eines Teamleiters ---------- */
+  const offeneAnfrage = strukturanfragen.find((x) => x.id === anfrageAuswahl);
+  if (offeneAnfrage && istGF)
+    return (
+      <StrukturFreigabe anfrage={offeneAnfrage} mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
+        strukturanfragen={strukturanfragen} setStrukturanfragen={setStrukturanfragen}
+        user={user} notieren={notieren} onZurueck={() => setAnfrageAuswahl(null)} />
+    );
 
   /* ---------- Einladungslink nach dem Anlegen ---------- */
   if (link)
@@ -4742,6 +5368,61 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
           </div>
         )}
 
+        {istGF && (() => {
+          const v = gewaehlt.vertrag || {};
+          return (
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                <span className="text-sm">Handelsvertretervertrag</span>
+                {v.gfUnterschrift && (
+                  <button className="text-sm" style={{ color: C.strom }}
+                    onClick={() => vertragPdf(gewaehlt, mitarbeiter)}>Als PDF</button>
+                )}
+              </div>
+              {v.gfUnterschrift ? (
+                <div className="grid sm:grid-cols-2 gap-4 text-xs" style={{ color: C.muted }}>
+                  <div>
+                    <DateiBild datei={v.gfUnterschrift} hoehe={60} />
+                    <div className="mt-1">EGC-Energie: {v.gfName}, {datum(v.gfDatum)}</div>
+                  </div>
+                  <div>
+                    {v.partnerUnterschrift
+                      ? <DateiBild datei={v.partnerUnterschrift} hoehe={60} />
+                      : <div className="py-5">noch nicht unterschrieben</div>}
+                    <div className="mt-1">
+                      {gewaehlt.name}{v.partnerDatum ? ", " + datum(v.partnerDatum) : ""}
+                    </div>
+                  </div>
+                  <div className="sm:col-span-2">
+                    Satz im Vertrag: {num(parseFloat(v.satz) || 0, 0)} %
+                    {parseFloat(v.satz) !== parseFloat(gewaehlt.satz)
+                      ? " · aktuell " + num(gewaehlt.satz, 0) + " %" : ""}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs mb-3" style={{ color: C.muted }}>
+                    Noch nicht von der Geschäftsführung unterschrieben. Satz {num(gewaehlt.satz, 0)} %.
+                  </p>
+                  <Unterschrift label="Unterschrift Geschäftsführung" onChange={setGfUnterschrift} />
+                  <div className="mt-3">
+                    <Btn icon={Check} disabled={!gfUnterschrift} onClick={() => {
+                      setz(gewaehlt.id, { vertrag: {
+                        art: "Handelsvertretervertrag", rolle: gewaehlt.rolle, satz: gewaehlt.satz,
+                        upline: gewaehlt.upline || null, team: gewaehlt.team,
+                        gfName: user.name, gfDatum: heute(), gfUnterschrift,
+                        partnerUnterschrift: v.partnerUnterschrift || null, partnerDatum: v.partnerDatum || null,
+                      } });
+                      if (notieren) notieren("Vertrag", "Handelsvertretervertrag " + gewaehlt.name + " unterschrieben");
+                      setGfUnterschrift(null);
+                    }}>Vertrag unterschreiben</Btn>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
+
         {gewaehlt.status !== "eingeladen" && (
           <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="flex items-baseline justify-between mb-4">
@@ -4828,6 +5509,27 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
             Beispiel bei 1.000 € Gesamtprovision: Ein Partner mit 25 % erhält bei Eigenakquise{" "}
             {eur(10 * (25 + (parseFloat(bonus) || 0)))} statt {eur(250)}.
           </p>
+        </div>
+      )}
+
+      {istGF && strukturanfragen.some((x) => x.status === "offen") && (
+        <div className="rounded overflow-hidden mb-5" style={{ background: C.card, border: "1px solid " + C.gas }}>
+          <div className="px-4 py-3 text-sm" style={{ color: C.gas, borderBottom: "1px solid " + C.line }}>
+            Strukturanfragen der Teamleiter
+          </div>
+          {strukturanfragen.filter((x) => x.status === "offen").map((x, i) => (
+            <button key={x.id} onClick={() => setAnfrageAuswahl(x.id)}
+              className="w-full text-left px-4 py-3 flex items-center gap-4"
+              style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <div className="flex-1">
+                <div className="text-sm">{x.name}</div>
+                <div className="text-xs" style={{ color: C.muted }}>
+                  {num(x.satz, 0)} % · angefragt von {x.von} am {datum(x.datum)}
+                </div>
+              </div>
+              <ChevronRight size={15} style={{ color: C.muted }} />
+            </button>
+          ))}
         </div>
       )}
 
@@ -6949,29 +7651,38 @@ function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
 
 /* Tippgeber des Vertriebspartners */
 const VERGUETUNG = [
-  { value: "prozent", label: "Prozentual an der Provision",
-    text: "Anteil an der Provision des Partners, je Lieferjahr", einheit: "%" },
-  { value: "fest", label: "Fester Betrag je Lieferjahr",
-    text: "Gleichbleibender Betrag für jedes Lieferjahr", einheit: "€" },
-  { value: "einmal", label: "Einmalzahlung",
-    text: "Einmalig bei Abschluss des Kunden", einheit: "€" },
+  { value: "kwh", label: "Fester Betrag je 100.000 kWh",
+    text: "Richtet sich nach der Liefermenge des Kunden", einheit: "€ je 100.000 kWh" },
+  { value: "prozent", label: "Prozentual an deiner Provision",
+    text: "Anteil an deiner eigenen Provision, nicht an der Gesamtprovision", einheit: "%" },
 ];
+const ZAHLWEISE = [
+  { value: "einmal", label: "Einmalig", text: "Nur für das erste Lieferjahr" },
+  { value: "jaehrlich", label: "Jährlich", text: "Für jedes Lieferjahr des Vertrags" },
+];
+const TIPPGEBER_VORSCHLAG_KWH = "250";
 
 const leererTippgeber = (besitzer) => ({
   id: "TG" + uid(), besitzerId: besitzer,
   name: "", firma: "", telefon: "", email: "", adresse: "",
-  art: "prozent", wert: "10", notiz: "", aktiv: true,
+  art: "kwh", wert: TIPPGEBER_VORSCHLAG_KWH, zahlweise: "einmal", notiz: "", aktiv: true,
   angelegt: heute(),
 });
 
-/* Was bekommt der Tippgeber für einen Kunden je Lieferjahr? */
-function tippgeberProvision(t, a, mitarbeiter) {
-  const eigen = anteilVon(a, t.besitzerId, mitarbeiter);
-  const wert = parseFloat(String(t.wert).replace(",", ".")) || 0;
-  if (t.art === "prozent") return (eigen * wert) / 100;
-  if (t.art === "fest") return wert;
-  return 0;
-}
+/* kurze Beschreibung der Vergütung, z. B. „250 € je 100.000 kWh, einmalig" */
+const tippgeberText = (t) => {
+  if (!t) return "";
+  const w = num(parseFloat(String(t.wert || "").replace(",", ".")) || 0, t.art === "prozent" ? 0 : 2);
+  const was = t.art === "prozent" ? w + " % der Provision" : w + " € je 100.000 kWh";
+  return was + (t.zahlweise === "jaehrlich" ? ", jährlich" : ", einmalig");
+};
+
+/* Was im Vorgang festgehalten wird. Spätere Änderungen am Tippgeber ändern
+   bestehende Abschlüsse nicht. */
+const tippgeberMomentaufnahme = (t) => t ? ({
+  id: t.id, name: t.firma || t.name, besitzerId: t.besitzerId,
+  art: t.art, wert: t.wert, zahlweise: t.zahlweise || "einmal", datum: heute(),
+}) : null;
 
 function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
   const [auswahl, setAuswahl] = useState(null);
@@ -6981,17 +7692,57 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
   const gewaehlt = tippgeber.find((t) => t.id === auswahl);
 
   const kundenVon = (t) => anfragen.filter((a) =>
-    a.tippgeberId === t.id && ["bestaetigt", "abgeschlossen"].includes(a.status));
+    ((a.tippgeber && a.tippgeber.id === t.id) || a.tippgeberId === t.id)
+    && ["bestaetigt", "abgeschlossen"].includes(a.status));
 
-  const summe = (t) => kundenVon(t).reduce((x, a) => x + tippgeberProvision(t, a, mitarbeiter), 0);
-  const einmalSumme = (t) => t.art === "einmal"
-    ? kundenVon(t).length * (parseFloat(String(t.wert).replace(",", ".")) || 0) : 0;
+  /* Betrag im 1. Lieferjahr und über die gesamte Laufzeit */
+  const betragVon = (a) => {
+    const v = gesamtverteilung(a, mitarbeiter, undefined, 1);
+    const erst = v.tippgeber ? v.tippgeber.betrag : 0;
+    const jahre = faelligkeiten(a).length;
+    const tg = a.tippgeber || {};
+    return { erst, gesamt: tg.zahlweise === "jaehrlich" ? erst * jahre : erst, jahre };
+  };
+  const summe = (t) => kundenVon(t).reduce((x, a) => x + betragVon(a).gesamt, 0);
 
   const speichern = () => {
     const da = tippgeber.some((t) => t.id === entwurf.id);
     setTippgeber(da ? tippgeber.map((t) => (t.id === entwurf.id ? entwurf : t))
                     : [...tippgeber, entwurf]);
     setEntwurf(null);
+  };
+
+  /* Eckdaten der Tippgebervereinbarung. Der Vertragstext folgt von der Geschäftsführung. */
+  const vereinbarungPdf = (t) => {
+    const partner = mitarbeiter.find((m) => m.id === t.besitzerId) || user;
+    const z = [];
+    z.push({ text: "Tippgebervereinbarung - Eckdaten", gross: true });
+    z.push(" ");
+    z.push({ text: "Tippgeber", gross: true });
+    z.push(t.firma || t.name);
+    if (t.firma && t.name) z.push("Ansprechpartner: " + t.name);
+    if (t.adresse) z.push(t.adresse);
+    if (t.telefon || t.email) z.push([t.telefon, t.email].filter(Boolean).join(" · "));
+    z.push(" ");
+    z.push({ text: "Vertriebspartner", gross: true });
+    z.push(partner.name + " · EGC-Energie");
+    z.push(" ");
+    z.push({ text: "Vergütung", gross: true });
+    z.push((VERGUETUNG.find((v) => v.value === t.art) || {}).label + ": " + tippgeberText(t));
+    z.push(t.zahlweise === "jaehrlich"
+      ? "Die Vergütung wird für jedes Lieferjahr eines vermittelten Kunden gezahlt."
+      : "Die Vergütung wird einmalig für das erste Lieferjahr eines vermittelten Kunden gezahlt.");
+    z.push("Fällig erst, wenn der Versorger den Kunden angenommen und die Provision an");
+    z.push("EGC-Energie gezahlt hat. Sie wird mit der Provision des Vertriebspartners verrechnet.");
+    z.push(" ");
+    z.push("Datum: " + datum(heute()));
+    z.push(" ");
+    z.push(" ");
+    z.push("______________________________          ______________________________");
+    z.push("Tippgeber                                         Vertriebspartner");
+    const pdf = erzeugePdf("tippgebervereinbarung_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
+      "Tippgebervereinbarung", z);
+    if (pdf) dateiLaden(pdf);
   };
 
   /* Auswertung: bewusst ohne Vertragsdaten */
@@ -7003,22 +7754,17 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
     if (t.adresse) z.push(t.adresse);
     z.push(" ");
     z.push("Vermittelt über " + (mitarbeiter.find((m) => m.id === t.besitzerId) || {}).name);
-    z.push("Vergütung: " + (VERGUETUNG.find((v) => v.value === t.art) || {}).label +
-           " · " + t.wert + (t.art === "prozent" ? " %" : " €"));
+    z.push("Vergütung: " + tippgeberText(t));
     z.push(" ");
     z.push({ text: "Vermittelte Kunden", gross: true });
     if (!kunden.length) z.push("Noch keine abgeschlossenen Kunden.");
     kunden.forEach((a) => {
-      const betrag = t.art === "einmal"
-        ? (parseFloat(String(t.wert).replace(",", ".")) || 0)
-        : tippgeberProvision(t, a, mitarbeiter);
-      z.push(a.kunde.firma + "   " + eur(betrag) +
-             (t.art === "einmal" ? "  (einmalig)" : "  je Lieferjahr"));
+      const b = betragVon(a);
+      z.push(a.kunde.firma + "   " + eur(b.erst) +
+             ((a.tippgeber || {}).zahlweise === "jaehrlich" ? "  je Lieferjahr, " + b.jahre + " Jahre" : "  einmalig"));
     });
     z.push(" ");
-    const gesamt = t.art === "einmal" ? einmalSumme(t) : summe(t);
-    z.push({ text: "Gesamt " + eur(gesamt) +
-             (t.art === "einmal" ? " einmalig" : " je Lieferjahr"), gross: true });
+    z.push({ text: "Gesamt " + eur(summe(t)), gross: true });
     z.push(" ");
     z.push("Erstellt am " + datum(heute()) + " · EGC-Energie");
     const pdf = erzeugePdf("tippgeber_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
@@ -7030,6 +7776,24 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
   if (entwurf) {
     const setF = (k, v) => setEntwurf({ ...entwurf, [k]: v });
     const art = VERGUETUNG.find((v) => v.value === entwurf.art) || VERGUETUNG[0];
+    const Wahl = ({ liste, feld }) => (
+      <div className="space-y-2">
+        {liste.map((v) => (
+          <button key={v.value}
+            onClick={() => setEntwurf({ ...entwurf, [feld]: v.value,
+              ...(feld === "art" && v.value !== entwurf.art
+                ? { wert: v.value === "kwh" ? TIPPGEBER_VORSCHLAG_KWH : "10" } : {}) })}
+            className="w-full text-left px-3 py-2 rounded"
+            style={{
+              background: entwurf[feld] === v.value ? "#F1F5FA" : "#fff",
+              border: "1px solid " + (entwurf[feld] === v.value ? C.strom : C.line),
+            }}>
+            <span className="text-sm">{v.label}</span>
+            <span className="block text-xs" style={{ color: C.muted }}>{v.text}</span>
+          </button>
+        ))}
+      </div>
+    );
     return (
       <div>
         <div className="flex items-center gap-3 mb-5">
@@ -7049,30 +7813,22 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
 
           <div>
             <span className="block text-xs mb-2" style={{ color: C.muted }}>Wie wird vergütet?</span>
-            <div className="space-y-2">
-              {VERGUETUNG.map((v) => (
-                <button key={v.value} onClick={() => setF("art", v.value)}
-                  className="w-full text-left px-3 py-2 rounded"
-                  style={{
-                    background: entwurf.art === v.value ? "#F1F5FA" : "#fff",
-                    border: "1px solid " + (entwurf.art === v.value ? C.strom : C.line),
-                  }}>
-                  <span className="text-sm">{v.label}</span>
-                  <span className="block text-xs" style={{ color: C.muted }}>{v.text}</span>
-                </button>
-              ))}
-            </div>
+            <Wahl liste={VERGUETUNG} feld="art" />
             <div className="sm:max-w-xs mt-4">
               <Feld label={"Wert in " + art.einheit} value={entwurf.wert}
                 onChange={(v) => setF("wert", v)} />
             </div>
             <p className="text-xs mt-2" style={{ color: C.muted }}>
-              {entwurf.art === "prozent"
-                ? "Anteil an deiner eigenen Provision, nicht an der Gesamtprovision."
-                : entwurf.art === "fest"
-                ? "Wird für jedes Lieferjahr des Vertrags fällig."
-                : "Wird einmalig beim Abschluss fällig."}
+              {entwurf.art === "kwh"
+                ? "Vorschlag: 250 € je 100.000 kWh. Bei 400.000 kWh sind das 1.000 €."
+                : "Beispiel: Bei 10 % und 2.000 € Provision erhält der Tippgeber 200 €."}
+              {" "}Der Betrag wird von deiner Provision abgezogen.
             </p>
+          </div>
+
+          <div>
+            <span className="block text-xs mb-2" style={{ color: C.muted }}>Wie oft wird gezahlt?</span>
+            <Wahl liste={ZAHLWEISE} feld="zahlweise" />
           </div>
 
           <Feld label="Notiz" value={entwurf.notiz} onChange={(v) => setF("notiz", v)} breit />
@@ -7083,6 +7839,10 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
             </Btn>
             <Btn variante="hell" onClick={() => setEntwurf(null)}>Abbrechen</Btn>
           </div>
+          <p className="text-xs" style={{ color: C.muted }}>
+            Änderungen gelten für künftige Abschlüsse. Bereits gemeldete Kunden behalten die
+            Vergütung, die beim Abschluss galt.
+          </p>
         </div>
       </div>
     );
@@ -7091,7 +7851,6 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
   /* ---------- Einzelansicht ---------- */
   if (gewaehlt) {
     const kunden = kundenVon(gewaehlt);
-    const art = VERGUETUNG.find((v) => v.value === gewaehlt.art) || VERGUETUNG[0];
     return (
       <div>
         <div className="flex items-center gap-3 mb-1">
@@ -7105,26 +7864,24 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
         <div className="grid sm:grid-cols-3 gap-3 mb-5">
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="text-xs mb-2" style={{ color: C.muted }}>Vergütung</div>
-            <div className="text-lg">{gewaehlt.wert} {art.einheit}</div>
-            <div className="text-xs mt-1" style={{ color: C.muted }}>{art.label}</div>
+            <div className="text-sm">{tippgeberText(gewaehlt)}</div>
           </div>
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="text-xs mb-2" style={{ color: C.muted }}>Vermittelte Kunden</div>
             <div className="text-2xl" style={{ fontVariantNumeric: "tabular-nums" }}>{kunden.length}</div>
           </div>
           <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.ok }}>
-            <div className="text-xs mb-2" style={{ color: C.muted }}>
-              {gewaehlt.art === "einmal" ? "Summe einmalig" : "Summe je Lieferjahr"}
-            </div>
+            <div className="text-xs mb-2" style={{ color: C.muted }}>Summe über die Laufzeit</div>
             <div className="text-2xl" style={{ color: C.ok, fontVariantNumeric: "tabular-nums" }}>
-              {num(gewaehlt.art === "einmal" ? einmalSumme(gewaehlt) : summe(gewaehlt), 2)} €
+              {num(summe(gewaehlt), 2)} €
             </div>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-5">
-          <Btn icon={FileText} onClick={() => auswertungPdf(gewaehlt)}>Auswertung als PDF</Btn>
-          <Btn variante="hell" onClick={() => setEntwurf(gewaehlt)}>Bearbeiten</Btn>
+          <Btn icon={FileSignature} onClick={() => vereinbarungPdf(gewaehlt)}>Vereinbarung als PDF</Btn>
+          <Btn variante="hell" icon={FileText} onClick={() => auswertungPdf(gewaehlt)}>Auswertung als PDF</Btn>
+          <Btn variante="hell" onClick={() => setEntwurf({ zahlweise: "einmal", ...gewaehlt })}>Bearbeiten</Btn>
           <Btn variante="gefahr" icon={Trash2}
             onClick={() => { setTippgeber(tippgeber.filter((t) => t.id !== gewaehlt.id)); setAuswahl(null); }}>
             Entfernen
@@ -7137,27 +7894,34 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
           </div>
           {kunden.length === 0 && (
             <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>
-              Noch keine abgeschlossenen Kunden über diesen Tippgeber.
+              Noch keine bestätigten Kunden über diesen Tippgeber.
             </div>
           )}
-          {kunden.map((a, i) => (
-            <div key={a.id} className="flex items-center gap-4 px-4 py-3 text-sm"
-                 style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
-              <span className="flex-1">{a.kunde.firma}
-                <span className="block text-xs" style={{ color: C.muted }}>{a.kunde.ort}</span>
-              </span>
-              <span style={{ fontVariantNumeric: "tabular-nums", color: C.ok }}>
-                {eur(gewaehlt.art === "einmal"
-                  ? (parseFloat(String(gewaehlt.wert).replace(",", ".")) || 0)
-                  : tippgeberProvision(gewaehlt, a, mitarbeiter))}
-              </span>
-            </div>
-          ))}
+          {kunden.map((a, i) => {
+            const b = betragVon(a);
+            return (
+              <div key={a.id} className="flex items-center gap-4 px-4 py-3 text-sm"
+                   style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+                <span className="flex-1">{a.kunde.firma}
+                  <span className="block text-xs" style={{ color: C.muted }}>
+                    {[a.kunde.ort, tippgeberText(a.tippgeber)].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
+                <span className="text-right" style={{ fontVariantNumeric: "tabular-nums", color: C.ok }}>
+                  {eur(b.erst)}
+                  <span className="block text-xs" style={{ color: C.muted }}>
+                    {(a.tippgeber || {}).zahlweise === "jaehrlich" ? "je Lieferjahr" : "einmalig"}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
         </div>
 
         <p className="text-xs mt-4" style={{ color: C.muted, maxWidth: "62ch" }}>
           Die Auswertung als PDF enthält ausschließlich Firmennamen und den Betrag für den
-          Tippgeber. Verbrauch, Laufzeit, Versorger und Aufschlag stehen nicht darin.
+          Tippgeber. Verbrauch, Laufzeit, Versorger und Aufschlag stehen nicht darin. Die
+          Vereinbarung enthält bisher nur die Eckdaten; der Vertragstext folgt.
         </p>
       </div>
     );
@@ -7169,7 +7933,7 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <p className="text-sm" style={{ color: C.muted, maxWidth: "52ch" }}>
           Deine Tippgeber und was sie für vermittelte Kunden erhalten. Die Vergütung legst du je
-          Tippgeber selbst fest.
+          Tippgeber selbst fest; sie wird von deiner Provision abgezogen.
         </p>
         <Btn icon={Plus} onClick={() => setEntwurf(leererTippgeber(user.id))}>Tippgeber anlegen</Btn>
       </div>
@@ -7182,7 +7946,6 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
       ) : (
         <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
           {meine.map((t, i) => {
-            const art = VERGUETUNG.find((v) => v.value === t.art) || VERGUETUNG[0];
             const anzahl = kundenVon(t).length;
             return (
               <button key={t.id} onClick={() => setAuswahl(t.id)}
@@ -7195,16 +7958,13 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
                     {t.notiz ? " · " + t.notiz : ""}
                   </div>
                 </div>
-                <span className="text-xs w-40" style={{ color: C.muted }}>
-                  {t.wert} {art.einheit} · {art.value === "einmal" ? "einmalig"
-                    : art.value === "fest" ? "je Lieferjahr" : "der Provision"}
-                </span>
+                <span className="text-xs w-44" style={{ color: C.muted }}>{tippgeberText(t)}</span>
                 <span className="text-sm w-24 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
                   {anzahl} {anzahl === 1 ? "Kunde" : "Kunden"}
                 </span>
                 <span className="text-sm w-28 text-right"
                       style={{ color: C.ok, fontVariantNumeric: "tabular-nums" }}>
-                  {eur(t.art === "einmal" ? einmalSumme(t) : summe(t))}
+                  {eur(summe(t))}
                 </span>
                 <ChevronRight size={15} style={{ color: C.muted }} />
               </button>
@@ -9066,16 +9826,32 @@ function Tickets({ tickets, setTickets, user, mitarbeiter }) {
   );
 }
 
-/* Provisionsabrechnung mit Fälligkeiten je Lieferjahr */
+/* Provisionsabrechnung mit Fälligkeiten je Lieferjahr.
+   1. Lieferjahr: sobald die Geschäftsführung den Provisionseingang bestätigt
+   hat, unabhängig vom Lieferbeginn. Jedes weitere Lieferjahr: erst wenn der
+   Kunde dort angekommen ist, ausgezahlt im Monat danach.
+   Beispiel: Abschluss 11/2026, Lieferbeginn 1.1.2029 → Jahr 1 nach Eingang,
+   Jahr 2 am 1.2.2030, Jahr 3 am 1.2.2031. */
+const ersterDesFolgemonats = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth() + 1, 1)).toISOString().slice(0, 10);
+};
+
 function faelligkeiten(a) {
   const v = aktiveVariante(a);
   const monate = laufzeitVon(a) || 12;
   const jahre = Math.max(1, Math.round(monate / 12));
   const beginn = (v && v.lieferbeginn) || a.angelegt;
-  return Array.from({ length: jahre }, (_, i) => ({
-    jahr: i + 1,
-    faellig: monateDazu(beginn, i * 12) || beginn,
-  }));
+  const eingang = (a.provisionErhalten && a.provisionErhalten.datum)
+    || ((a.verlauf || []).filter((x) => /^Provisionseingang bestätigt/.test(x.t || "")).pop() || {}).d
+    || (a.bestaetigung && a.bestaetigung.datum) || a.angelegt;
+  return Array.from({ length: jahre }, (_, i) => {
+    if (i === 0) return { jahr: 1, faellig: eingang, beginnLieferjahr: beginn };
+    const start = monateDazu(beginn, i * 12) || beginn;
+    const f = ersterDesFolgemonats(start) || start;
+    return { jahr: i + 1, faellig: f < eingang ? eingang : f, beginnLieferjahr: start };
+  });
 }
 
 function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeffnen }) {
@@ -9085,11 +9861,15 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
 
   const zeilen = [];
   abg.forEach((a) => {
-    const v = gesamtverteilung(a, mitarbeiter);
-    const plan = faelligkeiten(a);
-    v.anteile.forEach((x) => {
-      if (wer !== "alle" && x.id !== wer) return;
-      plan.forEach((f) => {
+    faelligkeiten(a).forEach((f) => {
+      /* je Lieferjahr eigens rechnen: ein einmaliger Tippgeber fällt nur im 1. Jahr an */
+      const v = gesamtverteilung(a, mitarbeiter, undefined, f.jahr);
+      const empfaenger = [...v.anteile];
+      if (v.tippgeber && v.tippgeber.betrag > 0)
+        empfaenger.push({ id: "tg-" + v.tippgeber.id, name: v.tippgeber.name, rolle: "Tippgeber",
+                          betrag: v.tippgeber.betrag, vonPartner: v.tippgeber.besitzerId });
+      empfaenger.forEach((x) => {
+        if (wer !== "alle" && x.id !== wer && x.vonPartner !== wer) return;
         const schluessel = x.id + ":" + f.jahr;
         const alt = (a.ausgezahlt || {})[x.id];
         const eintrag = (a.ausgezahlt || {})[schluessel] || (f.jahr === 1 ? alt : null);
@@ -9176,7 +9956,9 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
                 </div>
                 <div className="text-xs" style={{ color: C.muted }}>
                   {z.anfrage.id} · {z.person.name} ({z.person.rolle}
-                  {z.person.overhead ? ", Overhead" : ""}) · fällig {datum(z.faellig)}
+                  {z.person.overhead ? ", Overhead" : ""}
+                  {z.person.vonPartner ? ", von " + ((mitarbeiter.find((m) => m.id === z.person.vonPartner) || {}).name || "Partner") : ""})
+                  {" · fällig " + datum(z.faellig)}
                 </div>
               </button>
               <span className="text-sm w-28 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -9195,8 +9977,10 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
       )}
 
       <p className="text-xs mt-4" style={{ color: C.muted, maxWidth: "62ch" }}>
-        Je Lieferjahr entsteht eine eigene Fälligkeit, berechnet ab dem Lieferbeginn. Bei einem
-        Vertrag über 24 Monate sind das zwei Zahlungen je Empfänger.
+        Je Lieferjahr entsteht eine eigene Fälligkeit. Das erste Lieferjahr wird fällig, sobald der
+        Provisionseingang bestätigt ist, auch wenn die Belieferung erst später beginnt. Jedes weitere
+        Lieferjahr wird im Monat nach seinem Beginn fällig: Lieferbeginn 1.1.2029 ergibt Februar 2030
+        und Februar 2031.
       </p>
     </div>
   );
@@ -9834,6 +10618,7 @@ export default function App() {
   const [protokoll, setProtokoll] = useState([]);
   const [bonusSatz, setBonusSatz] = useState("10");
   const [tippgeber, setTippgeber] = useState([]);
+  const [strukturanfragen, setStrukturanfragen] = useState([]);
   const [bonusziele, setBonusziele] = useState(BONUSZIELE_START);
   const [firmenanteil, setFirmenanteil] = useState("");
   const [listenAnsicht, setListenAnsicht] = useState(null);
@@ -9859,14 +10644,14 @@ export default function App() {
     anfragen: setAnfragen, mitarbeiter: setMitarbeiter, leads: setLeads, ablage: setAblage,
     versorger: setVersorger, tickets: setTickets, smartmeter: setSmartmeter, probleme: setProbleme,
     termine: setTermine, akquise: setAkquise, aufgaben: setAufgaben, protokoll: setProtokoll,
-    tippgeber: setTippgeber,
+    tippgeber: setTippgeber, strukturanfragen: setStrukturanfragen,
   };
   const UMFORMEN = { anfragen: migriereAnfragen, mitarbeiter: migriereMitarbeiter, leads: migriereLeads };
   const NAMEN = Object.keys(SETZER);
 
   const datenRef = React.useRef({});
   datenRef.current = { anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme,
-                       termine, akquise, aufgaben, protokoll, tippgeber };
+                       termine, akquise, aufgaben, protokoll, tippgeber, strukturanfragen };
   const zuletzt = React.useRef({});   /* zuletzt abgeglichener Stand je Sammlung */
   const zuSpeichern = React.useRef(new Set()); /* noch zu speichern */
   const nachladen = React.useRef(new Set());   /* Änderungen anderer, nach dem Speichern holen */
@@ -9961,7 +10746,7 @@ export default function App() {
     const t = setTimeout(speichernJetzt, 500);
     return () => clearTimeout(t);
   }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine,
-      akquise, aufgaben, protokoll, tippgeber, geladen, userId]);
+      akquise, aufgaben, protokoll, tippgeber, strukturanfragen, geladen, userId]);
 
   /* Einstellungen schreibt nur die Geschäftsführung */
   useEffect(() => {
@@ -10029,6 +10814,8 @@ export default function App() {
   };
 
   const neueLeads = user ? leads.filter((l) => l.zugewiesen === user.id && !l.gelesen).length : 0;
+  const offeneStrukturanfragen = user && user.rolle === "Geschäftsführung"
+    ? strukturanfragen.filter((x) => x.status === "offen").length : 0;
   const offeneTickets = user
     ? tickets.filter((t) => t.empfaenger === user.rolle && t.status !== "abgeschlossen").length : 0;
   const neueAuftraege = anfragen.filter((a) => a.status === "uebermittelt").length;
@@ -10267,6 +11054,7 @@ export default function App() {
       { id: "kunden", label: "Kunden im Team", icon: FileSignature },
       { id: "pruefung", label: "Kunde prüfen", icon: Check },
       { id: "tippgeber", label: "Tippgeber", icon: Users },
+      { id: "struktur", label: "Strukturanfragen", icon: Plus },
       { id: "pipeline", label: "Pipeline", icon: BarChart3 },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "leads", label: "Meine Leads", icon: Users, badge: neueLeads },
@@ -10368,7 +11156,7 @@ export default function App() {
       { id: "ruecksprachen", label: "Rücksprachen", icon: AlertTriangle },
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
-      { id: "partner", label: "Vertriebsmitarbeiter", icon: Users },
+      { id: "partner", label: "Vertriebsmitarbeiter", icon: Users, badge: offeneStrukturanfragen },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
       { id: "ziele", label: "Ziele", icon: Target },
@@ -10445,7 +11233,7 @@ export default function App() {
     inhalt = <MeineStammdaten user={user} mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} />;
   } else if (aktuell) {
     inhalt = (
-      <Detail a={aktuell} user={user} mitarbeiter={mitarbeiter} versorger={versorger}
+      <Detail a={aktuell} user={user} mitarbeiter={mitarbeiter} versorger={versorger} tippgeber={tippgeber}
         alleAnfragen={anfragen}
         onZurueck={() => setOffen(null)} onUpdate={(a) => speichern(a)}
         onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }}
@@ -10653,8 +11441,11 @@ export default function App() {
   } else if (ansicht === "partner") {
     inhalt = <Partnerverwaltung mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
                user={user} notieren={notieren} bonus={bonusSatz}
+               strukturanfragen={strukturanfragen} setStrukturanfragen={setStrukturanfragen}
                setBonus={(v) => { setBonusSatz(v); setzeBonus(v);
                  notieren("Provisionssatz", "Bonus für Eigenakquise auf " + v + " Prozentpunkte gesetzt"); }} />;
+  } else if (ansicht === "struktur") {
+    inhalt = <Strukturanfragen anfragen={strukturanfragen} setAnfragen={setStrukturanfragen} user={user} />;
   } else if (ansicht === "meine-daten") {
     inhalt = <MeineStammdaten user={user} mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} />;
   } else {
