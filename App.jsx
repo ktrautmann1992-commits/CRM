@@ -292,7 +292,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.9 · 30.10.2026 · Tippgeber, Strukturanfragen, Folgeprovisionen";
+const VERSION = "v5.9.1 · 31.10.2026 · Schnellzugriff Angebot und Auftrag";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -10698,8 +10698,45 @@ function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, l
     l.terminDatum >= heute() && l.terminDatum <= wocheEnde);
   const stand = zielstand(user, anfragen, mitarbeiter);
 
+  /* Schnellzugriff: Angebot anfragen und Auftrag einreichen, oben und groß */
+  const schnell = vertrieb || user.rolle === "Geschäftsführung";
+  const annehmbar = menge_.filter((a) => a.status === "angebot");
+  const auftragEinreichen = () => annehmbar.length === 1
+    ? onOeffnen(annehmbar[0].id)
+    : onListe("Auftrag einreichen: Angebot wählen", annehmbar);
+
   return (
     <div className="space-y-5">
+      {schnell && (
+        <div className="grid sm:grid-cols-2 gap-3">
+          <button onClick={() => onOeffnen(null, "neu")}
+            className="rounded p-4 text-left w-full flex items-center gap-4"
+            style={{ background: C.ink, color: "#fff" }}>
+            <span className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: C.gruen }}><Plus size={22} color={C.ink} /></span>
+            <span>
+              <span className="block text-base">Angebot anfragen</span>
+              <span className="block text-xs" style={{ color: "#B9C6D4" }}>Neuen Kunden an die Kalkulation geben</span>
+            </span>
+          </button>
+          <button onClick={auftragEinreichen} disabled={!annehmbar.length}
+            className="rounded p-4 text-left w-full flex items-center gap-4"
+            style={{ background: C.card, border: "2px solid " + (annehmbar.length ? C.ok : C.line),
+                     opacity: annehmbar.length ? 1 : 0.6 }}>
+            <span className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: annehmbar.length ? C.ok : C.line }}><Check size={22} color="#fff" /></span>
+            <span>
+              <span className="block text-base">Auftrag einreichen</span>
+              <span className="block text-xs" style={{ color: C.muted }}>
+                {annehmbar.length === 0 ? "Kein Angebot beim Kunden"
+                  : annehmbar.length === 1 ? "1 Angebot wartet: " + annehmbar[0].kunde.firma
+                  : annehmbar.length + " Angebote warten auf die Zusage des Kunden"}
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         {istTL ? <Umschalter bereich={bereich} setBereich={setBereich} /> : <span />}
         <button className="text-xs px-2 py-1 rounded" style={{ border: "1px solid " + C.line, color: C.muted }}
