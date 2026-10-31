@@ -3,6 +3,8 @@ import {
   Zap, Flame, Plus, Send, ArrowLeft, Upload, FileText, Check, X,
   AlertTriangle, Users, Calculator, FileSignature, BarChart3,
   Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw, Menu, Bell, Target, Calendar,
+  Search, ClipboardList, Contact, Briefcase, Lightbulb, UserPlus, Network, Trophy, Ban,
+  MessageSquare, FolderOpen, CircleUser, Gauge,
 } from "lucide-react";
 import {
   sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
@@ -292,7 +294,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.9.1 · 31.10.2026 · Schnellzugriff Angebot und Auftrag";
+const VERSION = "v5.9.1 · 31.10.2026 · Schnellzugriff und aufgeräumte Seitenleiste";
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -11585,6 +11587,36 @@ export default function App() {
     ],
   }[rolle] || [{ id: "dashboard", label: "Übersicht", icon: BarChart3 }];
 
+  /* Seitenleiste im Vertrieb: Neue Anfrage als Knopf oben, darunter Gruppen,
+     jeder Punkt mit eigenem Symbol */
+  const navGruppiert = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(rolle);
+  const NAV_SYMBOL = {
+    dashboard: Gauge, anfragen: Inbox, alle: Briefcase, kunden: Contact, pruefung: Search,
+    leads: UserPlus, akquise: Target, tippgeber: Lightbulb, pipeline: BarChart3, struktur: Network,
+    partner: Users, provisionen: Wallet, ziele: Trophy, smartmeter: Zap, probleme: AlertTriangle,
+    stornos: Ban, aufgaben: ClipboardList, kalender: Calendar, tickets: MessageSquare,
+    unterlagen: FolderOpen, "meine-daten": CircleUser,
+  };
+  const NAV_GRUPPEN = [
+    ["", ["dashboard"]],
+    ["Kunden und Anfragen", ["anfragen", "alle", "kunden", "pruefung"]],
+    ["Akquise", ["leads", "akquise", "tippgeber", "pipeline", "struktur", "partner"]],
+    ["Provision und Ziele", ["provisionen", "ziele"]],
+    ["Betreuung", ["smartmeter", "probleme", "stornos"]],
+    ["Organisation", ["aufgaben", "kalender", "tickets", "unterlagen", "meine-daten"]],
+  ];
+  const navAbschnitte = (() => {
+    if (!navGruppiert) return [["", NAV]];
+    const vergeben = new Set(["neu"]);
+    const teile = NAV_GRUPPEN.map(([titel, ids]) => {
+      const punkte = ids.map((id) => NAV.find((n) => n.id === id)).filter(Boolean);
+      punkte.forEach((n) => vergeben.add(n.id));
+      return [titel, punkte];
+    });
+    const rest = NAV.filter((n) => !vergeben.has(n.id));
+    return [...teile, ...(rest.length ? [["Weiteres", rest]] : [])].filter(([, p]) => p.length);
+  })();
+
   useEffect(() => {
     setOffen(null); setEntwurf(null);
     if (!userId) return;
@@ -11932,22 +11964,43 @@ export default function App() {
           </div>
 
           <nav className="lg:block">
-            {(gesperrt ? [] : NAV).map((n) => (
-              <button key={n.id}
-                onClick={() => { setAnsicht(n.id); setOffen(null); setEntwurf(null);
+            {!gesperrt && navGruppiert && NAV.some((n) => n.id === "neu") && (
+              <button
+                onClick={() => { setAnsicht("neu"); setOffen(null); setEntwurf(null);
                                  setListenAnsicht(null); setMenu(false); }}
-                className="flex items-center gap-2.5 px-3 py-2 rounded text-sm w-full"
-                style={{
-                  background: ansicht === n.id && !offen ? C.inkSoft : "transparent",
-                  color: ansicht === n.id && !offen ? "#fff" : "#93A4B8",
-                }}>
-                <n.icon size={15} />
-                <span className="flex-1 text-left">{n.label}</span>
-                {n.badge > 0 && (
-                  <span className="text-xs px-1.5 rounded-full"
-                        style={{ background: C.gruen, color: "#0A1626" }}>{n.badge}</span>
-                )}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded text-sm w-full mb-3"
+                style={{ background: C.gruen, color: "#0A1626" }}>
+                <Plus size={16} /> Neue Anfrage
               </button>
+            )}
+            {(gesperrt ? [] : navAbschnitte).map(([titel, punkte]) => (
+              <div key={titel || "start"} className={titel ? "mt-3" : ""}>
+                {titel && (
+                  <div className="px-3 pb-1 text-xs uppercase tracking-wider" style={{ color: "#5C6E85" }}>
+                    {titel}
+                  </div>
+                )}
+                {punkte.map((n) => {
+                  const Symbol = (navGruppiert && NAV_SYMBOL[n.id]) || n.icon;
+                  return (
+                    <button key={n.id}
+                      onClick={() => { setAnsicht(n.id); setOffen(null); setEntwurf(null);
+                                       setListenAnsicht(null); setMenu(false); }}
+                      className="flex items-center gap-2.5 px-3 py-2 rounded text-sm w-full"
+                      style={{
+                        background: ansicht === n.id && !offen ? C.inkSoft : "transparent",
+                        color: ansicht === n.id && !offen ? "#fff" : "#93A4B8",
+                      }}>
+                      <Symbol size={15} />
+                      <span className="flex-1 text-left">{n.label}</span>
+                      {n.badge > 0 && (
+                        <span className="text-xs px-1.5 rounded-full"
+                              style={{ background: C.gruen, color: "#0A1626" }}>{n.badge}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             ))}
           </nav>
 
