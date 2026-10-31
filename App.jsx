@@ -295,6 +295,8 @@ const stammdatenLuecken = (sd) => {
 };
 
 const VERSION = "v5.9.1 · 31.10.2026 · Schnellzugriff und aufgeräumte Seitenleiste";
+/* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
+const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
 const USERS = [
   { id: "vp-weber", name: "Marco Weber", rolle: "Vertriebspartner", team: "Süd", satz: 25, upline: "tl-sued",
@@ -5836,7 +5838,7 @@ function Login({ onAngemeldet, onEinladung, startCode }) {
             <p className="text-xs" style={{ color: C.muted }}>
               Passwort vergessen? Die Geschäftsführung schickt dir einen neuen Einladungslink.
             </p>
-            <p className="text-xs mt-2" style={{ color: C.muted }}>{VERSION}</p>
+            <p className="text-xs mt-2" style={{ color: C.muted }}>{VERSION_ANZEIGE}</p>
           </div>
         </div>
       </div>
@@ -12010,7 +12012,7 @@ export default function App() {
             Abmelden
           </button>
 
-          <p className="text-xs mt-4" style={{ color: "#5C6E85" }}>{VERSION}</p>
+          <p className="text-xs mt-4" style={{ color: "#5C6E85" }}>{VERSION_ANZEIGE}</p>
           {gesperrt && (
             <p className="text-xs mt-2" style={{ color: "#8B9BB0" }}>
               Das Portal wird freigeschaltet, sobald deine Stammdaten geprüft sind.
