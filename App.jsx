@@ -1382,7 +1382,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     const spar = summeAlt - summeNeu;
     flaeche(GRUEN); doc.rect(RA, y, BR, 18, "F");
     schrift(10, true); farbe([255, 255, 255]);
-    text(mitVergleich ? "IHRE ERSPARNIS PRO JAHR" : "IHRE PROGNOSTIZIERTEN ENERGIEKOSTEN PRO JAHR", RA + 4, y + 8);
+    text(mitVergleich ? "IHRE ERSPARNIS PRO JAHR" : "IHRE ENERGIEKOSTEN PRO JAHR", RA + 4, y + 8);
     schrift(17, true); text(eurx(mitVergleich ? spar : summeNeu), W - RA - 4, y + 9, { align: "right" });
     schrift(7.5); text(mitVergleich ? (summeAlt > 0 ? "(entspricht ca. " + num(spar / summeAlt * 100, 1) + " % Ersparnis)" : "")
       : "(ohne Vergleich mit dem bisherigen Versorger)", W - RA - 4, y + 14.5, { align: "right" });
