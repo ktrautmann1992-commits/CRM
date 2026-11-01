@@ -294,7 +294,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.9.1 · 31.10.2026 · Schnellzugriff und aufgeräumte Seitenleiste";
+const VERSION = "v5.10 · 01.11.2026 · Angebot im EGC-Design";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -880,8 +880,8 @@ async function lastgangAuswerten(datei) {
   let beste = -1, meiste = 0;
   for (let i = 0; i < breite; i++) {
     const gefuellt = proben.filter((z) => z[i] !== undefined && z[i] !== "");
-    /* Spalten mit Datumsangaben scheiden aus */
-    if (gefuellt.filter((z) => istDatum(z[i])).length > gefuellt.length / 2) continue;
+    /* Spalten mit Datumsangaben scheiden aus, auch Excel-Seriennummern */
+    if (gefuellt.filter((z) => istDatum(z[i]) || istSeriennummer(z[i])).length > gefuellt.length / 2) continue;
     const treffer = gefuellt.filter((z) => !isNaN(zahlLesen(z[i]))).length;
     if (treffer > meiste) { meiste = treffer; beste = i; }
   }
@@ -893,7 +893,7 @@ async function lastgangAuswerten(datei) {
     const w = zahlLesen(z[beste]);
     if (isNaN(w)) return;
     werte.push(w);
-    zeitpunkte.push(z.find((f) => istDatum(f)) || null);
+    zeitpunkte.push(z.find((f) => istDatum(f)) || z.find((f) => istSeriennummer(f)) || null);
   });
   if (werte.length < 10) throw new Error("Zu wenige Messwerte gefunden.");
 
@@ -909,9 +909,8 @@ async function lastgangAuswerten(datei) {
   const monate = Array(12).fill(0);
   let mitDatum = 0;
   werte.forEach((w, i) => {
-    const t = zeitpunkte[i];
-    const m = t && String(t).match(/\d{1,2}[.\-/](\d{1,2})[.\-/]\d{2,4}/);
-    if (m) { monate[parseInt(m[1]) - 1] += w; mitDatum++; }
+    const t = zeitLesen(zeitpunkte[i]);
+    if (t) { monate[t.getMonth()] += w; mitDatum++; }
   });
   const profil = mitDatum > werte.length / 2 ? monate : (() => {
     const teile = Array(12).fill(0);
@@ -920,7 +919,8 @@ async function lastgangAuswerten(datei) {
   })();
 
   return { anzahl: werte.length, summe, max, schnitt, spitze, benutzung, profil,
-           datiert: mitDatum > werte.length / 2 };
+           datiert: mitDatum > werte.length / 2,
+           verlaeufe: lastgangVerlaeufe(werte, zeitpunkte, proStunde) };
 }
 
 function Lastganganalyse({ datei }) {
@@ -948,6 +948,7 @@ function Lastganganalyse({ datei }) {
 
   const maxProfil = Math.max(...stand.profil, 1);
   const monatsnamen = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+  const bilder = stand.verlaeufe ? (stand.bilder || (stand.bilder = lastgangGrafiken(stand))) : null;
 
   return (
     <div className="mt-3 p-3 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
@@ -975,6 +976,13 @@ function Lastganganalyse({ datei }) {
       <div className="flex justify-between text-xs mt-1" style={{ color: C.muted }}>
         {monatsnamen.map((m, i) => <span key={i}>{m}</span>)}
       </div>
+      {bilder && (
+        <div className="space-y-3 mt-4">
+          {[bilder.jahr, bilder.woche, bilder.werktag].map((b, i) => (
+            <img key={i} src={b} alt="" className="w-full rounded" style={{ border: "1px solid " + C.line }} />
+          ))}
+        </div>
+      )}
       <p className="text-xs mt-2" style={{ color: C.muted }}>
         {stand.datiert ? "Monatsverlauf aus den Zeitstempeln der Datei."
           : "Kein Datum erkannt, die Datei wurde in zwölf gleich große Abschnitte geteilt."}
@@ -982,6 +990,571 @@ function Lastganganalyse({ datei }) {
       </p>
     </div>
   );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Angebot im EGC-Design                                              */
+/*  Nach der Excel-Vorlage „Energate Angebot“: Deckblatt, Strom- und   */
+/*  Gasangebot mit Vergleich zum bisherigen Versorger, Lastgang-       */
+/*  Analyse, Service- & Beratungsauftrag, nächste Schritte.            */
+/*  Alle Preise netto.                                                 */
+/* ------------------------------------------------------------------ */
+
+/* Bisheriger Versorger je Lieferstelle: Arbeitspreis direkt oder aus der Rechnung.
+   Aus der Rechnung: (Betrag − anteiliger Grundpreis) ÷ Verbrauch. */
+/* Abrechnungstage einschließlich erstem und letztem Tag */
+const abrechnungstage = (von, bis) => {
+  const t = tageZwischen(von, bis);
+  return t == null ? 0 : t + 1;
+};
+function altPreis(vv) {
+  if (!vv) return null;
+  const z = (x) => zahlLesen(x);
+  const grund = z(vv.grundpreis);
+  if ((vv.modus || "preis") === "rechnung") {
+    const betrag = z(vv.betrag), menge = z(vv.verbrauch);
+    if (isNaN(betrag) || isNaN(menge) || menge <= 0) return null;
+    const tage = abrechnungstage(vv.von, vv.bis);
+    const grundAnteil = !isNaN(grund) && tage ? (grund * tage) / 365 : 0;
+    return { arbeit: ((betrag - grundAnteil) / menge) * 100, grundpreis: isNaN(grund) ? 0 : grund,
+             tage, aufgerechnet: true };
+  }
+  const arbeit = z(vv.arbeit);
+  if (isNaN(arbeit)) return null;
+  return { arbeit, grundpreis: isNaN(grund) ? 0 : grund };
+}
+
+/* Zeitstempel aus Lastgangdateien: 01.01.2025 00:15 · 2025-01-01T00:15 · Excel-Seriennummer */
+function zeitLesen(f) {
+  if (f == null || f === "") return null;
+  const s = String(f).trim();
+  let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})(?:[ T,]+(\d{1,2}):(\d{2}))?/);
+  if (m) {
+    const j = m[3].length === 2 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
+    return new Date(j, parseInt(m[2]) - 1, parseInt(m[1]), parseInt(m[4] || 0), parseInt(m[5] || 0));
+  }
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]), parseInt(m[4] || 0), parseInt(m[5] || 0));
+  if (/^\d{5}([.,]\d+)?$/.test(s)) {
+    const z = parseFloat(s.replace(",", "."));
+    if (z > 20000 && z < 80000) {
+      const d = new Date(Math.round((z - 25569) * 86400000));
+      return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes());
+    }
+  }
+  return null;
+}
+const istSeriennummer = (t) => /^\d{5}[.,]\d+$/.test(String(t || "").trim());
+
+/* Verläufe für Grafiken und Kennzahlen aus einem ausgewerteten Lastgang */
+function lastgangVerlaeufe(werte, zeiten, proStunde) {
+  const schritt = 60 / proStunde;
+  const gelesen = zeiten.map(zeitLesen);
+  const mitZeit = gelesen.filter(Boolean).length > werte.length / 2;
+  const start = mitZeit ? gelesen.find(Boolean) : new Date(new Date().getFullYear() - 1, 0, 1);
+  const zeit = (i) => (mitZeit && gelesen[i]) ? gelesen[i] : new Date(start.getTime() + i * schritt * 60000);
+
+  const tage = new Map();
+  const woche = Array(7 * 24).fill(0), wocheN = Array(7 * 24).fill(0);
+  const slots = 24 * proStunde;
+  const werktag = Array(slots).fill(0), werktagN = Array(slots).fill(0);
+  let imax = 0;
+  werte.forEach((w, i) => {
+    const kw = w * proStunde;
+    if (w > werte[imax]) imax = i;
+    const t = zeit(i);
+    const tag = t.getFullYear() + "-" + (t.getMonth() + 1) + "-" + t.getDate();
+    tage.set(tag, Math.max(tage.get(tag) || 0, kw));
+    const wt = (t.getDay() + 6) % 7;
+    woche[wt * 24 + t.getHours()] += kw; wocheN[wt * 24 + t.getHours()]++;
+    if (wt < 5) {
+      const s = t.getHours() * proStunde + Math.floor(t.getMinutes() / schritt);
+      werktag[s] += kw; werktagN[s]++;
+    }
+  });
+  const jahre = {};
+  werte.forEach((_, i) => { const j = zeit(i).getFullYear(); jahre[j] = (jahre[j] || 0) + 1; });
+  return {
+    tagesSpitze: [...tage.values()],
+    woche: woche.map((x, i) => (wocheN[i] ? x / wocheN[i] : 0)),
+    werktag: werktag.map((x, i) => (werktagN[i] ? x / werktagN[i] : 0)),
+    spitzeZeit: zeit(imax),
+    jahr: Object.entries(jahre).sort((x, y) => y[1] - x[1])[0][0],
+    schrittMin: schritt,
+  };
+}
+
+/* Verlaufsgrafik: Fläche oben dunkelblau, nach unten heller und durchsichtiger */
+function lastgangGrafik(werte, { breite = 1400, hoehe = 430, titel = "", achse = [], einheit = "kW" } = {}) {
+  const c = document.createElement("canvas");
+  c.width = breite; c.height = hoehe;
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, breite, hoehe);
+  const L = 92, R = 24, T = titel ? 62 : 20, B = 54;
+  const w = breite - L - R, h = hoehe - T - B;
+  const roh = Math.max(...werte, 0.001);
+  const stufe = Math.pow(10, Math.floor(Math.log10(roh / 5)));
+  const schritt = [1, 2, 2.5, 5, 10].map((f) => f * stufe).find((s) => roh / s <= 6) || stufe * 10;
+  const max = Math.ceil(roh / schritt) * schritt;
+  const x = (i) => L + (werte.length < 2 ? 0 : (i * w) / (werte.length - 1));
+  const y = (v) => T + h - (v / max) * h;
+
+  g.font = "600 30px Helvetica, Arial, sans-serif"; g.fillStyle = "#0A1626"; g.textAlign = "left";
+  if (titel) g.fillText(titel, L, 38);
+  g.font = "22px Helvetica, Arial, sans-serif"; g.textAlign = "right";
+  for (let v = 0; v <= max + 1e-9; v += schritt) {
+    g.strokeStyle = "#E3E7EC"; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(L, y(v)); g.lineTo(L + w, y(v)); g.stroke();
+    g.fillStyle = "#6B7787";
+    g.fillText(v.toLocaleString("de-DE", { maximumFractionDigits: 1 }), L - 12, y(v) + 7);
+  }
+  g.save(); g.translate(26, T + h / 2); g.rotate(-Math.PI / 2); g.textAlign = "center";
+  g.fillText(einheit, 0, 0); g.restore();
+
+  const verlauf = g.createLinearGradient(0, T, 0, T + h);
+  verlauf.addColorStop(0, "rgba(10,22,38,0.92)");
+  verlauf.addColorStop(0.55, "rgba(10,22,38,0.35)");
+  verlauf.addColorStop(1, "rgba(10,22,38,0.03)");
+  g.beginPath(); g.moveTo(x(0), y(0));
+  werte.forEach((v, i) => g.lineTo(x(i), y(v)));
+  g.lineTo(x(werte.length - 1), y(0)); g.closePath();
+  g.fillStyle = verlauf; g.fill();
+  g.beginPath(); werte.forEach((v, i) => (i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v))));
+  g.strokeStyle = "#0A1626"; g.lineWidth = 2.5; g.stroke();
+
+  g.fillStyle = "#6B7787"; g.textAlign = "center"; g.font = "22px Helvetica, Arial, sans-serif";
+  achse.forEach(({ i, text }) => g.fillText(text, x(i), T + h + 34));
+  return c.toDataURL("image/png");
+}
+
+const MONATE_KURZ = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+const WOCHENTAGE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
+/* die drei Grafiken der Lastgang-Analyse */
+function lastgangGrafiken(stand) {
+  const vl = stand.verlaeufe;
+  const n = vl.tagesSpitze.length;
+  return {
+    jahr: lastgangGrafik(vl.tagesSpitze, { titel: "Tagesspitzenlast " + vl.jahr,
+      achse: MONATE_KURZ.map((m, k) => ({ i: Math.round((k + 0.5) * (n - 1) / 12), text: m })) }),
+    woche: lastgangGrafik(vl.woche, { titel: "Eine durchschnittliche Woche",
+      achse: WOCHENTAGE.map((t, k) => ({ i: k * 24 + 12, text: t })) }),
+    werktag: lastgangGrafik(vl.werktag, { titel: "Ein typischer Werktag",
+      achse: [0, 4, 8, 12, 16, 20].map((s) => ({ i: Math.round((s * vl.werktag.length) / 24),
+        text: String(s).padStart(2, "0") + ":00" })) }),
+  };
+}
+
+/* Texte aus der Vorlage, auf EGC-Energie umgestellt */
+const EGC_LEISTUNGEN = ["Persönliche Betreuung und Beratung", "Transparente und faire Vertragsbedingungen",
+  "Sichere und zuverlässige Energieversorgung", "Keine versteckten Kosten", "Versorgerunabhängig"];
+const EGC_SCHRITTE = [
+  ["Angebot vorstellen", "Wir stellen Ihnen Ihr individuelles Energieangebot vor und beantworten alle offenen Fragen."],
+  ["Angebot und Service- & Beratungsauftrag unterzeichnen", "Sie bestätigen das Angebot sowie den Service- und Beratungsauftrag – schnell und unkompliziert."],
+  ["Versorgerwechsel durch EGC-Energie", "Wir übernehmen die komplette Abwicklung Ihres Versorgerwechsels – Sie müssen sich um nichts kümmern."],
+  ["Bewirtschaftung des Energievertrages und laufende Portfolioanpassung", "Wir kümmern uns kontinuierlich um Ihren Energievertrag und passen Ihr Portfolio laufend an die Marktentwicklung an. Sie haben einen Ansprechpartner für Ihre Energielieferverträge."],
+  ["Energienebenkosten-Optimierung", "Wir unterstützen Sie bei der Stromsteuer-Rückerstattung, der Reduzierung der Energienebenkosten sowie bei der Planung von PV-Anlage, Batteriespeicher und E-Ladesäulen. Sowie beim Einsatz von Smartmetern."],
+  ["Dauerhafte Partnerschaft", "Auch nach dem Wechsel bleiben wir an Ihrer Seite – persönliche Betreuung, langfristig und verlässlich. Bei uns haben Sie einen festen persönlichen Ansprechpartner und keine Warteschleife."],
+];
+const EGC_AUFTRAG = {
+  einleitung: "Einwilligung in die Datenverarbeitung zu Maklerzwecken laut Beiblatt",
+  abschnitte: [
+    ["Vertragsoptimierung", "Hiermit erteilt der Unterzeichner den Auftrag und die Vollmacht, in seinem Namen Verhandlungen über die von ihm genutzten und gewollten Energieprodukte zu führen und Aufträge (gem. Produktanlagen) auszuführen und ihn dabei sowohl bei bisherigen Versorgern als auch bei anderen Versorgungsunternehmen umfassend zu vertreten, Verträge zu kündigen und neue abzuschließen, die Installation von Smart-Meter-Messstellen zu beauftragen sowie sämtliche hierzu notwendigen Willenserklärungen abzugeben und entgegenzunehmen (unter Einschluss der Möglichkeit, Untervollmachten zu erteilen). Der Kunde stimmt hiermit einer Bestandsfreigabe/Übertragung seiner Versorgungsverträge auf das o. g. Beratungsunternehmen zu. Dieser Auftrag gilt für sämtliche aktuellen und zukünftigen Abnahmestellen des Kunden. Ebenso erteile ich die Vollmacht zur Nutzung meiner Bankverbindung für entsprechende Lastschriften des Energieanbieters."],
+    ["Laufzeit", "Diese Vollmacht läuft 12 Monate und verlängert sich automatisch um weitere 12 Monate, wenn sie nicht 6 Wochen vor Ablauf gekündigt wird."],
+  ],
+  datenschutz: [
+    ["Einwilligung", "Ja, ich bin damit einverstanden, dass das Unternehmen (ggf. unter Einschaltung eines beauftragten Dienstleisters) meine personenbezogenen Daten zum Zweck der Verhandlung über Energieprodukte bis auf Widerruf verwenden darf. Zu den vorgenannten Zwecken darf ich per Post, E-Mail, Telefon, Fax, SMS oder vergleichbaren Kommunikationsmitteln kontaktiert werden. Mir ist bewusst, dass diese Einwilligung freiwillig erfolgt und jederzeit widerrufbar ist. Meine in folgenden Abschnitten dargestellten Datenschutzrechte habe ich zur Kenntnis genommen. Eine darüber hinausgehende Verarbeitung personenbezogener Daten, die im folgenden Abschnitt beschrieben ist, erfolgt nur mit Ihrer Einwilligung (freiwillig)."],
+    ["Datenverarbeitung", "Das Unternehmen nimmt den Schutz der Daten der Kunden ernst. Grundsätzlich gilt, dass der Schutz Ihrer individuellen Privat- und Persönlichkeitssphäre für uns von höchster Bedeutung ist. Deshalb ist das Einhalten der gesetzlichen Bestimmungen zum Datenschutz für uns selbstverständlich. Darüber hinaus ist es uns wichtig, dass unsere Kunden jederzeit wissen, wann wir welche Daten speichern und wie wir diese verwenden."],
+    ["Einsatz von KI-gestützten Verarbeitungssystemen", "Zur effizienten Bearbeitung von Anfragen, der Erstellung von Angeboten sowie der Analyse von Energie-, Verbrauchs-, Lastgang- und Vertragsdaten können wir moderne KI-gestützte Softwarelösungen (z. B. ChatGPT, Claude oder vergleichbare Systeme) einsetzen. Dabei werden ausschließlich die zur Bearbeitung Ihres Anliegens erforderlichen Daten verarbeitet. Der Einsatz erfolgt unter Beachtung der geltenden datenschutzrechtlichen Bestimmungen und ausschließlich zu den vereinbarten Beratungs- und Dienstleistungszwecken. Sofern eine Übermittlung an externe KI-Dienstleister erfolgt, geschieht diese ausschließlich im Rahmen der gesetzlichen Vorgaben der Datenschutz-Grundverordnung (DSGVO) und unter Anwendung geeigneter Datenschutzgarantien. Auf Wunsch stellen wir Ihnen jederzeit einen ausführlichen Auszug über unsere KI-gestützte Datenverarbeitung einschließlich der eingesetzten Systeme, Verarbeitungszwecke und Datenschutzmaßnahmen zur Verfügung."],
+    ["Datenverarbeitung zur Vertragsabwicklung", "Die Verarbeitung der von Ihnen angegebenen personenbezogenen Daten (wie Name, Adresse, Geburtsdatum, Telefonnummer) durch uns ist zur ordnungsgemäßen Abwicklung des zugrunde liegenden Vertragsverhältnisses und soweit wir zu deren Erhebung gesetzlich verpflichtet sind, z. B. zur Einhaltung von Vorhaltefristen gegenüber dem Finanzamt, erforderlich. Sie beruht auf Art. 6 Abs. 1 Buchstabe b und c DSGVO. Die Daten werden gelöscht, sobald sie für die vorgenannten Zwecke nicht mehr erforderlich sind. Wir speichern Ihre personenbezogenen Daten jedoch, solange wir gesetzlich dazu verpflichtet sind, beispielsweise aufgrund von Aufbewahrungspflichten oder Verjährungsfristen noch nicht abgelaufener potenzieller Rechtsansprüche."],
+    ["Datenschutzrechte des Kunden und Kontaktdaten", "Sie können von uns jederzeit Auskunft über Ihre gespeicherten personenbezogenen Daten erhalten (Art. 15 DSGVO), deren Berichtigung (Art. 16 DSGVO), Löschung (Art. 17 DSGVO) oder Einschränkung der Verarbeitung (Art. 18 DSGVO) verlangen sowie Ihr Recht auf Datenübertragbarkeit (Art. 20 DSGVO) geltend machen. Zudem können Sie Ihre Einwilligungserklärung jederzeit ohne Angabe von Gründen mit Wirkung für die Zukunft ändern oder widerrufen (Art. 21 DSGVO). Bitte beachten Sie dabei, dass Datenverarbeitungen, die vor dem Widerruf erfolgt sind, hiervon nicht betroffen sind. Zu den vorgenannten Zwecken wenden Sie sich bitte an eine der nachfolgenden Kontaktadressen."],
+    ["Kosten der Beratung", "Dieser Serviceauftrag ist für den Endkunden kostenfrei. Sollten weitere Serviceleistungen erbracht werden, so werden diese sondervertraglich geregelt."],
+  ],
+};
+
+/* Der PDF-Baustein (jsPDF) wird erst geladen, wenn ein Angebot erzeugt wird.
+   Er liegt beim Bau unter /assets/jspdf-4.2.1.min.js. */
+let jsPdfLaden = null;
+const ladeJsPdf = () => {
+  if (window.jspdf) return Promise.resolve(window.jspdf.jsPDF);
+  if (!jsPdfLaden)
+    jsPdfLaden = new Promise((fertig, fehler) => {
+      const s = document.createElement("script");
+      s.src = "/assets/jspdf-4.2.1.min.js";
+      s.onload = () => fertig(window.jspdf.jsPDF);
+      s.onerror = () => { jsPdfLaden = null; fehler(new Error("PDF-Baustein konnte nicht geladen werden.")); };
+      document.head.appendChild(s);
+    });
+  return jsPdfLaden;
+};
+
+/* Erzeugt das Angebot als PDF. Gibt ein Dateiobjekt zurück wie ein Upload. */
+async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {} }) {
+  const jsPDF = await ladeJsPdf();
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+  const W = 210, H = 297, RA = 16, BR = W - 2 * RA;
+  const NAVY = [10, 22, 38], GRUEN = [108, 180, 59], TEXT = [22, 33, 44], GRAU = [107, 119, 135],
+        LINIE = [216, 221, 228], HELL = [246, 248, 250], GRUENHELL = [238, 246, 232];
+  const F = FIRMENDATEN;
+  const kunde = a.kunde || {};
+  const berater = mitarbeiter.find((m) => m.id === a.partnerId) || {};
+  const ansprech = kunde.ansprechpartner || "";
+  const heuteD = datum(a.kalkulation && a.kalkulation.datum || heute());
+  const gueltig = v.gueltigBis ? datum(v.gueltigBis) : "";
+  const ende = enddatum(v);
+  const zahl = (x, d = 2) => num(x, d);
+  const ct = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " ct/kWh");
+  const eurx = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " €");
+  const logo = "data:image/jpeg;base64," + LOGO_PDF;
+
+  const farbe = (f) => doc.setTextColor(f[0], f[1], f[2]);
+  const flaeche = (f) => doc.setFillColor(f[0], f[1], f[2]);
+  const strich = (f) => doc.setDrawColor(f[0], f[1], f[2]);
+  const schrift = (gr, fett) => { doc.setFont("helvetica", fett ? "bold" : "normal"); doc.setFontSize(gr); };
+  const text = (t, x, y, opt) => doc.text(String(t == null ? "" : t), x, y, opt);
+  const absatz = (t, x, y, breite, gr = 8.5, zeile = 4) => {
+    schrift(gr); const z = doc.splitTextToSize(String(t), breite); doc.text(z, x, y, { lineHeightFactor: 1.35 });
+    return y + z.length * zeile;
+  };
+  const fuss = () => {
+    strich(LINIE); doc.setLineWidth(0.3); doc.line(RA, H - 14, W - RA, H - 14);
+    schrift(7); farbe(GRAU);
+    const teile = [[F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "),
+      [F.strasse, F.ort].filter(Boolean).join(", "), F.email, F.ustId ? "USt-IdNr.: " + F.ustId : ""].filter(Boolean);
+    text(teile.join("  |  "), RA, H - 9);
+  };
+  const kopf = (titel) => {
+    flaeche(NAVY); doc.rect(0, 0, W, 26, "F");
+    doc.addImage(logo, "JPEG", RA, 6, (420 / 196) * 13, 13);
+    schrift(15, true); farbe([255, 255, 255]); text(titel, W - RA, 16, { align: "right" });
+    flaeche(GRUEN); doc.rect(0, 26, W, 1.2, "F");
+    fuss();
+    return 36;
+  };
+  const neueSeite = (titel) => { doc.addPage(); return kopf(titel); };
+  const ueberschrift = (t, x, y) => {
+    flaeche(GRUEN); doc.rect(x, y - 3.4, 1.2, 4.4, "F");
+    schrift(10, true); farbe(NAVY); text(t.toUpperCase(), x + 3.5, y); return y + 6;
+  };
+  const haken = (x, y) => {
+    strich(GRUEN); doc.setLineWidth(0.6); doc.line(x, y - 1.2, x + 1.2, y); doc.line(x + 1.2, y, x + 3.2, y - 2.8);
+  };
+  const unterschriften = (y, felder) => {
+    const b = (BR - 8 * (felder.length - 1)) / felder.length;
+    strich(TEXT); doc.setLineWidth(0.3);
+    felder.forEach((f, i) => {
+      const x = RA + i * (b + 8);
+      doc.line(x, y, x + b, y); schrift(7.5); farbe(GRAU); text(f, x, y + 4);
+    });
+    return y + 10;
+  };
+
+  /* ---------- Deckblatt ---------- */
+  flaeche(NAVY); doc.rect(0, 0, W, 132, "F");
+  doc.addImage(logo, "JPEG", RA, 26, (420 / 196) * 24, 24);
+  schrift(8, true); farbe(GRUEN); text("ENERGIEBERATUNG & VERTRIEB", RA, 60, { charSpace: 0.8 });
+  doc.setDrawColor(40, 58, 82); doc.setLineWidth(0.6);
+  doc.circle(W - 30, 30, 34, "S"); doc.circle(W - 8, 110, 22, "S");
+  flaeche(GRUEN); doc.rect(0, 132, W, 2, "F");
+  schrift(16); farbe(GRAU); text("Ihr individuelles", W / 2, 162, { align: "center" });
+  schrift(30, true); farbe(NAVY); text("Energieangebot", W / 2, 176, { align: "center" });
+  doc.setFont("helvetica", "italic"); doc.setFontSize(10); farbe(GRAU);
+  text("Persönlich zusammengestellt für " + (kunde.firma || ""), W / 2, 186, { align: "center" });
+  let y = 206;
+  flaeche(GRUEN); doc.rect(RA + 8, y - 6, 0.8, 52, "F");
+  [["Angebot für", [ansprech, kunde.firma].filter(Boolean).join(", ")], ["Erstellt am", heuteD],
+   ["Gültig bis", gueltig || "–"], ["Ihr Berater", berater.name || ""]].forEach(([k, w]) => {
+    schrift(7.5, true); farbe(GRAU); text(k.toUpperCase(), RA + 14, y, { charSpace: 0.4 });
+    schrift(10.5, true); farbe(TEXT); text(w, RA + 62, y);
+    strich(LINIE); doc.setLineWidth(0.2); doc.line(RA + 62, y + 3, W - RA - 8, y + 3);
+    y += 13;
+  });
+  flaeche(GRUEN); doc.rect(0, H - 14, W, 14, "F");
+  schrift(8.5, true); farbe([255, 255, 255]);
+  text([F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "), W / 2, H - 5.5, { align: "center" });
+
+  /* ---------- Angebot je Sparte ---------- */
+  const sparten = (v.sparte && v.sparte !== "beide") ? [v.sparte]
+    : ["strom", "gas"].filter((s) => a.lieferstellen.some((l) => l.medium === s));
+  let summeAlt = 0, summeNeu = 0, mitVergleich = false;
+
+  for (const sparte of sparten) {
+    const stellen = a.lieferstellen.filter((l) => l.medium === sparte);
+    if (!stellen.length) continue;
+    const name = sparte === "gas" ? "Erdgas" : "Strom";
+    y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+
+    /* Kopfangaben rechts, Kundenkontakt */
+    schrift(8); farbe(GRAU);
+    [["Berater:", berater.name || ""], ["Angebotsdatum:", heuteD], ["Angebot gültig bis:", gueltig || "–"]]
+      .forEach(([k, w], i) => { text(k, W - RA - 62, y + i * 4.6); schrift(8, true); farbe(TEXT);
+        text(w, W - RA, y + i * 4.6, { align: "right" }); schrift(8); farbe(GRAU); });
+    y += 18;
+    strich(GRUEN); doc.setLineWidth(0.5); flaeche([255, 255, 255]); doc.rect(RA, y, BR, 25, "S");
+    flaeche(GRUENHELL); doc.rect(RA, y, BR, 6, "F");
+    schrift(8, true); farbe(NAVY); text("KUNDENKONTAKT", RA + 3, y + 4.2);
+    const kx = [RA + 3, RA + 30, RA + BR / 2 + 3, RA + BR / 2 + 24];
+    [["Firma:", kunde.firma, "PLZ + Ort:", [kunde.plz, kunde.ort].filter(Boolean).join(" ")],
+     ["Ansprechpartner:", ansprech, "E-Mail:", kunde.email],
+     ["Straße + Hausnr.:", kunde.strasse, "Telefon:", kunde.telefon]].forEach((r, i) => {
+      const yy = y + 11 + i * 4.8;
+      schrift(8, true); farbe(TEXT); text(r[0], kx[0], yy); text(r[2], kx[2], yy);
+      schrift(8); text(r[1] || "–", kx[1], yy); text(r[3] || "–", kx[3], yy);
+    });
+    y += 32;
+
+    /* Begrüßung und Eckdaten */
+    farbe(TEXT);
+    y = absatz((ansprech ? "Guten Tag " + ansprech + ", h" : "H") + "erzlichen Dank für Ihre Anfrage. Gerne unterbreiten wir Ihnen nachfolgend ein individuelles Angebot für die Belieferung " +
+      (stellen.length > 1 ? "Ihrer Standorte" : "Ihres Standortes") + " mit " + name + ". Unser Ziel ist es, Ihnen nicht nur einen attraktiven Preis, sondern auch eine langfristige und verlässliche Partnerschaft zu bieten.",
+      RA, y, BR, 8.5, 3.9) + 2;
+    flaeche(HELL); doc.rect(RA, y, BR, 11, "F");
+    const eck = [["Neuer Versorger", v.versorger || "–"], ["Beschaffungsmodell", v.produkt || "–"],
+      ["Lieferbeginn", v.lieferbeginn ? datum(v.lieferbeginn) : "–"], ["Laufzeit bis", ende ? datum(ende) : (laufzeitMonate(v) || v.laufzeit) + " Monate"]];
+    eck.forEach(([k, w], i) => {
+      const x = RA + 3 + i * (BR / 4);
+      schrift(6.8); farbe(GRAU); text(k.toUpperCase(), x, y + 4.2);
+      schrift(9, true); farbe(TEXT); text(w, x, y + 8.6);
+    });
+    y += 16;
+    y = ueberschrift("Ihr aktueller Tarif im Vergleich zu unserem Angebot", RA, y + 2);
+
+    /* je Lieferstelle ein Vergleich */
+    const sp = [RA, RA + 62, RA + 104, RA + 146];
+    for (const l of stellen) {
+      const pr = (v.preise || {})[l.id] || {};
+      const neuA = zahlLesen(pr.arbeit), neuE = zahlLesen(pr.energie), neuG = zahlLesen(pr.grundpreis);
+      const vv = vorversorger[l.id] || {};
+      const alt = altPreis(vv);
+      const menge = zahlLesen(l.verbrauch) || 0;
+      const kostenNeu = (isNaN(neuG) ? 0 : neuG) + (isNaN(neuA) ? 0 : neuA) / 100 * menge;
+      const kostenAlt = alt ? alt.grundpreis + alt.arbeit / 100 * menge : null;
+      summeNeu += kostenNeu;
+      if (alt) { summeAlt += kostenAlt; mitVergleich = true; } else summeAlt += kostenNeu;
+      const zeilen = [
+        ["Versorger", vv.versorger || l.versorger || "–", v.versorger || "–", "–"],
+        ["Arbeitspreis (ct/kWh)", alt ? ct(alt.arbeit) : "–", ct(neuA), alt && !isNaN(neuA) ? ct(alt.arbeit - neuA) : "–"],
+        ...(!isNaN(neuE) ? [["davon Energiepreis (ct/kWh)", "–", ct(neuE), "–"]] : []),
+        ["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–", eurx(isNaN(neuG) ? 0 : neuG),
+          alt ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"],
+        ["Jahresverbrauch", num(menge) + " kWh", num(menge) + " kWh", "–"],
+        ["Lieferbeginn", "–", v.lieferbeginn ? datum(v.lieferbeginn) : "–", "–"],
+        ["Kosten pro Jahr", alt ? eurx(kostenAlt) : "–", eurx(kostenNeu), alt ? eurx(kostenAlt - kostenNeu) : "–"],
+      ];
+      const hoehe = 12 + zeilen.length * 5.6;
+      if (y + hoehe > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+      schrift(8.5, true); farbe(NAVY);
+      text((l.bezeichnung || name) + (l.zaehlerart ? " (" + l.zaehlerart + ")" : ""), RA, y);
+      schrift(7.5); farbe(GRAU);
+      text(["MaLo " + (l.maloId || "–"), "Zähler " + (l.zaehlernummer || "–"),
+        [l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")].filter(Boolean).join("  ·  "),
+        W - RA, y, { align: "right" });
+      y += 2;
+      flaeche(NAVY); doc.rect(sp[0], y, BR, 6, "F");
+      schrift(7.5, true); farbe([255, 255, 255]);
+      ["Position", "Ihr aktueller Tarif", "Unser Angebot", "Ersparnis"].forEach((t, i) => text(t, sp[i] + 2, y + 4.1));
+      flaeche(GRUEN); doc.rect(sp[2], y, 42, 6, "F"); farbe(NAVY); text("Unser Angebot", sp[2] + 2, y + 4.1);
+      y += 6;
+      zeilen.forEach((r, i) => {
+        const letzte = i === zeilen.length - 1;
+        if (letzte) { flaeche(GRUENHELL); doc.rect(RA, y, BR, 5.6, "F"); }
+        else if (i % 2) { flaeche(HELL); doc.rect(RA, y, BR, 5.6, "F"); }
+        schrift(8, letzte); farbe(TEXT);
+        r.forEach((t, k) => { if (k === 3 && t !== "–") farbe(GRUEN.map((c) => c * 0.75)); text(t, sp[k] + 2, y + 3.9); farbe(TEXT); });
+        y += 5.6;
+      });
+      strich(LINIE); doc.setLineWidth(0.2); doc.rect(RA, y - zeilen.length * 5.6 - 6, BR, zeilen.length * 5.6 + 6, "S");
+      y += 6;
+    }
+
+    /* Ergebnis */
+    if (y + 26 > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+    const spar = summeAlt - summeNeu;
+    flaeche(GRUEN); doc.rect(RA, y, BR, 18, "F");
+    schrift(10, true); farbe([255, 255, 255]);
+    text(mitVergleich ? "IHRE ERSPARNIS PRO JAHR" : "IHRE PROGNOSTIZIERTEN ENERGIEKOSTEN PRO JAHR", RA + 4, y + 8);
+    schrift(17, true); text(eurx(mitVergleich ? spar : summeNeu), W - RA - 4, y + 9, { align: "right" });
+    schrift(7.5); text(mitVergleich ? (summeAlt > 0 ? "(entspricht ca. " + num(spar / summeAlt * 100, 1) + " % Ersparnis)" : "")
+      : "(ohne Vergleich mit dem bisherigen Versorger)", W - RA - 4, y + 14.5, { align: "right" });
+    y += 24;
+    summeAlt = 0; summeNeu = 0; mitVergleich = false;
+
+    if (v.bemerkung) {
+      y = ueberschrift("Hinweise zum Angebot", RA, y + 2); farbe(TEXT); y = absatz(v.bemerkung, RA, y, BR) + 2;
+    }
+
+    /* Leistungen, Hinweis, Ansprechpartner, Annahme */
+    if (y + 38 > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+    const yl = ueberschrift("Leistungen inklusive", RA, y + 2);
+    schrift(8.5); farbe(TEXT);
+    EGC_LEISTUNGEN.forEach((t, i) => { haken(RA + 1, yl + i * 5); text(t, RA + 6, yl + i * 5); });
+    ueberschrift("Hinweis", RA + BR / 2 + 4, y + 2);
+    farbe(TEXT); absatz("Die Preisangaben verstehen sich zzgl. der gesetzlichen Umsatzsteuer. Änderungen der gesetzlichen Umlagen, Steuern und Abgaben bleiben vorbehalten.",
+      RA + BR / 2 + 4, yl, BR / 2 - 4);
+    y = yl + EGC_LEISTUNGEN.length * 5 + 4;
+
+    if (y + 58 > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+    y = ueberschrift("Ihr persönlicher Ansprechpartner", RA, y);
+    const bild = typeof berater.bild === "string" && /^data:image\/(jpeg|png)/.test(berater.bild) ? berater.bild : null;
+    let bx = RA;
+    if (bild) {
+      doc.addImage(bild, /png/.test(bild.slice(0, 20)) ? "PNG" : "JPEG", RA, y - 2, 20, 20);
+      strich(GRUEN); doc.setLineWidth(0.8); doc.rect(RA, y - 2, 20, 20, "S"); bx = RA + 25;
+    }
+    schrift(9, true); farbe(TEXT); text(berater.name || "", bx, y + 2);
+    schrift(8.5); farbe(GRAU);
+    [berater.email, berater.telefon, berater.rolle].filter(Boolean).forEach((t, i) => text(t, bx, y + 7 + i * 4.4));
+    y += 24;
+
+    flaeche(HELL); doc.rect(RA, y, BR, 30, "F");
+    schrift(9, true); farbe(NAVY); text("Angebot angenommen:", RA + 4, y + 6);
+    schrift(8.5); farbe(TEXT);
+    text("Hiermit akzeptiere ich das oben stehende Angebot und beauftrage EGC-Energie mit dem Abschluss des Energieliefervertrags.",
+      RA + 4, y + 11, { maxWidth: BR - 8 });
+    unterschriften(y + 23, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"]);
+  }
+
+  /* ---------- Lastgang-Analyse für RLM-Lieferstellen mit Lastgang ---------- */
+  const rlm = a.lieferstellen.filter((l) => l.zaehlerart === "RLM" && l.lastgang &&
+    (!v.sparte || v.sparte === "beide" || l.medium === v.sparte));
+  for (const l of rlm) {
+    let stand;
+    try { stand = await lastgangAuswerten({ ...l.lastgang, url: await dateiInhalt(l.lastgang) }); }
+    catch (e) { continue; }
+    if (!stand.verlaeufe) continue;
+    const bilder = lastgangGrafiken(stand);
+    y = neueSeite("LASTGANG-ANALYSE");
+    schrift(8); farbe(GRAU);
+    text("Zusatzblatt für Kunden mit RLM-Zähler (registrierende Leistungsmessung)", W - RA, y - 2, { align: "right" });
+    y = ueberschrift("Ihr Lastprofil " + stand.verlaeufe.jahr + (l.bezeichnung ? " · " + l.bezeichnung : ""), RA, y + 6);
+    farbe(TEXT);
+    y = absatz("Der folgende Jahresverlauf zeigt Ihren Verbrauch aus " + (stand.verlaeufe.schrittMin === 15 ? "15-Minuten-Werten" : "den Messwerten") +
+      " – so erkennen Sie auf einen Blick, wann Ihre Lastspitzen auftreten.", RA, y, BR) + 2;
+    const sz = stand.verlaeufe.spitzeZeit;
+    const kz = [["Jahresverbrauch", num(stand.summe) + " kWh", ""],
+      ["Spitzenlast", num(stand.spitze, 1) + " kW", sz ? "am " + String(sz.getDate()).padStart(2, "0") + "." + String(sz.getMonth() + 1).padStart(2, "0") + "." + sz.getFullYear() + " " +
+        String(sz.getHours()).padStart(2, "0") + ":" + String(sz.getMinutes()).padStart(2, "0") + " Uhr" : ""],
+      ["Ø Last", num(stand.schnitt * (stand.spitze / stand.max || 1), 1) + " kW", ""],
+      ["Jahresbenutzungsstunden", num(stand.benutzung, 0) + " h", ""]];
+    const kb = (BR - 9) / 4;
+    kz.forEach(([k, w, u], i) => {
+      const x = RA + i * (kb + 3);
+      strich(GRUEN); doc.setLineWidth(0.4); doc.rect(x, y, kb, 17, "S");
+      schrift(6.8); farbe(GRAU); text(k, x + 2.5, y + 4.5);
+      schrift(11, true); farbe(NAVY); text(w, x + 2.5, y + 11);
+      if (u) { schrift(6.2); farbe(GRAU); text(u, x + 2.5, y + 15); }
+    });
+    y += 22;
+    const gh = BR * (430 / 1400);
+    doc.addImage(bilder.jahr, "PNG", RA, y, BR, gh); y += gh + 3;
+    if (y + gh + 8 > H - 18) y = neueSeite("LASTGANG-ANALYSE");
+    schrift(7.5); farbe(GRAU);
+    text("Durchschnittlicher Lastverlauf je Wochentag, aus allen Wochen des Jahres gemittelt.", RA, y + 2); y += 3.5;
+    doc.addImage(bilder.woche, "PNG", RA, y, BR, gh); y += gh + 3;
+    if (y + gh + 8 > H - 18) y = neueSeite("LASTGANG-ANALYSE");
+    schrift(7.5); farbe(GRAU);
+    text("Durchschnittlicher Tagesverlauf an Werktagen (Montag bis Freitag).", RA, y + 2); y += 3.5;
+    doc.addImage(bilder.werktag, "PNG", RA, y, BR, gh);
+  }
+
+  /* ---------- Service- & Beratungsauftrag ---------- */
+  y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
+  const halb = BR / 2;
+  schrift(8, true); farbe(GRAU); text("ZWISCHEN", RA, y);
+  schrift(9, true); farbe(TEXT); text("EGC-Energie", RA, y + 5);
+  schrift(9); [F.vertreter ? "vertreten durch " + F.vertreter : "", F.strasse, F.ort].filter(Boolean)
+    .forEach((t, i) => text(t, RA, y + 9.5 + i * 4.4));
+  schrift(8); farbe(GRAU);
+  [["Berater:", berater.name], ["E-Mail:", berater.email], ["Kontakt:", berater.telefon]].forEach(([k, w], i) => {
+    text(k, RA + halb + 4, y + 5 + i * 4.6); schrift(8.5, true); farbe(TEXT); text(w || "–", RA + halb + 22, y + 5 + i * 4.6);
+    schrift(8); farbe(GRAU);
+  });
+  y += 26;
+  schrift(8, true); farbe(GRAU); text("UND", RA, y); y += 3;
+  [["Firma / Herr / Frau", kunde.firma + (ansprech ? " · " + ansprech : "")], ["Straße, Hausnummer", kunde.strasse],
+   ["PLZ, Ort", [kunde.plz, kunde.ort].filter(Boolean).join(" ")],
+   ["Telefon / E-Mail", [kunde.telefon, kunde.email].filter(Boolean).join(" · ")], ["Geburtsdatum", ""]].forEach(([k, w], i) => {
+    if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.6, "F"); }
+    schrift(8); farbe(GRAU); text(k, RA + 2, y + 3.9); schrift(8.5); farbe(TEXT); text(w || "", RA + 50, y + 3.9);
+    y += 5.6;
+  });
+  y += 5;
+  y = ueberschrift("Lieferadressen", RA, y);
+  for (const l of a.lieferstellen) {
+    if (y + 20 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
+    const vv = vorversorger[l.id] || {};
+    schrift(8.5, true); farbe(NAVY);
+    text((l.medium === "gas" ? "Erdgas" : "Strom") + (l.bezeichnung ? " · " + l.bezeichnung : "") + "  ·  " +
+      [l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", "), RA, y);
+    y += 1.5;
+    [["akt. Versorger", vv.versorger || l.versorger, "Kundennummer", l.kundennummer],
+     ["Verbrauch", l.verbrauch ? num(zahlLesen(l.verbrauch) || 0) + " kWh" : "", "Zählernummer", l.zaehlernummer],
+     ["Lieferbeginn", v.lieferbeginn ? datum(v.lieferbeginn) : "", "MaLo", l.maloId]].forEach((r, i) => {
+      if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.2, "F"); }
+      schrift(7.8); farbe(GRAU); text(r[0], RA + 2, y + 3.6); text(r[2], RA + halb + 2, y + 3.6);
+      farbe(TEXT); text(r[1] || "", RA + 32, y + 3.6); text(r[3] || "", RA + halb + 32, y + 3.6);
+      y += 5.2;
+    });
+    y += 3;
+  }
+  schrift(8.5, true); farbe(TEXT); text("IBAN:", RA, y + 4);
+  strich(TEXT); doc.setLineWidth(0.3); doc.line(RA + 14, y + 4.5, W - RA, y + 4.5);
+  y += 11;
+  if (y + 60 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
+  schrift(8.5, true); farbe(NAVY); text(EGC_AUFTRAG.einleitung, RA, y); y += 5;
+  EGC_AUFTRAG.abschnitte.forEach(([t, inhalt]) => {
+    schrift(8.5, true); farbe(TEXT); text(t, RA, y); y += 4;
+    farbe(TEXT); y = absatz(inhalt, RA, y, BR, 8, 3.6) + 2;
+  });
+  y += 6;
+  y = ueberschrift("Unterschriften Service- & Beratungsauftrag", RA, y);
+  unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
+
+  y = neueSeite("DATENSCHUTZ");
+  EGC_AUFTRAG.datenschutz.forEach(([t, inhalt]) => {
+    if (y + 26 > H - 22) y = neueSeite("DATENSCHUTZ");
+    schrift(8.5, true); farbe(NAVY); text(t, RA, y); y += 4;
+    farbe(TEXT); y = absatz(inhalt, RA, y, BR, 8, 3.6) + 3;
+  });
+  if (y + 24 > H - 22) y = neueSeite("DATENSCHUTZ");
+  y = ueberschrift("Unterschrift Einwilligung", RA, y + 4);
+  unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
+
+  /* ---------- Nächste Schritte ---------- */
+  doc.addPage();
+  flaeche(NAVY); doc.rect(0, 0, W, 44, "F");
+  doc.addImage(logo, "JPEG", RA, 12, (420 / 196) * 16, 16);
+  flaeche(GRUEN); doc.rect(0, 44, W, 1.2, "F");
+  schrift(14); farbe(GRAU); text("Ihre", RA, 62);
+  schrift(24, true); farbe(NAVY); text("nächsten Schritte", RA, 73);
+  doc.setFont("helvetica", "italic"); doc.setFontSize(9); farbe(GRAU);
+  text("So geht es nach Ihrem Energieangebot weiter:", RA, 80);
+  y = 96;
+  EGC_SCHRITTE.forEach(([t, inhalt], i) => {
+    flaeche(NAVY); doc.circle(RA + 5, y, 4.6, "F");
+    schrift(10, true); farbe([255, 255, 255]); text(String(i + 1), RA + 5, y + 1.3, { align: "center" });
+    if (i < EGC_SCHRITTE.length - 1) { strich(GRUEN); doc.setLineWidth(0.6); doc.line(RA + 5, y + 6, RA + 5, y + 24); }
+    schrift(10.5, true); farbe(NAVY); text(t, RA + 15, y + 1);
+    farbe(TEXT); absatz(inhalt, RA + 15, y + 6, BR - 15, 8.5, 3.9);
+    y += 29;
+  });
+  flaeche(NAVY); doc.rect(0, H - 22, W, 22, "F");
+  flaeche(GRUEN); doc.rect(0, H - 22, W, 1.2, "F");
+  schrift(8); farbe([185, 198, 212]);
+  text([[F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "), [F.strasse, F.ort].filter(Boolean).join(", "), F.email]
+    .filter(Boolean).join("  |  "), W / 2, H - 10, { align: "center" });
+
+  /* Seitenzahlen ab Seite 2 */
+  const n = doc.getNumberOfPages();
+  for (let i = 2; i < n; i++) {
+    doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 9, { align: "right" });
+  }
+
+  const roh = doc.output("datauristring");
+  const url = "data:application/pdf;base64," + roh.split(",")[1];
+  const name = "Angebot_" + (kunde.firma || a.id).replace(/[^\wäöüÄÖÜß]+/g, "_") + "_" +
+    (v.produkt || "").replace(/[^\wäöüÄÖÜß]+/g, "") + ".pdf";
+  return { name, typ: "application/pdf", groesse: Math.round(roh.length * 0.75), url };
 }
 
 /* Erzeugt ein Angebotsdokument aus den erfassten Daten */
@@ -2663,7 +3236,18 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const istPartner = istBeteiligt(a, user.id);
   const istVM = user.rolle === "Vertragsmanagement";
 
-  const setVar = (id, k, v) => setVars(vars.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
+  /* bisheriger Versorger je Lieferstelle, für den Vergleich im Angebot */
+  const [vorv, setVorv] = useState((a.kalkulation && a.kalkulation.vorversorger) || {});
+  const setVorvFeld = (lid, k, w) => setVorv((alt) => ({ ...alt, [lid]: { ...(alt[lid] || {}), [k]: w } }));
+  const [erzeugt, setErzeugt] = useState(null);
+  const angebotErzeugen = async (v) => {
+    setErzeugt(v.id);
+    try { setVar(v.id, "angebot", await egcAngebotPdf(a, v, { mitarbeiter, vorversorger: vorv })); }
+    catch (e) { alert("Das Angebot konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+    setErzeugt(null);
+  };
+
+  const setVar = (id, k, v) => setVars((alle) => alle.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
   const setVarPreis = (id, lid, art, v) =>
     setVars(vars.map((x) => x.id === id
       ? { ...x, preise: { ...x.preise, [lid]: { ...(x.preise[lid] || {}), [art]: v } } } : x));
@@ -2682,6 +3266,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         datum: heute(),
         vollmacht,
         dienstleistungsvertrag: dlv,
+        vorversorger: vorv,
         gewaehlt: null,
         varianten: vars.map((v) => ({
           ...v,
@@ -3353,6 +3938,71 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     ist je Variante erforderlich.
                   </p>
 
+                  <div className="rounded p-4" style={{ border: "1px solid " + C.line, background: "#FAFBFC" }}>
+                    <div className="text-sm mb-1">Bisheriger Versorger</div>
+                    <p className="text-xs mb-3" style={{ color: C.muted }}>
+                      Für den Vergleich im Angebot. Arbeitspreis direkt eintragen oder aus der Rechnung
+                      berechnen lassen. Alle Werte netto.
+                    </p>
+                    <div className="space-y-3">
+                      {a.lieferstellen.map((l) => {
+                        const vv = vorv[l.id] || {};
+                        const modus = vv.modus || "preis";
+                        const ergebnis = altPreis(vv);
+                        return (
+                          <div key={l.id} className="p-3 rounded" style={{ background: "#fff",
+                               border: "1px solid " + C.line, borderLeft: "3px solid " + (l.medium === "strom" ? C.strom : C.gas) }}>
+                            <div className="flex items-center gap-2 mb-2 text-sm">
+                              <MediumIcon medium={l.medium} />
+                              {l.bezeichnung || (l.medium === "strom" ? "Strom" : "Erdgas")}
+                              <span className="text-xs" style={{ color: C.muted }}>
+                                {num(zahlLesen(l.verbrauch) || 0)} kWh/Jahr
+                              </span>
+                            </div>
+                            <div className="grid sm:grid-cols-2 gap-3 mb-2">
+                              <Feld label="Bisheriger Versorger" value={vv.versorger ?? (l.versorger || "")}
+                                onChange={(x) => setVorvFeld(l.id, "versorger", x)} />
+                              <Select label="Preis ermitteln" value={modus}
+                                onChange={(x) => setVorvFeld(l.id, "modus", x)}
+                                options={[{ value: "preis", label: "Arbeitspreis eintragen" },
+                                          { value: "rechnung", label: "Aus der Rechnung berechnen" }]} />
+                            </div>
+                            {modus === "preis" ? (
+                              <div className="grid grid-cols-2 gap-3">
+                                <Feld label="Arbeitspreis (ct/kWh)" value={vv.arbeit || ""}
+                                  onChange={(x) => setVorvFeld(l.id, "arbeit", x)} />
+                                <Feld label="Grundpreis (€/Jahr)" value={vv.grundpreis || ""}
+                                  onChange={(x) => setVorvFeld(l.id, "grundpreis", x)} />
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-3">
+                                <Feld label="Abrechnung von" type="date" value={vv.von || ""}
+                                  onChange={(x) => setVorvFeld(l.id, "von", x)} />
+                                <Feld label="Abrechnung bis" type="date" value={vv.bis || ""}
+                                  onChange={(x) => setVorvFeld(l.id, "bis", x)} />
+                                <Feld label="Rechnungsbetrag netto (€)" value={vv.betrag || ""}
+                                  onChange={(x) => setVorvFeld(l.id, "betrag", x)} />
+                                <Feld label="Verbrauch laut Rechnung (kWh)" value={vv.verbrauch || ""}
+                                  placeholder={l.verbrauch ? "z. B. " + num(zahlLesen(l.verbrauch) || 0) : ""}
+                                  onChange={(x) => setVorvFeld(l.id, "verbrauch", x)} />
+                                <Feld label="Grundpreis (€/Jahr), falls bekannt" value={vv.grundpreis || ""}
+                                  onChange={(x) => setVorvFeld(l.id, "grundpreis", x)} breit />
+                              </div>
+                            )}
+                            {ergebnis && (
+                              <p className="text-xs mt-2" style={{ color: C.ok }}>
+                                Arbeitspreis bisher: {num(ergebnis.arbeit, 2)} ct/kWh
+                                {ergebnis.aufgerechnet ? " (aus " + num(ergebnis.tage || 0) + " Tagen Abrechnung" +
+                                  (ergebnis.grundpreis ? ", ohne anteiligen Grundpreis" : "") + ")" : ""}
+                                {ergebnis.grundpreis ? " · Grundpreis " + num(ergebnis.grundpreis, 2) + " €/Jahr" : ""}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   {vars.map((v, i) => (
                     <div key={v.id} className="rounded overflow-hidden" style={{ border: "1px solid " + C.line }}>
                       <div className="flex items-center justify-between px-4 py-2"
@@ -3371,7 +4021,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                         <div className="grid sm:grid-cols-2 gap-4">
                           <Select label="Gilt für" value={v.sparte || "beide"}
                             onChange={(x) => setVar(v.id, "sparte", x)} options={SPARTEN} />
-                          <Select label="Produkt" value={v.produkt}
+                          <Select label="Neuer Versorger" value={v.versorger || ""}
+                            onChange={(x) => setVar(v.id, "versorger", x)}
+                            options={[{ value: "", label: "Bitte wählen" },
+                              ...(versorger || []).map((x) => ({ value: x.name, label: x.name }))]} />
+                          <Select label="Beschaffungsmodell" value={v.produkt}
                             onChange={(x) => setVar(v.id, "produkt", x)} options={PRODUKTE} />
                           <Feld label="Bestätigter Aufschlag (ct/kWh)" value={v.aufschlag}
                             onChange={(x) => setVar(v.id, "aufschlag", x)}
@@ -3401,8 +4055,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
                         <div>
                           <div className="flex items-baseline justify-between mb-2">
-                            <span className="text-sm">Preise je Lieferstelle</span>
-                            <span className="text-xs" style={{ color: C.muted }}>optional</span>
+                            <span className="text-sm">Preise des neuen Versorgers je Lieferstelle</span>
+                            <span className="text-xs" style={{ color: C.muted }}>netto</span>
                           </div>
                           <div className="space-y-3">
                             {a.lieferstellen
@@ -3415,13 +4069,16 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                   <MediumIcon medium={l.medium} />
                                   {l.bezeichnung || (l.medium === "strom" ? "Strom" : "Erdgas")}
                                 </div>
-                                <div className="grid sm:grid-cols-2 gap-4">
-                                  <Feld label="Reiner Energiepreis (ct/kWh)"
-                                    value={(v.preise[l.id] || {}).energie || ""}
-                                    onChange={(x) => setVarPreis(v.id, l.id, "energie", x)} />
-                                  <Feld label="Arbeitspreis gesamt (ct/kWh)"
+                                <div className="grid sm:grid-cols-3 gap-4">
+                                  <Feld label="Arbeitspreis (ct/kWh)"
                                     value={(v.preise[l.id] || {}).arbeit || ""}
                                     onChange={(x) => setVarPreis(v.id, l.id, "arbeit", x)} />
+                                  <Feld label="davon Energiepreis (ct/kWh)"
+                                    value={(v.preise[l.id] || {}).energie || ""}
+                                    onChange={(x) => setVarPreis(v.id, l.id, "energie", x)} />
+                                  <Feld label="Grundpreis (€/Jahr)"
+                                    value={(v.preise[l.id] || {}).grundpreis || ""}
+                                    onChange={(x) => setVarPreis(v.id, l.id, "grundpreis", x)} />
                                 </div>
                               </div>
                             ))}
@@ -3442,11 +4099,13 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
                         <Datei label="Angebot als PDF – erforderlich" datei={v.angebot}
                           onSet={(f) => setVar(v.id, "angebot", f)} hinweis="Angebot anhängen" />
-                        <button className="text-xs px-2 py-1 rounded"
-                          style={{ border: "1px solid " + C.line, color: C.strom }}
-                          onClick={() => setVar(v.id, "angebot", angebotPdf(a, v))}>
-                          Angebot aus den Daten erzeugen
-                        </button>
+                        <Btn icon={FileText} onClick={() => angebotErzeugen(v)} disabled={erzeugt === v.id}>
+                          {erzeugt === v.id ? "Angebot wird erzeugt …" : "Angebot im EGC-Design erzeugen"}
+                        </Btn>
+                        <p className="text-xs" style={{ color: C.muted }}>
+                          Deckblatt, Angebot mit Vergleich zum bisherigen Versorger, Lastgang-Analyse bei RLM,
+                          Service- & Beratungsauftrag und nächste Schritte. Das PDF wird an diese Variante angehängt.
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -4823,8 +5482,8 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
    Wortlaut der Geschäftsführung (Handelsvertretervertrag, Tippgebervertrag).
    Platzhalter in geschweiften Klammern werden beim Erzeugen ersetzt.
    Die Firmendaten von EGC (vertreten durch, Anschrift) pflegt die Geschäftsführung. */
-let FIRMENDATEN = { vertreter: "", strasse: "", ort: "" };
-const setzeFirmendaten = (f) => { FIRMENDATEN = { vertreter: "", strasse: "", ort: "", ...(f || {}) }; };
+let FIRMENDATEN = { vertreter: "", strasse: "", ort: "", email: "", ustId: "" };
+const setzeFirmendaten = (f) => { FIRMENDATEN = { vertreter: "", strasse: "", ort: "", email: "", ustId: "", ...(f || {}) }; };
 
 const HV_PARAGRAFEN = [
  { h: "§ 1 Vertragsverhältnis", n: [
@@ -8332,7 +8991,7 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
       {reiter === "firma" && firmendaten && (
         <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
           <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "62ch" }}>
-            Erscheinen im Handelsvertreter- und im Tippgebervertrag unter „Auftraggeber“.
+            Erscheinen in den Verträgen unter „Auftraggeber“ und in der Fußzeile der Angebote.
           </p>
           <div className="grid sm:grid-cols-3 gap-3">
             <Feld label="Vertreten durch" value={firmendaten.vertreter}
@@ -8341,6 +9000,10 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
               onChange={(v) => setFirmendaten({ ...firmendaten, strasse: v })} />
             <Feld label="PLZ und Ort" value={firmendaten.ort}
               onChange={(v) => setFirmendaten({ ...firmendaten, ort: v })} />
+            <Feld label="E-Mail Kundenservice" value={firmendaten.email || ""}
+              onChange={(v) => setFirmendaten({ ...firmendaten, email: v })} />
+            <Feld label="USt-IdNr." value={firmendaten.ustId || ""}
+              onChange={(v) => setFirmendaten({ ...firmendaten, ustId: v })} />
           </div>
         </div>
       )}

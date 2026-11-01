@@ -42,6 +42,9 @@ sw = sw.replace("/assets/app.js", "/assets/" + js)
        .replace("egc-portal-v1", "egc-portal-" + js.split(".")[1]);
 await writeFile("dist/sw.js", sw);
 
+/* PDF-Baustein für Angebote: wird nur bei Bedarf nachgeladen */
+await cp("node_modules/jspdf/dist/jspdf.umd.min.js", "dist/assets/jspdf-4.2.1.min.js");
+
 await cp("manifest.json", "dist/manifest.json");
 await cp("icon-192.png", "dist/icon-192.png");
 await cp("icon-512.png", "dist/icon-512.png");
