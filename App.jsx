@@ -1188,8 +1188,14 @@ const ladeJsPdf = () => {
   return jsPdfLaden;
 };
 
+/* Service- & Beratungsauftrag ohne Kundendaten, zum Ausfüllen von Hand */
+const blankoAuftragPdf = () => egcAngebotPdf(
+  { kunde: {}, partnerId: null,
+    lieferstellen: [1, 2, 3, 4].map((i) => ({ id: "leer" + i, medium: "strom" })) },
+  {}, { mitarbeiter: [], blanko: true });
+
 /* Erzeugt das Angebot als PDF. Gibt ein Dateiobjekt zurück wie ein Upload. */
-async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBemerkung = "" }) {
+async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBemerkung = "", blanko = false }) {
   const jsPDF = await ladeJsPdf();
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const W = 210, H = 297, RA = 16, BR = W - 2 * RA;
@@ -1201,7 +1207,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const ansprech = kunde.ansprechpartner || "";
   const heuteD = datum(a.kalkulation && a.kalkulation.datum || heute());
   const gueltig = v.gueltigBis ? datum(v.gueltigBis) : "";
-  const ende = enddatum(v);
+  const ende = blanko ? null : enddatum(v);
   const zahl = (x, d = 2) => num(x, d);
   const ct = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " ct/kWh");
   const eurx = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " €");
@@ -1249,6 +1255,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     return y + 10;
   };
 
+  let y;
+  if (!blanko) {
   /* ---------- Deckblatt ---------- */
   flaeche(NAVY); doc.rect(0, 0, W, 132, "F");
   doc.addImage(logo, "JPEG", RA, 26, (420 / 196) * 24, 24);
@@ -1260,7 +1268,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   schrift(30, true); farbe(NAVY); text("Energieangebot", W / 2, 176, { align: "center" });
   doc.setFont("helvetica", "italic"); doc.setFontSize(10); farbe(GRAU);
   text("Persönlich zusammengestellt für " + (kunde.firma || ""), W / 2, 186, { align: "center" });
-  let y = 206;
+  y = 206;
   flaeche(GRUEN); doc.rect(RA + 8, y - 6, 0.8, 52, "F");
   [["Angebot für", [ansprech, kunde.firma].filter(Boolean).join(", ")], ["Erstellt am", heuteD],
    ["Gültig bis", gueltig || "–"], ["Ihr Berater", berater.name || ""]].forEach(([k, w]) => {
@@ -1467,8 +1475,10 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     doc.addImage(bilder.werktag, "PNG", RA, y, BR, gh);
   }
 
+  } /* Ende: nicht blanko */
+
   /* ---------- Service- & Beratungsauftrag ---------- */
-  y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
+  y = blanko ? kopf("SERVICE- & BERATUNGSAUFTRAG") : neueSeite("SERVICE- & BERATUNGSAUFTRAG");
   const halb = BR / 2;
   schrift(8, true); farbe(GRAU); text("ZWISCHEN", RA, y);
   schrift(9, true); farbe(TEXT); text("EGC-Energie", RA, y + 5);
@@ -1476,12 +1486,14 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     .forEach((t, i) => text(t, RA, y + 9.5 + i * 4.4));
   schrift(8); farbe(GRAU);
   [["Berater:", berater.name], ["E-Mail:", berater.email], ["Kontakt:", berater.telefon]].forEach(([k, w], i) => {
-    text(k, RA + halb + 4, y + 5 + i * 4.6); schrift(8.5, true); farbe(TEXT); text(w || "–", RA + halb + 22, y + 5 + i * 4.6);
+    text(k, RA + halb + 4, y + 5 + i * 4.6); schrift(8.5, true); farbe(TEXT);
+    if (blanko) { strich(LINIE); doc.setLineWidth(0.2); doc.line(RA + halb + 22, y + 5.5 + i * 4.6, W - RA, y + 5.5 + i * 4.6); }
+    else text(w || "–", RA + halb + 22, y + 5 + i * 4.6);
     schrift(8); farbe(GRAU);
   });
   y += 26;
   schrift(8, true); farbe(GRAU); text("UND", RA, y); y += 3;
-  [["Firma / Herr / Frau", kunde.firma + (ansprech ? " · " + ansprech : "")], ["Straße, Hausnummer", kunde.strasse],
+  [["Firma / Herr / Frau", (kunde.firma || "") + (ansprech ? " · " + ansprech : "")], ["Straße, Hausnummer", kunde.strasse],
    ["PLZ, Ort", [kunde.plz, kunde.ort].filter(Boolean).join(" ")],
    ["Telefon / E-Mail", [kunde.telefon, kunde.email].filter(Boolean).join(" · ")], ["Geburtsdatum", ""]].forEach(([k, w], i) => {
     if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.6, "F"); }
@@ -1494,6 +1506,13 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     if (y + 20 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
     const vv = vorversorger[l.id] || {};
     schrift(8.5, true); farbe(NAVY);
+    if (blanko) {
+      strich(TEXT); doc.setLineWidth(0.3);
+      doc.rect(RA, y - 2.6, 2.8, 2.8, "S"); text("Strom", RA + 4, y);
+      doc.rect(RA + 18, y - 2.6, 2.8, 2.8, "S"); text("Erdgas", RA + 22, y);
+      schrift(7.8); farbe(GRAU); text("Lieferadresse:", RA + 40, y);
+      strich(LINIE); doc.line(RA + 60, y + 0.5, W - RA, y + 0.5);
+    } else
     text((l.medium === "gas" ? "Erdgas" : "Strom") + (l.bezeichnung ? " · " + l.bezeichnung : "") + "  ·  " +
       [l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", "), RA, y);
     y += 1.5;
@@ -1502,7 +1521,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
      ["Lieferbeginn", v.lieferbeginn ? datum(v.lieferbeginn) : "", "MaLo", l.maloId]].forEach((r, i) => {
       if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.2, "F"); }
       schrift(7.8); farbe(GRAU); text(r[0], RA + 2, y + 3.6); text(r[2], RA + halb + 2, y + 3.6);
-      farbe(TEXT); text(r[1] || "", RA + 32, y + 3.6); text(r[3] || "", RA + halb + 32, y + 3.6);
+      farbe(TEXT); text(blanko ? "" : r[1] || "", RA + 32, y + 3.6); text(blanko ? "" : r[3] || "", RA + halb + 32, y + 3.6);
       y += 5.2;
     });
     y += 3;
@@ -1544,6 +1563,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
 
   /* ---------- Nächste Schritte ---------- */
+  if (!blanko) {
   doc.addPage();
   flaeche(NAVY); doc.rect(0, 0, W, 44, "F");
   doc.addImage(logo, "JPEG", RA, 12, (420 / 196) * 16, 16);
@@ -1566,13 +1586,19 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   schrift(8); farbe([185, 198, 212]);
   text([[F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "), [F.strasse, F.ort].filter(Boolean).join(", "), F.email]
     .filter(Boolean).join("  |  "), W / 2, H - 10, { align: "center" });
+  }
 
-  /* Seitenzahlen ab Seite 2 */
+  /* Seitenzahlen (beim Angebot ohne Deckblatt und Schlussseite) */
   const n = doc.getNumberOfPages();
-  for (let i = 2; i < n; i++) {
+  for (let i = blanko ? 1 : 2; i <= (blanko ? n : n - 1); i++) {
     doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 9, { align: "right" });
   }
 
+  if (blanko) {
+    const roh = doc.output("datauristring");
+    return { name: "Service-und-Beratungsauftrag_Blanko.pdf", typ: "application/pdf",
+             groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
+  }
   const roh = doc.output("datauristring");
   const url = "data:application/pdf;base64," + roh.split(",")[1];
   const name = "Angebot_" + (kunde.firma || a.id).replace(/[^\wäöüÄÖÜß]+/g, "_") + "_" +
@@ -7312,9 +7338,15 @@ function Ablage({ ablage, setAblage, user, start }) {
             </button>
           ))}
         </div>
-        {darfPflegen && (
-          <Btn icon={Plus} onClick={() => setEntwurf(leererEintrag(bereich))}>Unterlage hinzufügen</Btn>
-        )}
+        <div className="flex flex-wrap gap-2">
+          <Btn variante="hell" icon={FileSignature} onClick={async () => {
+            try { dateiLaden(await blankoAuftragPdf()); }
+            catch (e) { alert("Die Vorlage konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+          }}>Vollmacht blanko (PDF)</Btn>
+          {darfPflegen && (
+            <Btn icon={Plus} onClick={() => setEntwurf(leererEintrag(bereich))}>Unterlage hinzufügen</Btn>
+          )}
+        </div>
       </div>
 
       <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "60ch" }}>{aktuell.text}</p>
