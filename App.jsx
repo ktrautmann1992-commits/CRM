@@ -824,6 +824,7 @@ const leereAnfrage = (user) => ({
   herkunft: "Eigenes Netzwerk",
   herkunftDetail: "",
   tippgeberId: null,
+  vollmachtAnhaengen: true,
   lieferstellenListe: false,
   lieferstellenDatei: null,
   dienstleistungsvertrag: false,
@@ -1477,7 +1478,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
 
   } /* Ende: nicht blanko */
 
-  /* ---------- Service- & Beratungsauftrag ---------- */
+  /* ---------- Service- & Beratungsauftrag (nur wenn der Vertriebspartner ihn angehängt haben will) ---------- */
+  if (blanko || a.vollmachtAnhaengen !== false) {
   y = blanko ? kopf("SERVICE- & BERATUNGSAUFTRAG") : neueSeite("SERVICE- & BERATUNGSAUFTRAG");
   const halb = BR / 2;
   schrift(8, true); farbe(GRAU); text("ZWISCHEN", RA, y);
@@ -1561,6 +1563,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   if (y + 24 > H - 22) y = neueSeite("DATENSCHUTZ");
   y = ueberschrift("Unterschrift Einwilligung", RA, y + 4);
   unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
+  } /* Ende Service- & Beratungsauftrag */
 
   /* ---------- Nächste Schritte ---------- */
   if (!blanko) {
@@ -3028,6 +3031,19 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
               </div>
             )}
 
+            <label className="flex items-start gap-3 text-sm p-3 rounded"
+                   style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+              <input type="checkbox" className="mt-0.5" checked={a.vollmachtAnhaengen !== false}
+                onChange={(e) => setA({ ...a, vollmachtAnhaengen: e.target.checked })}
+                style={{ accentColor: C.ink, width: 18, height: 18 }} />
+              <span>
+                Service- & Beratungsauftrag (Vollmacht) an das Angebot anhängen
+                <span className="block text-xs mt-0.5" style={{ color: C.muted }}>
+                  Dann enthält das Angebots-PDF die Vollmacht mit Datenschutzseite zum Unterschreiben.
+                </span>
+              </span>
+            </label>
+
             <div>
               <span className="block text-xs mb-2" style={{ color: C.muted }}>Vertragsdauer</span>
               <div className="flex gap-1 mb-4">
@@ -4054,6 +4070,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     </div>
                   </div>
 
+                  <p className="text-xs" style={{ color: a.vollmachtAnhaengen === false ? C.gas : C.ok }}>
+                    {a.vollmachtAnhaengen === false
+                      ? "Der Vertriebspartner möchte die Vollmacht nicht im Angebot. Das PDF enthält sie dann nicht."
+                      : "Der Vertriebspartner möchte die Vollmacht im Angebot. Das PDF enthält den Service- & Beratungsauftrag."}
+                  </p>
                   <label className="block">
                     <span className="block text-xs mb-1" style={{ color: C.muted }}>
                       Zusatzbemerkungen im Service- & Beratungsauftrag (frei, optional)
@@ -4955,6 +4976,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             <Zeile k="Aufschlag" v={num(a.aufschlag, 3) + " ct/kWh"} />
             <Zeile k="Wunsch-Lieferbeginn" v={a.wunschLieferbeginn ? datum(a.wunschLieferbeginn) : "offen"} />
             <Zeile k="Gesamtmenge" v={num(verbrauchGesamt(a)) + " kWh"} />
+            <Zeile k="Vollmacht im Angebot" v={a.vollmachtAnhaengen === false ? "nein" : "ja"} />
             {a.vertragsStatus && <Zeile k="Vertrag" v={a.vertragsStatus} />}
             {a.bestaetigung && <Zeile k="Versorger" v={a.bestaetigung.versorger} />}
             {a.bestaetigung && <Zeile k="Bestätigte Menge" v={num(bestaetigteMenge(a)) + " kWh"} />}
