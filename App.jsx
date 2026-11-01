@@ -1189,7 +1189,7 @@ const ladeJsPdf = () => {
 };
 
 /* Erzeugt das Angebot als PDF. Gibt ein Dateiobjekt zurück wie ein Upload. */
-async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {} }) {
+async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBemerkung = "" }) {
   const jsPDF = await ladeJsPdf();
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const W = 210, H = 297, RA = 16, BR = W - 2 * RA;
@@ -1500,6 +1500,19 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {} }) {
   schrift(8.5, true); farbe(TEXT); text("IBAN:", RA, y + 4);
   strich(TEXT); doc.setLineWidth(0.3); doc.line(RA + 14, y + 4.5, W - RA, y + 4.5);
   y += 11;
+
+  /* Zusatzbemerkungen: vorgefüllter Text der Kalkulation, darunter Linien zum Ausfüllen von Hand */
+  if (y + 34 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
+  schrift(8.5, true); farbe(TEXT); text("Zusatzbemerkungen:", RA, y); y += 2;
+  const zb = String(vollmachtBemerkung || "").trim();
+  strich(LINIE); doc.setLineWidth(0.3);
+  const boxH = Math.max(22, zb ? doc.splitTextToSize(zb, BR - 6).length * 3.8 + 14 : 22);
+  doc.rect(RA, y, BR, boxH, "S");
+  let yb = y + 5;
+  if (zb) { farbe(TEXT); yb = absatz(zb, RA + 3, yb, BR - 6, 8.5, 3.8) + 1; }
+  strich(LINIE); doc.setLineWidth(0.2);
+  for (let yy = yb + 3; yy < y + boxH - 1; yy += 6) doc.line(RA + 3, yy, W - RA - 3, yy);
+  y += boxH + 7;
   if (y + 60 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
   schrift(8.5, true); farbe(NAVY); text(EGC_AUFTRAG.einleitung, RA, y); y += 5;
   EGC_AUFTRAG.abschnitte.forEach(([t, inhalt]) => {
@@ -3239,10 +3252,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   /* bisheriger Versorger je Lieferstelle, für den Vergleich im Angebot */
   const [vorv, setVorv] = useState((a.kalkulation && a.kalkulation.vorversorger) || {});
   const setVorvFeld = (lid, k, w) => setVorv((alt) => ({ ...alt, [lid]: { ...(alt[lid] || {}), [k]: w } }));
+  const [vmBemerkung, setVmBemerkung] = useState((a.kalkulation && a.kalkulation.vollmachtBemerkung) || "");
   const [erzeugt, setErzeugt] = useState(null);
   const angebotErzeugen = async (v) => {
     setErzeugt(v.id);
-    try { setVar(v.id, "angebot", await egcAngebotPdf(a, v, { mitarbeiter, vorversorger: vorv })); }
+    try { setVar(v.id, "angebot", await egcAngebotPdf(a, v, { mitarbeiter, vorversorger: vorv, vollmachtBemerkung: vmBemerkung })); }
     catch (e) { alert("Das Angebot konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
     setErzeugt(null);
   };
@@ -3267,6 +3281,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         vollmacht,
         dienstleistungsvertrag: dlv,
         vorversorger: vorv,
+        vollmachtBemerkung: vmBemerkung,
         gewaehlt: null,
         varianten: vars.map((v) => ({
           ...v,
@@ -4002,6 +4017,20 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                       })}
                     </div>
                   </div>
+
+                  <label className="block">
+                    <span className="block text-xs mb-1" style={{ color: C.muted }}>
+                      Zusatzbemerkungen im Service- & Beratungsauftrag (frei, optional)
+                    </span>
+                    <textarea rows={3} value={vmBemerkung} onChange={(e) => setVmBemerkung(e.target.value)}
+                      placeholder="z. B. Kündigung beim bisherigen Versorger zum 31.12. bereits erfolgt"
+                      className="w-full px-3 py-2 text-sm rounded outline-none"
+                      style={{ border: "1px solid " + C.line }} />
+                    <span className="block text-xs mt-1" style={{ color: C.muted }}>
+                      Erscheint im PDF in einem eigenen Feld. Darunter bleiben Linien frei, damit der Kunde
+                      von Hand ergänzen kann.
+                    </span>
+                  </label>
 
                   {vars.map((v, i) => (
                     <div key={v.id} className="rounded overflow-hidden" style={{ border: "1px solid " + C.line }}>
