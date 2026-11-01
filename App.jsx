@@ -1317,29 +1317,35 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       schrift(9, true); farbe(TEXT); text(w, x, y + 8.6);
     });
     y += 16;
-    y = ueberschrift("Ihr aktueller Tarif im Vergleich zu unserem Angebot", RA, y + 2);
+    /* ohne bisherigen Versorger nur „Unser Angebot“, ohne leere Vergleichsspalten */
+    const vergleich = stellen.some((l) => altPreis(vorversorger[l.id]));
+    y = ueberschrift(vergleich ? "Ihr aktueller Tarif im Vergleich zu unserem Angebot" : "Unser Angebot für Ihre Lieferstellen", RA, y + 2);
 
     /* je Lieferstelle ein Vergleich */
-    const sp = [RA, RA + 62, RA + 104, RA + 146];
+    const sp = vergleich ? [RA, RA + 62, RA + 104, RA + 146] : [RA, null, RA + 100, null];
     for (const l of stellen) {
       const pr = (v.preise || {})[l.id] || {};
       const neuA = zahlLesen(pr.arbeit), neuE = zahlLesen(pr.energie), neuG = zahlLesen(pr.grundpreis);
       const vv = vorversorger[l.id] || {};
       const alt = altPreis(vv);
       const menge = zahlLesen(l.verbrauch) || 0;
-      const kostenNeu = (isNaN(neuG) ? 0 : neuG) + (isNaN(neuA) ? 0 : neuA) / 100 * menge;
+      /* ohne neuen Arbeitspreis keine Kosten und keine Ersparnis für diese Lieferstelle */
+      const kostenNeu = isNaN(neuA) ? null : (isNaN(neuG) ? 0 : neuG) + neuA / 100 * menge;
       const kostenAlt = alt ? alt.grundpreis + alt.arbeit / 100 * menge : null;
-      summeNeu += kostenNeu;
-      if (alt) { summeAlt += kostenAlt; mitVergleich = true; } else summeAlt += kostenNeu;
+      if (kostenNeu != null) {
+        summeNeu += kostenNeu;
+        if (alt) { summeAlt += kostenAlt; mitVergleich = true; } else summeAlt += kostenNeu;
+      }
       const zeilen = [
         ["Versorger", vv.versorger || l.versorger || "–", v.versorger || "–", "–"],
         ["Arbeitspreis (ct/kWh)", alt ? ct(alt.arbeit) : "–", ct(neuA), alt && !isNaN(neuA) ? ct(alt.arbeit - neuA) : "–"],
         ...(!isNaN(neuE) ? [["davon Energiepreis (ct/kWh)", "–", ct(neuE), "–"]] : []),
-        ["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–", eurx(isNaN(neuG) ? 0 : neuG),
-          alt ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"],
+        ["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–", isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
+          alt && !isNaN(neuA) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"],
         ["Jahresverbrauch", num(menge) + " kWh", num(menge) + " kWh", "–"],
         ["Lieferbeginn", "–", v.lieferbeginn ? datum(v.lieferbeginn) : "–", "–"],
-        ["Kosten pro Jahr", alt ? eurx(kostenAlt) : "–", eurx(kostenNeu), alt ? eurx(kostenAlt - kostenNeu) : "–"],
+        ["Kosten pro Jahr", alt ? eurx(kostenAlt) : "–", kostenNeu == null ? "–" : eurx(kostenNeu),
+          alt && kostenNeu != null ? eurx(kostenAlt - kostenNeu) : "–"],
       ];
       const hoehe = 12 + zeilen.length * 5.6;
       if (y + hoehe > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
@@ -1352,15 +1358,19 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       y += 2;
       flaeche(NAVY); doc.rect(sp[0], y, BR, 6, "F");
       schrift(7.5, true); farbe([255, 255, 255]);
-      ["Position", "Ihr aktueller Tarif", "Unser Angebot", "Ersparnis"].forEach((t, i) => text(t, sp[i] + 2, y + 4.1));
-      flaeche(GRUEN); doc.rect(sp[2], y, 42, 6, "F"); farbe(NAVY); text("Unser Angebot", sp[2] + 2, y + 4.1);
+      ["Position", "Ihr aktueller Tarif", "Unser Angebot", "Ersparnis"].forEach((t, i) => { if (sp[i] != null) text(t, sp[i] + 2, y + 4.1); });
+      flaeche(GRUEN); doc.rect(sp[2], y, vergleich ? 42 : RA + BR - sp[2], 6, "F"); farbe(NAVY); text("Unser Angebot", sp[2] + 2, y + 4.1);
       y += 6;
       zeilen.forEach((r, i) => {
         const letzte = i === zeilen.length - 1;
         if (letzte) { flaeche(GRUENHELL); doc.rect(RA, y, BR, 5.6, "F"); }
         else if (i % 2) { flaeche(HELL); doc.rect(RA, y, BR, 5.6, "F"); }
         schrift(8, letzte); farbe(TEXT);
-        r.forEach((t, k) => { if (k === 3 && t !== "–") farbe(GRUEN.map((c) => c * 0.75)); text(t, sp[k] + 2, y + 3.9); farbe(TEXT); });
+        r.forEach((t, k) => {
+          if (sp[k] == null) return;
+          if (k === 3 && t !== "–") farbe(GRUEN.map((c) => c * 0.75));
+          text(t, sp[k] + 2, y + 3.9); farbe(TEXT);
+        });
         y += 5.6;
       });
       strich(LINIE); doc.setLineWidth(0.2); doc.rect(RA, y - zeilen.length * 5.6 - 6, BR, zeilen.length * 5.6 + 6, "S");
