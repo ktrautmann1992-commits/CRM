@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { zipSync, strToU8 } from "fflate";
 import {
   Zap, Flame, Plus, Send, ArrowLeft, Upload, FileText, Check, X,
   AlertTriangle, Users, Calculator, FileSignature, BarChart3,
@@ -1607,6 +1608,175 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const name = "Angebot_" + (kunde.firma || a.id).replace(/[^\wäöüÄÖÜß]+/g, "_") + "_" +
     (v.produkt || "").replace(/[^\wäöüÄÖÜß]+/g, "") + ".pdf";
   return { name, typ: "application/pdf", groesse: Math.round(roh.length * 0.75), url };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Individualanfrage an den Versorger                                 */
+/*  Bei Tranchen- oder PPA-Wunsch braucht es ein Angebot direkt vom    */
+/*  Versorger. Die Kalkulation lädt ein Paket: Anfrage-PDF mit allen   */
+/*  Kunden- und Lieferstellendaten, dazu die Lastgänge als XLSX.        */
+/* ------------------------------------------------------------------ */
+const INDIVIDUAL_PRODUKTE = ["Tranchenmodell", "PPA-Modell"];
+const brauchtIndividualanfrage = (a) =>
+  INDIVIDUAL_PRODUKTE.includes(a.produkt) || INDIVIDUAL_PRODUKTE.includes(a.produktGas);
+
+const dataUrlBytes = (url) => {
+  const roh = atob(String(url).split(",")[1] || "");
+  const b = new Uint8Array(roh.length);
+  for (let i = 0; i < roh.length; i++) b[i] = roh.charCodeAt(i);
+  return b;
+};
+const bytesDataUrl = (bytes, typ) => {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return "data:" + typ + ";base64," + btoa(s);
+};
+const dateiName = (t) => String(t || "Datei").replace(/[^\wäöüÄÖÜß.-]+/g, "_").replace(/^_+|_+$/g, "");
+
+/* Kleine XLSX-Datei aus Zeilen (Zahlen bleiben Zahlen, deutsche Schreibweise wird erkannt) */
+function xlsxAusZeilen(zeilen, blatt = "Lastgang") {
+  const x = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const spalte = (i) => { let s = ""; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+  const reihen = zeilen.map((z, r) => '<row r="' + (r + 1) + '">' + z.map((f, c) => {
+    const ref = spalte(c) + (r + 1);
+    const s = String(f == null ? "" : f).trim();
+    if (s === "") return "";
+    const n = /^-?[\d.]+(,\d+)?$|^-?\d+(\.\d+)?$/.test(s) ? zahlLesen(s) : NaN;
+    return isNaN(n) ? '<c r="' + ref + '" t="inlineStr"><is><t>' + x(s) + "</t></is></c>"
+      : '<c r="' + ref + '"><v>' + n + "</v></c>";
+  }).join("") + "</row>").join("");
+  const dateien = {
+    "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+    "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="' + x(blatt.slice(0, 31)) + '" sheetId="1" r:id="rId1"/></sheets></workbook>',
+    "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+    "xl/worksheets/sheet1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + reihen + "</sheetData></worksheet>",
+  };
+  const z = {};
+  Object.entries(dateien).forEach(([k, v]) => { z[k] = strToU8(v); });
+  return zipSync(z, { level: 6 });
+}
+
+/* Anfrage-PDF für den Versorger */
+async function individualAnfragePdf(a, mitarbeiter, anlagen) {
+  const jsPDF = await ladeJsPdf();
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+  const W = 210, H = 297, RA = 16, BR = W - 2 * RA;
+  const NAVY = [10, 22, 38], GRUEN = [108, 180, 59], TEXT = [22, 33, 44], GRAU = [107, 119, 135],
+        LINIE = [216, 221, 228], HELL = [246, 248, 250];
+  const F = FIRMENDATEN;
+  const k = a.kunde || {};
+  const partner = mitarbeiter.find((m) => m.id === a.partnerId) || {};
+  const farbe = (f) => doc.setTextColor(f[0], f[1], f[2]);
+  const flaeche = (f) => doc.setFillColor(f[0], f[1], f[2]);
+  const schrift = (gr, fett) => { doc.setFont("helvetica", fett ? "bold" : "normal"); doc.setFontSize(gr); };
+  const text = (t, x, y, o) => doc.text(String(t == null ? "" : t), x, y, o);
+  const kopf = () => {
+    flaeche(NAVY); doc.rect(0, 0, W, 26, "F");
+    doc.addImage("data:image/jpeg;base64," + LOGO_PDF, "JPEG", RA, 6, (420 / 196) * 13, 13);
+    schrift(15, true); farbe([255, 255, 255]); text("INDIVIDUALANFRAGE", W - RA, 16, { align: "right" });
+    flaeche(GRUEN); doc.rect(0, 26, W, 1.2, "F");
+    doc.setDrawColor(...LINIE); doc.setLineWidth(0.3); doc.line(RA, H - 14, W - RA, H - 14);
+    schrift(7); farbe(GRAU);
+    text([[F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "), [F.strasse, F.ort].filter(Boolean).join(", "), F.email]
+      .filter(Boolean).join("  |  "), RA, H - 9);
+    return 36;
+  };
+  const titel = (t, y) => { flaeche(GRUEN); doc.rect(RA, y - 3.4, 1.2, 4.4, "F"); schrift(10, true); farbe(NAVY); text(t.toUpperCase(), RA + 3.5, y); return y + 6; };
+  const tabelle = (zeilen, y, links = 52) => {
+    zeilen.forEach(([kk, vv], i) => {
+      if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.6, "F"); }
+      schrift(8); farbe(GRAU); text(kk, RA + 2, y + 3.9);
+      schrift(8.5); farbe(TEXT); text(doc.splitTextToSize(String(vv || "–"), BR - links - 4)[0], RA + links, y + 3.9);
+      y += 5.6;
+    });
+    return y + 4;
+  };
+
+  let y = kopf();
+  schrift(8); farbe(GRAU);
+  text("Vorgang " + a.id + "  ·  Anfrage vom " + datum(heute()), RA, y);
+  y += 8;
+  farbe(TEXT);
+  schrift(9);
+  const intro = doc.splitTextToSize("Wir bitten um ein individuelles Angebot für den nachstehenden Kunden. Die Lastgänge der RLM-Lieferstellen liegen als Excel-Dateien bei.", BR);
+  doc.text(intro, RA, y); y += intro.length * 4.4 + 4;
+
+  y = titel("Angefragt von", y);
+  y = tabelle([["Vermittler", [F.vertreter, "EGC-Energie"].filter(Boolean).join(" · ")],
+    ["Anschrift", [F.strasse, F.ort].filter(Boolean).join(", ")], ["E-Mail", F.email],
+    ["Vertriebspartner", partner.name]], y);
+
+  y = titel("Kunde", y);
+  y = tabelle([["Firma", k.firma], ["Anschrift", [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")],
+    ["Ansprechpartner", k.ansprechpartner], ["Branche", k.branche]], y);
+
+  y = titel("Angebotswunsch", y);
+  const strom = verbrauchMedium(a, "strom") > 0, gas = verbrauchMedium(a, "gas") > 0;
+  y = tabelle([
+    ...(strom ? [["Produkt Strom", a.produkt]] : []),
+    ...(gas ? [["Produkt Erdgas", a.produktGas || a.produkt]] : []),
+    ["Gewünschter Lieferbeginn", a.wunschLieferbeginn ? datum(a.wunschLieferbeginn) : "offen"],
+    ["Gewünschte Laufzeit", a.laufzeitArt === "ende" ? "fest bis " + (a.wunschLieferende ? datum(a.wunschLieferende) : "offen") : a.laufzeit + " Monate"],
+    ["Gewünschter Aufschlag", num(a.aufschlag || 0, 3) + " ct/kWh"],
+    ["Gesamtmenge", num(verbrauchGesamt(a)) + " kWh/Jahr"],
+  ], y);
+  if (a.beratungHinweis) {
+    schrift(8.5, true); farbe(TEXT); text("Hinweis zum Kunden:", RA, y); y += 4;
+    schrift(8.5); const h = doc.splitTextToSize(a.beratungHinweis, BR); doc.text(h, RA, y); y += h.length * 4 + 4;
+  }
+
+  y = titel("Lieferstellen", y);
+  a.lieferstellen.forEach((l, i) => {
+    if (y + 40 > H - 20) { doc.addPage(); y = kopf(); }
+    schrift(9, true); farbe(NAVY);
+    text((i + 1) + ". " + (l.medium === "gas" ? "Erdgas" : "Strom") + (l.bezeichnung ? " · " + l.bezeichnung : ""), RA, y); y += 2;
+    const anl = anlagen.find((x) => x.lieferstelle === l.id);
+    y = tabelle([
+      ["Lieferanschrift", [l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")],
+      ["Jahresverbrauch", num(zahlLesen(l.verbrauch) || 0) + " kWh"],
+      ["Zählerart", l.zaehlerart], ["Zählernummer", l.zaehlernummer], ["Marktlokations-ID", l.maloId],
+      ["Aktueller Versorger", l.neueinzug ? "Neueinzug, kein Vorversorger" : l.versorger],
+      ["Lastgang", anl ? "Anlage: " + anl.name : (l.zaehlerart === "RLM" ? "liegt nicht vor" : "–")],
+    ], y);
+  });
+
+  if (anlagen.length) {
+    if (y + 10 + anlagen.length * 5 > H - 20) { doc.addPage(); y = kopf(); }
+    y = titel("Anlagen", y);
+    schrift(8.5); farbe(TEXT);
+    anlagen.forEach((x) => { text("• " + x.name, RA + 2, y); y += 4.6; });
+  }
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) { doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 9, { align: "right" }); }
+  return new Uint8Array(doc.output("arraybuffer"));
+}
+
+/* Paket: Anfrage-PDF und Lastgänge als XLSX, zusammen als ZIP */
+async function individualPaket(a, mitarbeiter) {
+  const anlagen = [];
+  for (const l of a.lieferstellen) {
+    if (!l.lastgang) continue;
+    const basis = "Lastgang_" + dateiName(l.bezeichnung || (l.medium === "gas" ? "Erdgas" : "Strom")) + "_" + dateiName(l.maloId || l.id);
+    const url = await dateiInhalt(l.lastgang);
+    if (!url) continue;
+    const name = String(l.lastgang.name || "");
+    let bytes, endung;
+    if (/\.xlsx$/i.test(name)) { bytes = dataUrlBytes(url); endung = ".xlsx"; }
+    else if (/\.(csv|txt)$/i.test(name) || /text\/csv/.test(url.slice(0, 30))) {
+      bytes = xlsxAusZeilen(await csvLesen({ ...l.lastgang, url })); endung = ".xlsx";
+    } else { bytes = dataUrlBytes(url); endung = (name.match(/\.\w+$/) || [".pdf"])[0]; }
+    anlagen.push({ lieferstelle: l.id, name: basis + endung, bytes });
+  }
+  const pdf = await individualAnfragePdf(a, mitarbeiter, anlagen);
+  const firma = dateiName(a.kunde && a.kunde.firma || a.id);
+  const inhalt = { ["Individualanfrage_" + firma + ".pdf"]: pdf };
+  anlagen.forEach((x) => { inhalt[x.name] = x.bytes; });
+  const zip = zipSync(inhalt, { level: 6 });
+  return { pdf: { name: "Individualanfrage_" + firma + ".pdf", typ: "application/pdf", groesse: pdf.length,
+                  url: bytesDataUrl(pdf, "application/pdf") },
+           zip: { name: "Individualanfrage_" + firma + ".zip", typ: "application/zip", groesse: zip.length,
+                  url: bytesDataUrl(zip, "application/zip") } };
 }
 
 /* Erzeugt ein Angebotsdokument aus den erfassten Daten */
@@ -3306,6 +3476,13 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const setVorvFeld = (lid, k, w) => setVorv((alt) => ({ ...alt, [lid]: { ...(alt[lid] || {}), [k]: w } }));
   const [vmBemerkung, setVmBemerkung] = useState((a.kalkulation && a.kalkulation.vollmachtBemerkung) || "");
   const [erzeugt, setErzeugt] = useState(null);
+  const [paketLaeuft, setPaketLaeuft] = useState(false);
+  const paketLaden = async (art) => {
+    setPaketLaeuft(true);
+    try { const p = await individualPaket(a, mitarbeiter); dateiLaden(art === "pdf" ? p.pdf : p.zip); }
+    catch (e) { alert("Die Individualanfrage konnte nicht erstellt werden: " + ((e && e.message) || e)); }
+    setPaketLaeuft(false);
+  };
   const angebotErzeugen = async (v) => {
     setErzeugt(v.id);
     try { setVar(v.id, "angebot", await egcAngebotPdf(a, v, { mitarbeiter, vorversorger: vorv, vollmachtBemerkung: vmBemerkung })); }
@@ -3319,7 +3496,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       ? { ...x, preise: { ...x.preise, [lid]: { ...(x.preise[lid] || {}), [art]: v } } } : x));
   const varLoeschen = (id) => setVars(vars.filter((x) => x.id !== id));
 
-  const bereit = vars.length > 0 && vars.every((v) => v.angebot);
+  const bereit = vars.length > 0 && vars.every((v) => v.angebot || v.individualangebot);
 
   const angebotSenden = () => {
     onUpdate({
@@ -4005,6 +4182,22 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     ist je Variante erforderlich.
                   </p>
 
+                  <div className="rounded p-4" style={{ background: brauchtIndividualanfrage(a) ? "#FDF6EE" : "#FAFBFC",
+                       border: "1px solid " + (brauchtIndividualanfrage(a) ? C.gas : C.line) }}>
+                    <div className="text-sm mb-1">Individualanfrage an den Versorger</div>
+                    <p className="text-xs mb-3" style={{ color: C.muted }}>
+                      {brauchtIndividualanfrage(a)
+                        ? "Der Vertriebspartner wünscht " + [a.produkt, a.produktGas].filter((x) => INDIVIDUAL_PRODUKTE.includes(x)).join(" und ") +
+                          ". Dafür braucht es ein Angebot direkt vom Versorger. Das Paket enthält die Anfrage als PDF mit allen Kunden- und Lieferstellendaten und die Lastgänge als Excel-Dateien."
+                        : "Falls ein Angebot direkt beim Versorger angefragt werden muss: Anfrage als PDF mit allen Kunden- und Lieferstellendaten, Lastgänge als Excel-Dateien."}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Btn icon={FileText} variante={brauchtIndividualanfrage(a) ? "primär" : "hell"} disabled={paketLaeuft}
+                        onClick={() => paketLaden("zip")}>{paketLaeuft ? "wird erstellt …" : "Paket laden (ZIP)"}</Btn>
+                      <Btn variante="hell" disabled={paketLaeuft} onClick={() => paketLaden("pdf")}>Nur Anfrage-PDF</Btn>
+                    </div>
+                  </div>
+
                   <div className="rounded p-4" style={{ border: "1px solid " + C.line, background: "#FAFBFC" }}>
                     <div className="text-sm mb-1">Bisheriger Versorger</div>
                     <p className="text-xs mb-3" style={{ color: C.muted }}>
@@ -4183,8 +4376,10 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                             style={{ border: "1px solid " + C.line }} />
                         </label>
 
-                        <Datei label="Angebot als PDF – erforderlich" datei={v.angebot}
+                        <Datei label="Angebot als PDF" datei={v.angebot}
                           onSet={(f) => setVar(v.id, "angebot", f)} hinweis="Angebot anhängen" />
+                        <Datei label="Individualangebot vom Versorger (z. B. Tranchen oder PPA)" datei={v.individualangebot}
+                          onSet={(f) => setVar(v.id, "individualangebot", f)} hinweis="Individualangebot anhängen" />
                         <Btn icon={FileText} onClick={() => angebotErzeugen(v)} disabled={erzeugt === v.id}>
                           {erzeugt === v.id ? "Angebot wird erzeugt …" : "Angebot im EGC-Design erzeugen"}
                         </Btn>
@@ -4215,7 +4410,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     </Btn>
                     {!bereit && (
                       <p className="text-xs mt-2" style={{ color: C.muted }}>
-                        Jede Variante braucht ein angehängtes Angebots-PDF.
+                        Jede Variante braucht ein Angebot: erzeugt, als PDF angehängt oder als Individualangebot vom Versorger.
                       </p>
                     )}
                   </div>
@@ -4862,6 +5057,9 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
                         {v.angebot && (
                           <div className="mt-3"><DateiChip datei={v.angebot} label="Angebot" /></div>
+                        )}
+                        {v.individualangebot && (
+                          <div className="mt-2"><DateiChip datei={v.individualangebot} label="Individualangebot" /></div>
                         )}
 
                         {istPartner && ["angebot", "abgeschlossen"].includes(a.status) && !gewaehlt && (
