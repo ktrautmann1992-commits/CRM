@@ -1224,11 +1224,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     schrift(gr); const z = doc.splitTextToSize(String(t), breite); doc.text(z, x, y, { lineHeightFactor: 1.35 });
     return y + z.length * zeile;
   };
-  const fuss = () => {
-    strich(LINIE); doc.setLineWidth(0.3); doc.line(RA, H - 14, W - RA, H - 14);
-    schrift(7); farbe(GRAU);
-    text(firmenzeile(), RA, H - 9);
-  };
+  const fuss = () => pdfFussFirma(doc, W, H, RA);
   const kopf = (titel) => {
     flaeche(NAVY); doc.rect(0, 0, W, 26, "F");
     doc.addImage(logo, "JPEG", RA, 6, (420 / 196) * 13, 13);
@@ -1492,7 +1488,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     else text(w || "–", RA + halb + 22, y + 5 + i * 4.6);
     schrift(8); farbe(GRAU);
   });
-  y += 26;
+  y += 31;
   schrift(8, true); farbe(GRAU); text("UND", RA, y); y += 3;
   [["Firma / Herr / Frau", (kunde.firma || "") + (ansprech ? " · " + ansprech : "")], ["Straße, Hausnummer", kunde.strasse],
    ["PLZ, Ort", [kunde.plz, kunde.ort].filter(Boolean).join(" ")],
@@ -1503,6 +1499,10 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   });
   y += 5;
   y = ueberschrift("Lieferadressen", RA, y);
+  if (blanko) {
+    strich(TEXT); doc.setLineWidth(0.3); doc.rect(RA, y - 2.8, 2.8, 2.8, "S");
+    schrift(8); farbe(TEXT); text("siehe Lieferstellenliste (Anlage)", RA + 4, y); y += 5;
+  }
   for (const l of a.lieferstellen) {
     if (y + 20 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
     const vv = vorversorger[l.id] || {};
@@ -1544,13 +1544,15 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   for (let yy = yb + 3; yy < y + boxH - 1; yy += 6) doc.line(RA + 3, yy, W - RA - 3, yy);
   y += boxH + 7;
   if (y + 60 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
-  schrift(8.5, true); farbe(NAVY); text(EGC_AUFTRAG.einleitung, RA, y); y += 5;
+  strich(TEXT); doc.setLineWidth(0.3); doc.rect(RA, y - 3, 3.4, 3.4, "S");
+  strich(GRUEN); doc.setLineWidth(0.6); doc.line(RA + 0.6, y - 1.3, RA + 1.4, y - 0.4); doc.line(RA + 1.4, y - 0.4, RA + 2.9, y - 2.5);
+  schrift(8.5, true); farbe(NAVY); text(EGC_AUFTRAG.einleitung, RA + 5.5, y); y += 5;
   EGC_AUFTRAG.abschnitte.forEach(([t, inhalt]) => {
     schrift(8.5, true); farbe(TEXT); text(t, RA, y); y += 4;
     farbe(TEXT); y = absatz(inhalt, RA, y, BR, 8, 3.6) + 2;
   });
   y += 6;
-  y = ueberschrift("Unterschriften Service- & Beratungsauftrag", RA, y);
+  y = ueberschrift("Unterschriften Vollmacht / Lastschriftmandat / Datenschutz", RA, y);
   unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
 
   y = neueSeite("DATENSCHUTZ");
@@ -1561,7 +1563,25 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   });
   if (y + 24 > H - 22) y = neueSeite("DATENSCHUTZ");
   y = ueberschrift("Unterschrift Einwilligung", RA, y + 4);
-  unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
+  y = unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
+  if (blanko) {
+    y = neueSeite("WEITERE ZÄHLERPUNKTE");
+    for (let i = 0; i < 7; i++) {
+      strich(TEXT); doc.setLineWidth(0.3);
+      schrift(8.5, true); farbe(NAVY);
+      doc.rect(RA, y - 2.6, 2.8, 2.8, "S"); text("Strom", RA + 4, y);
+      doc.rect(RA + 18, y - 2.6, 2.8, 2.8, "S"); text("Erdgas", RA + 22, y);
+      schrift(7.8); farbe(GRAU); text("Lieferadresse:", RA + 40, y);
+      strich(LINIE); doc.line(RA + 60, y + 0.5, W - RA, y + 0.5);
+      y += 1.5;
+      [["akt. Versorger", "Kundennummer"], ["Verbrauch", "Zählernummer"], ["Lieferbeginn", "MaLo"]].forEach((r, k) => {
+        if (k % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.2, "F"); }
+        schrift(7.8); farbe(GRAU); text(r[0], RA + 2, y + 3.6); text(r[1], RA + halb + 2, y + 3.6);
+        y += 5.2;
+      });
+      y += 3.5;
+    }
+  }
   } /* Ende Service- & Beratungsauftrag */
 
   /* ---------- Nächste Schritte ---------- */
@@ -1592,7 +1612,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   /* Seitenzahlen (beim Angebot ohne Deckblatt und Schlussseite) */
   const n = doc.getNumberOfPages();
   for (let i = blanko ? 1 : 2; i <= (blanko ? n : n - 1); i++) {
-    doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 9, { align: "right" });
+    doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 6.4, { align: "right" });
   }
 
   if (blanko) {
@@ -1673,9 +1693,7 @@ async function individualAnfragePdf(a, mitarbeiter, anlagen) {
     doc.addImage("data:image/jpeg;base64," + LOGO_PDF, "JPEG", RA, 6, (420 / 196) * 13, 13);
     schrift(15, true); farbe([255, 255, 255]); text("INDIVIDUALANFRAGE", W - RA, 16, { align: "right" });
     flaeche(GRUEN); doc.rect(0, 26, W, 1.2, "F");
-    doc.setDrawColor(...LINIE); doc.setLineWidth(0.3); doc.line(RA, H - 14, W - RA, H - 14);
-    schrift(7); farbe(GRAU);
-    text(firmenzeile(), RA, H - 9);
+    pdfFussFirma(doc, W, H, RA);
     return 36;
   };
   const titel = (t, y) => { flaeche(GRUEN); doc.rect(RA, y - 3.4, 1.2, 4.4, "F"); schrift(10, true); farbe(NAVY); text(t.toUpperCase(), RA + 3.5, y); return y + 6; };
@@ -1744,7 +1762,7 @@ async function individualAnfragePdf(a, mitarbeiter, anlagen) {
     anlagen.forEach((x) => { text("• " + x.name, RA + 2, y); y += 4.6; });
   }
   const n = doc.getNumberOfPages();
-  for (let i = 1; i <= n; i++) { doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 9, { align: "right" }); }
+  for (let i = 1; i <= n; i++) { doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 6.4, { align: "right" }); }
   return new Uint8Array(doc.output("arraybuffer"));
 }
 
@@ -5767,8 +5785,22 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
    „Verträge“ ändern; leere Felder in der Datenbank überschreiben die Vorgabe nicht. */
 const FIRMENDATEN_VORGABE = {
   vertreter: "Karsten Trautmann", strasse: "In den Erlenwiesen 11", ort: "66914 Waldmohr",
-  telefon: "06373 8920114", email: "", ustId: "DE365107489",
+  telefon: "06373 8920114", email: "anfrage@egc-energie.de", website: "www.egc-energie.de",
+  ustId: "DE365107489", iban: "DE97 1001 0123 9973 1963 88", bic: "QNTODEB2XXX",
 };
+/* dreispaltige Fußzeile mit den Pflichtangaben (für jsPDF-Dokumente, Maße in mm) */
+function pdfFussFirma(doc, W, H, RA) {
+  const F = FIRMENDATEN;
+  doc.setDrawColor(216, 221, 228); doc.setLineWidth(0.3); doc.line(RA, H - 17, W - RA, H - 17);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(6.6); doc.setTextColor(107, 119, 135);
+  const spalten = [
+    ["EGC Energie" + (F.vertreter ? " · " + F.vertreter : ""), F.strasse, F.ort],
+    [F.telefon ? "Tel. " + F.telefon : "", F.email, F.website],
+    [F.iban ? "IBAN " + F.iban : "", F.bic ? "BIC " + F.bic : "", F.ustId ? "USt-IdNr. " + F.ustId : ""],
+  ];
+  const x = [RA, RA + 62, RA + 112];
+  spalten.forEach((z, i) => z.filter(Boolean).forEach((t, k) => doc.text(String(t), x[i], H - 12.6 + k * 3.1)));
+}
 const firmendatenMit = (f) => {
   const z = { ...FIRMENDATEN_VORGABE };
   Object.entries(f || {}).forEach(([k, v]) => { if (v != null && String(v).trim() !== "") z[k] = v; });
@@ -9311,6 +9343,12 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
               onChange={(v) => setFirmendaten({ ...firmendaten, email: v })} />
             <Feld label="USt-IdNr." value={firmendaten.ustId || ""}
               onChange={(v) => setFirmendaten({ ...firmendaten, ustId: v })} />
+            <Feld label="Website" value={firmendaten.website || ""}
+              onChange={(v) => setFirmendaten({ ...firmendaten, website: v })} />
+            <Feld label="IBAN" value={firmendaten.iban || ""}
+              onChange={(v) => setFirmendaten({ ...firmendaten, iban: v })} />
+            <Feld label="BIC" value={firmendaten.bic || ""}
+              onChange={(v) => setFirmendaten({ ...firmendaten, bic: v })} />
           </div>
         </div>
       )}
