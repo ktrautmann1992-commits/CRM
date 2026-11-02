@@ -295,7 +295,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.10.2 · 02.11.2026 · Angebots-PDF neu gestaltet";
+const VERSION = "v5.10.3 · 02.11.2026 · Tippgeber durch die Geschäftsführung";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2244,9 +2244,12 @@ const tgZahl = (w) => parseFloat(String(w ?? "").replace(",", ".")) || 0;
 const tippgeberMenge = (a) => bestaetigteMenge(a) || verbrauchGesamt(a);
 
 /* wer trägt den Tippgeber? der Partner, der ihn gewählt hat, sonst der erste Vertriebspartner */
+const TG_FIRMA = "EGC";
 function tippgeberTraeger(a, mitarbeiter) {
   const tg = a && a.tippgeber;
   if (!tg) return null;
+  /* Tippgeber der Firma: die Vergütung trägt EGC, kein Vertriebspartner */
+  if (tg.besitzerId === TG_FIRMA) return null;
   const vertrieb = beteiligte(a).filter((b) => {
     const m = mitarbeiter.find((x) => x.id === b.id);
     return m && ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle);
@@ -2300,7 +2303,7 @@ function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
     const basis = p ? p.betrag : 0;
     let auszahlung = 0, abzug = 0;
     if (tg.art === "prozent") {
-      auszahlung = ((p ? basis : g) * wert) / 100;
+      auszahlung = ((p ? basis : tg.besitzerId === TG_FIRMA ? beiEgc : g) * wert) / 100;
       abzug = p ? Math.min(auszahlung, basis) : 0;
     } else if (tg.art === "kwh") {
       const gesamtTG = (wert * tippgeberMenge(a)) / 100000;
@@ -3108,7 +3111,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                     ...(v !== "Tippgeber" ? { tippgeberId: null, tippgeber: null } : {}) })}
                   options={HERKUNFT} />
                 {a.herkunft === "Tippgeber" ? (
-                  tippgeberFuer(tippgeber, user.id).length > 0 ? (
+                  tippgeberFuer(tippgeber, user.id, user.rolle === "Geschäftsführung").length > 0 ? (
                     <Select label="Welcher Tippgeber?" value={a.tippgeberId || ""}
                       onChange={(v) => {
                         const t = (tippgeber || []).find((x) => x.id === v);
@@ -3116,7 +3119,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                                herkunftDetail: t ? (t.firma || t.name) : "" });
                       }}
                       options={[{ value: "", label: "Bitte wählen" },
-                        ...tippgeberFuer(tippgeber, user.id)
+                        ...tippgeberFuer(tippgeber, user.id, user.rolle === "Geschäftsführung")
                           .map((t) => ({ value: t.id, label: t.firma || t.name }))]} />
                   ) : (
                     <div>
@@ -3921,7 +3924,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
     tippgeberId: (a.tippgeber && a.tippgeber.id) || a.tippgeberId || "",
   });
   /* zur Auswahl stehen nur eigene, von der Geschäftsführung freigegebene Tippgeber */
-  const meineTippgeber = tippgeberFuer(tippgeber, user.id);
+  const meineTippgeber = tippgeberFuer(tippgeber, user.id, user.rolle === "Geschäftsführung");
   const fragtTippgeber = istBeteiligt(a, user.id);
 
   const abschlussSenden = () => {
@@ -6057,6 +6060,9 @@ const TG_VERGUETUNG = {
     n4: "Kündigt der Energieversorger den Liefervertrag des Kunden vor der Auszahlung, entfällt der Anspruch auf Vergütung für diesen Kunden.",
   },
 };
+
+/* Tippgeber der Firma, prozentual: Grundlage ist, was EGC vom Versorger erhält */
+const TG_N1_FIRMA = "Der Tippgeber erhält für jeden Kunden aus einem erfolgreichen Tipp eine jährliche Vergütung von {W} der Provision, die EGC für diesen Kunden im jeweiligen Lieferjahr vom Energieversorger erhält (ohne Umsatzsteuer).";
 
 const TG_PARAGRAFEN = [
  { h: "§ 1 Vertragsgegenstand", n: [
@@ -9002,19 +9008,20 @@ const tippgeberMomentaufnahme = (t, traegerId) => t ? ({
 }) : null;
 
 /* auswählbar: eigene oder von der Geschäftsführung zugeordnete, jeweils freigegeben */
-const tippgeberFuer = (liste, userId) => (liste || []).filter((t) => tippgeberFrei(t)
-  && (t.besitzerId === userId || (t.zugeordnet || []).includes(userId)));
+const tippgeberFuer = (liste, userId, gf = false) => (liste || []).filter((t) => tippgeberFrei(t)
+  && (t.besitzerId === userId || (t.zugeordnet || []).includes(userId) || (gf && t.besitzerId === TG_FIRMA)));
 const tippgeberLabel = (t) => (t.firma || t.name) + (t.art ? " · " + tippgeberText(t) : "");
 
 /* Tippgebervertrag zwischen EGC und dem Tippgeber, mit der freigegebenen Vergütung */
 function tippgeberVertragPdf(t, mitarbeiter, user) {
-  const partner = mitarbeiter.find((m) => m.id === t.besitzerId) || user;
+  const firma = t.besitzerId === TG_FIRMA;
+  const partner = firma ? { name: "EGC Energie" } : mitarbeiter.find((m) => m.id === t.besitzerId) || user;
   const leer = "______________________";
   const wert = parseFloat(String(t.wert || "").replace(",", ".")) || 0;
   const art = t.art === "prozent" ? "prozent" : "kwh";
   const W = art === "prozent" ? num(wert, wert % 1 ? 1 : 0) + " %" : num(wert, wert % 1 ? 2 : 0) + " €";
   const BSP = num(wert / 10, 2) + " €";
-  const vg = TG_VERGUETUNG[art];
+  const vg = firma && art === "prozent" ? { ...TG_VERGUETUNG.prozent, n1: TG_N1_FIRMA } : TG_VERGUETUNG[art];
   const fuell = (x) => x.replace(/\{W\}/g, W).replace("{BSP}", BSP).replace("{PARTNER}", partner.name);
   const z = vertragsZeilen("Tippgebervertrag", [
     "Tippgeber: " + (t.firma ? t.firma + (t.name ? " (" + t.name + ")" : "") : t.name) + ", "
@@ -9031,7 +9038,7 @@ function tippgeberVertragPdf(t, mitarbeiter, user) {
   z.push("______________________________          ______________________________");
   z.push("EGC Energie, " + (FIRMENDATEN.vertreter || "") + "                       Tippgeber, " + (t.name || t.firma));
   z.push(" ");
-  z.push("Zuständiger Vertriebspartner: " + partner.name);
+  z.push(firma ? "Betreuung durch EGC Energie" : "Zuständiger Vertriebspartner: " + partner.name);
   const pdf = erzeugePdf("Tippgebervertrag_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
     "Tippgebervertrag", z);
   if (pdf) dateiLaden(pdf);
@@ -9081,7 +9088,8 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
     if (t.firma && t.name) z.push("Ansprechpartner: " + t.name);
     if (t.adresse) z.push(t.adresse);
     z.push(" ");
-    z.push("Vermittelt über " + (mitarbeiter.find((m) => m.id === t.besitzerId) || {}).name);
+    z.push("Vermittelt über " + (t.besitzerId === TG_FIRMA ? "EGC Energie"
+      : (mitarbeiter.find((m) => m.id === t.besitzerId) || {}).name));
     z.push("Vergütung: " + tippgeberText(t));
     z.push(" ");
     z.push({ text: "Vermittelte Kunden", gross: true });
@@ -9340,9 +9348,11 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
   const [reiter, setReiter] = useState("tippgeber");
   const [grund, setGrund] = useState({});
   const [offenId, setOffenId] = useState(null);
+  const [neuTG, setNeuTG] = useState(null);
   const vertrieb = mitarbeiter.filter((m) => ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle));
   const koepfe = mitarbeiter.filter((m) => ["Teamleiter", "Leitung Vertrieb"].includes(m.rolle));
-  const name = (id) => (mitarbeiter.find((m) => m.id === id) || {}).name || "unbekannt";
+  const name = (id) => id === TG_FIRMA ? "EGC Energie (Firma)"
+    : (mitarbeiter.find((m) => m.id === id) || {}).name || "unbekannt";
   const kunden = (t) => anfragen.filter((a) => a.tippgeber && a.tippgeber.id === t.id
     && ["bestaetigt", "abgeschlossen"].includes(a.status)).length;
   const wartend = tippgeber.filter((t) => t.status !== "freigegeben" && t.status !== "abgelehnt");
@@ -9357,6 +9367,17 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
     (t.firma || t.name) + " von " + name(t.besitzerId) + (an ? " freigegeben (" + tippgeberText(t) + ")" : ": Freigabe zurückgenommen"));
   const ablehnen = (t) => setTG(t, { status: "abgelehnt", ablehnung: (grund[t.id] || "").trim(), freigabe: null },
     (t.firma || t.name) + " von " + name(t.besitzerId) + " abgelehnt");
+  /* Die Geschäftsführung legt Tippgeber selbst an: für einen Vertriebspartner
+     (Vergütung geht von dessen Provision ab) oder für die Firma (EGC trägt sie).
+     Was die Geschäftsführung anlegt, ist sofort freigegeben. */
+  const tgAnlegen = () => {
+    const t = { ...neuTG, zahlweise: zahlweiseVon(neuTG.art), status: "freigegeben",
+                freigabe: { von: user.name, datum: heute() }, ablehnung: "" };
+    setTippgeber([...tippgeber, t]);
+    if (notieren) notieren("Tippgeber", (t.firma || t.name) + " angelegt für " + name(t.besitzerId)
+      + " und freigegeben (" + tippgeberText(t) + ")");
+    setNeuTG(null);
+  };
   const zuordnen = (t, id, an) => {
     const alt = t.zugeordnet || [];
     setTG(t, { zugeordnet: an ? [...new Set([...alt, id])] : alt.filter((x) => x !== id) },
@@ -9386,7 +9407,49 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
         <Reiter id="firma">Firmendaten</Reiter>
       </div>
 
-      {reiter === "tippgeber" && (tippgeber.length === 0 ? (
+      {reiter === "tippgeber" && !neuTG && (
+        <div className="mb-4">
+          <Btn icon={Plus} onClick={() => setNeuTG(leererTippgeber(TG_FIRMA))}>Tippgeber anlegen</Btn>
+        </div>
+      )}
+      {reiter === "tippgeber" && neuTG && (
+        <div className="rounded p-5 space-y-5 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <h3 className="text-base">Neuer Tippgeber</h3>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Feld label="Firma" value={neuTG.firma} onChange={(v) => setNeuTG({ ...neuTG, firma: v })} />
+            <Feld label="Ansprechpartner" value={neuTG.name} onChange={(v) => setNeuTG({ ...neuTG, name: v })} />
+            <Feld label="Telefon" value={neuTG.telefon} onChange={(v) => setNeuTG({ ...neuTG, telefon: v })} />
+            <Feld label="E-Mail" value={neuTG.email} onChange={(v) => setNeuTG({ ...neuTG, email: v })} />
+            <Feld label="Anschrift" value={neuTG.adresse} onChange={(v) => setNeuTG({ ...neuTG, adresse: v })} breit />
+            <Select label="Wer betreut den Tippgeber?" value={neuTG.besitzerId} breit
+              onChange={(v) => setNeuTG({ ...neuTG, besitzerId: v })}
+              options={[{ value: TG_FIRMA, label: "EGC Energie (Firma)" },
+                ...vertrieb.map((m) => ({ value: m.id, label: m.name + " (" + m.rolle + ")" }))]} />
+            <Select label="Wie wird vergütet?" value={neuTG.art}
+              onChange={(v) => setNeuTG({ ...neuTG, art: v, wert: v === "kwh" ? TIPPGEBER_VORSCHLAG_KWH : "10" })}
+              options={[{ value: "kwh", label: "Festbetrag je 100.000 kWh, einmalig" },
+                        { value: "prozent", label: "Prozentual an der Provision, jährlich" }]} />
+            <Feld label={neuTG.art === "kwh" ? "Wert in € je 100.000 kWh" : "Wert in %"} value={neuTG.wert}
+              onChange={(v) => setNeuTG({ ...neuTG, wert: v })} />
+            <Feld label="Notiz" value={neuTG.notiz} onChange={(v) => setNeuTG({ ...neuTG, notiz: v })} breit />
+          </div>
+          <p className="text-xs" style={{ color: C.muted, maxWidth: "62ch" }}>
+            {neuTG.besitzerId === TG_FIRMA
+              ? "Die Vergütung trägt EGC, kein Vertriebspartner wird belastet." +
+                (neuTG.art === "prozent" ? " Prozentual heißt hier: Anteil an der Provision, die bei EGC ankommt." : "") +
+                " Damit Vertriebspartner den Tippgeber an ihren Vorgängen auswählen können, ordnest du ihn danach über „Zuordnen“ zu."
+              : "Die Vergütung geht von der Provision des gewählten Vertriebspartners ab, genau so, als hätte er den Tippgeber selbst angelegt."}
+            {" "}Der Tippgeber ist sofort freigegeben; den Tippgebervertrag erzeugst du danach in der Liste.
+          </p>
+          <div className="flex gap-2">
+            <Btn icon={Check} onClick={tgAnlegen} disabled={(!neuTG.firma && !neuTG.name) || !tgZahl(neuTG.wert)}>
+              Anlegen und freigeben
+            </Btn>
+            <Btn variante="hell" onClick={() => setNeuTG(null)}>Abbrechen</Btn>
+          </div>
+        </div>
+      )}
+      {reiter === "tippgeber" && !neuTG && (tippgeber.length === 0 ? (
         <div className="rounded p-8 text-center text-sm" style={{ border: "1px dashed " + C.line, color: C.muted }}>
           Noch keine Tippgeber angelegt.
         </div>
