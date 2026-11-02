@@ -34,7 +34,7 @@ function html(titel: string, absaetze: string[], vorgangId: string) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EFF1F4;padding:24px 12px">
 <tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:8px;overflow:hidden">
-<tr><td style="background:#0A1626;padding:18px 24px;color:#ffffff;font-size:18px;font-weight:bold">EGC<span style="color:#6CB43B">-</span>Energie</td></tr>
+<tr><td style="background:#0A1626;padding:18px 24px;color:#ffffff;font-size:18px;font-weight:bold">EGC <span style="color:#6CB43B">Energie</span></td></tr>
 <tr><td style="height:4px;background:#6CB43B"></td></tr>
 <tr><td style="padding:24px">
 <h1 style="font-size:19px;margin:0 0 14px;color:#0A1626">${esc(titel)}</h1>
@@ -43,7 +43,7 @@ ${absaetze.map((p) => `<p style="font-size:15px;line-height:1.5;margin:0 0 12px"
 <p style="font-size:13px;color:#6B7787;margin:12px 0 0">Vorgang ${esc(vorgangId)}</p>
 </td></tr>
 <tr><td style="padding:14px 24px;border-top:1px solid #D8DDE4;font-size:12px;color:#6B7787">
-Automatische Nachricht aus dem Vertriebsportal von EGC-Energie.
+Automatische Nachricht aus dem Vertriebsportal von EGC Energie.
 </td></tr>
 </table></td></tr></table></body></html>`;
 }
@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
       if (aktivMitMail(empf))
         mails.push({ an: [empf!.daten.email], betreff: "Testmail aus dem Vertriebsportal",
           titel: "Die E-Mail-Benachrichtigungen funktionieren",
-          text: ["Diese Testmail kommt aus dem Vertriebsportal von EGC-Energie.",
+          text: ["Diese Testmail kommt aus dem Vertriebsportal von EGC Energie.",
                  "Ab jetzt erhalten Kalkulation und Vertriebspartner automatisch eine Nachricht bei neuen Anfragen, " +
                  "Angeboten, fehlenden Unterlagen, Abschlüssen und ausgezahlten Provisionen."] });
     }
@@ -136,7 +136,7 @@ Deno.serve(async (req) => {
     /* jede Person bekommt eine eigene Mail, damit niemand die Adressen der anderen sieht */
     for (const an of [...new Set(m.an)]) {
       try {
-        await post.sendMail({ from: `"EGC-Energie Vertriebsportal" <${benutzer}>`, to: an,
+        await post.sendMail({ from: `"EGC Energie Vertriebsportal" <${benutzer}>`, to: an,
           subject: m.betreff, html: html(m.titel, m.text, id) });
         gesendet++;
       } catch (e) { fehler.push(String((e as Error)?.message || e).slice(0, 200)); }

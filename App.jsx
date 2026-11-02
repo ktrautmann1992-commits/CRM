@@ -181,7 +181,7 @@ function seedAblage() {
       "Vierseitig, für Erstgespräche im Gastgewerbe."),
     e("marketing", "Flyer Produktion und Gewerbe", "PDF", "flyer_produktion.pdf",
       "Schwerpunkt RLM, Lastgangoptimierung und Tranchen."),
-    e("marketing", "Imagebroschüre EGC-Energie", "PDF", "imagebroschuere.pdf",
+    e("marketing", "Imagebroschüre EGC Energie", "PDF", "imagebroschuere.pdf",
       "Unternehmensvorstellung zum Hinterlassen beim Kunden."),
     e("schulung", "Grundlagen Energiebeschaffung", "PDF", "schulung_grundlagen.pdf",
       "Einstieg: Marktrollen, Preisbestandteile, Netzentgelte."),
@@ -295,7 +295,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.10.1 · 02.11.2026 · Firmendaten in allen Dokumenten";
+const VERSION = "v5.10.1 · 02.11.2026 · Firmendaten, Schreibweise EGC Energie";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -757,7 +757,7 @@ function erzeugePdf(dateiname, titel, zeilen) {
 
 /* Erzeugt ein kleines, gültiges PDF als Datenlink – nur für die Demodateien */
 function demoPdf(name, zeilen) {
-  const text = (zeilen || ["EGC-Energie", name])
+  const text = (zeilen || ["EGC Energie", name])
     .map((z, i) => "BT /F1 " + (i ? 12 : 18) + " Tf 60 " + (760 - i * 26) + " Td (" +
       String(z).replace(/[()\\]/g, "") + ") Tj ET")
     .join("\n");
@@ -1147,13 +1147,13 @@ function lastgangGrafiken(stand) {
   };
 }
 
-/* Texte aus der Vorlage, auf EGC-Energie umgestellt */
+/* Texte aus der Vorlage, auf EGC Energie umgestellt */
 const EGC_LEISTUNGEN = ["Persönliche Betreuung und Beratung", "Transparente und faire Vertragsbedingungen",
   "Sichere und zuverlässige Energieversorgung", "Keine versteckten Kosten", "Versorgerunabhängig"];
 const EGC_SCHRITTE = [
   ["Angebot vorstellen", "Wir stellen Ihnen Ihr individuelles Energieangebot vor und beantworten alle offenen Fragen."],
   ["Angebot und Service- & Beratungsauftrag unterzeichnen", "Sie bestätigen das Angebot sowie den Service- und Beratungsauftrag – schnell und unkompliziert."],
-  ["Versorgerwechsel durch EGC-Energie", "Wir übernehmen die komplette Abwicklung Ihres Versorgerwechsels – Sie müssen sich um nichts kümmern."],
+  ["Versorgerwechsel durch EGC Energie", "Wir übernehmen die komplette Abwicklung Ihres Versorgerwechsels – Sie müssen sich um nichts kümmern."],
   ["Bewirtschaftung des Energievertrages und laufende Portfolioanpassung", "Wir kümmern uns kontinuierlich um Ihren Energievertrag und passen Ihr Portfolio laufend an die Marktentwicklung an. Sie haben einen Ansprechpartner für Ihre Energielieferverträge."],
   ["Energienebenkosten-Optimierung", "Wir unterstützen Sie bei der Stromsteuer-Rückerstattung, der Reduzierung der Energienebenkosten sowie bei der Planung von PV-Anlage, Batteriespeicher und E-Ladesäulen. Sowie beim Einsatz von Smartmetern."],
   ["Dauerhafte Partnerschaft", "Auch nach dem Wechsel bleiben wir an Ihrer Seite – persönliche Betreuung, langfristig und verlässlich. Bei uns haben Sie einen festen persönlichen Ansprechpartner und keine Warteschleife."],
@@ -1279,7 +1279,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   });
   flaeche(GRUEN); doc.rect(0, H - 14, W, 14, "F");
   schrift(8.5, true); farbe([255, 255, 255]);
-  text([F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "), W / 2, H - 5.5, { align: "center" });
+  text([F.vertreter, "EGC Energie"].filter(Boolean).join(" · "), W / 2, H - 5.5, { align: "center" });
 
   /* ---------- Angebot je Sparte ---------- */
   const sparten = (v.sparte && v.sparte !== "beide") ? [v.sparte]
@@ -1427,7 +1427,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     flaeche(HELL); doc.rect(RA, y, BR, 30, "F");
     schrift(9, true); farbe(NAVY); text("Angebot angenommen:", RA + 4, y + 6);
     schrift(8.5); farbe(TEXT);
-    text("Hiermit akzeptiere ich das oben stehende Angebot und beauftrage EGC-Energie mit dem Abschluss des Energieliefervertrags.",
+    text("Hiermit akzeptiere ich das oben stehende Angebot und beauftrage EGC Energie mit dem Abschluss des Energieliefervertrags.",
       RA + 4, y + 11, { maxWidth: BR - 8 });
     unterschriften(y + 23, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"]);
   }
@@ -1482,7 +1482,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   y = blanko ? kopf("SERVICE- & BERATUNGSAUFTRAG") : neueSeite("SERVICE- & BERATUNGSAUFTRAG");
   const halb = BR / 2;
   schrift(8, true); farbe(GRAU); text("ZWISCHEN", RA, y);
-  schrift(9, true); farbe(TEXT); text("EGC-Energie", RA, y + 5);
+  schrift(9, true); farbe(TEXT); text("EGC Energie", RA, y + 5);
   schrift(9); [F.vertreter ? "vertreten durch " + F.vertreter : "", F.strasse, F.ort, F.telefon ? "Tel. " + F.telefon : ""].filter(Boolean)
     .forEach((t, i) => text(t, RA, y + 9.5 + i * 4.4));
   schrift(8); farbe(GRAU);
@@ -1699,7 +1699,7 @@ async function individualAnfragePdf(a, mitarbeiter, anlagen) {
   doc.text(intro, RA, y); y += intro.length * 4.4 + 4;
 
   y = titel("Angefragt von", y);
-  y = tabelle([["Vermittler", [F.vertreter, "EGC-Energie"].filter(Boolean).join(" · ")],
+  y = tabelle([["Vermittler", [F.vertreter, "EGC Energie"].filter(Boolean).join(" · ")],
     ["Anschrift", [F.strasse, F.ort].filter(Boolean).join(", ")], ["Telefon", F.telefon], ["E-Mail", F.email],
     ["Vertriebspartner", partner.name]], y);
 
@@ -1812,7 +1812,7 @@ function angebotPdf(a, v) {
   z.push("Alle Preise netto zuzüglich Steuern, Abgaben, Umlagen und Netzentgelten,");
   z.push("soweit nicht anders angegeben. Angebot freibleibend.");
   z.push(" ");
-  z.push("EGC-Energie · " + [FIRMENDATEN.strasse, FIRMENDATEN.ort].filter(Boolean).join(", "));
+  z.push("EGC Energie · " + [FIRMENDATEN.strasse, FIRMENDATEN.ort].filter(Boolean).join(", "));
   return erzeugePdf("angebot_" + a.id + "_" + (v.produkt || "").toLowerCase().replace(/[^a-z]/g, "") + ".pdf",
     "Angebot " + a.id, z);
 }
@@ -3613,7 +3613,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
     });
 
     z.push({ text: " ", gross: false });
-    z.push("Erstellt am " + datum(heute()) + " um " + jetzt() + " Uhr von " + user.name + ", EGC-Energie Vertriebsportal");
+    z.push("Erstellt am " + datum(heute()) + " um " + jetzt() + " Uhr von " + user.name + ", EGC Energie Vertriebsportal");
 
     const pdf = erzeugePdf("verlauf_" + a.id + ".pdf",
       "Vorgangsprotokoll " + a.id, z);
@@ -5364,7 +5364,7 @@ function Provisionen({ anfragen, mitarbeiter, user, onOeffnen, onListe }) {
             <div className="grid sm:grid-cols-3 gap-4">
               {[["Anteil EGC an der Gesamtprovision", f.beiEgc, C.text],
                 ["Ausgeschüttet an den Vertrieb", f.aus, C.gas],
-                ["Verbleibt bei EGC-Energie", f.rest, C.ok]].map(([k, w, farbe]) => (
+                ["Verbleibt bei EGC Energie", f.rest, C.ok]].map(([k, w, farbe]) => (
                 <div key={k}>
                   <div className="text-xs mb-1" style={{ color: C.muted }}>{k}</div>
                   <div className="text-xl" style={{ color: farbe, fontVariantNumeric: "tabular-nums" }}>
@@ -5606,7 +5606,7 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
           <div className="text-sm space-y-1 mb-4">
             <div>Provisionssatz: {num(parseFloat(vertrag.satz) || 0, 0)} % der Gesamtprovision je Lieferjahr</div>
             <div style={{ color: C.muted }}>
-              Unterschrieben für EGC-Energie von {vertrag.gfName} am {datum(vertrag.gfDatum)}
+              Unterschrieben für EGC Energie von {vertrag.gfName} am {datum(vertrag.gfDatum)}
             </div>
           </div>
           {vertrag.partnerUnterschrift ? (
@@ -5763,7 +5763,7 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
    Wortlaut der Geschäftsführung (Handelsvertretervertrag, Tippgebervertrag).
    Platzhalter in geschweiften Klammern werden beim Erzeugen ersetzt.
    Die Firmendaten von EGC (vertreten durch, Anschrift) pflegt die Geschäftsführung. */
-/* Offizielle Angaben von EGC-Energie. Die Geschäftsführung kann sie unter
+/* Offizielle Angaben von EGC Energie. Die Geschäftsführung kann sie unter
    „Verträge“ ändern; leere Felder in der Datenbank überschreiben die Vorgabe nicht. */
 const FIRMENDATEN_VORGABE = {
   vertreter: "Karsten Trautmann", strasse: "In den Erlenwiesen 11", ort: "66914 Waldmohr",
@@ -5779,7 +5779,7 @@ const setzeFirmendaten = (f) => { FIRMENDATEN = firmendatenMit(f); };
 /* eine Zeile für Fußzeilen: Name · Anschrift · Telefon · E-Mail · USt-IdNr. */
 const firmenzeile = () => {
   const F = FIRMENDATEN;
-  return ["EGC-Energie", [F.strasse, F.ort].filter(Boolean).join(", "), F.telefon ? "Tel. " + F.telefon : "",
+  return ["EGC Energie", [F.strasse, F.ort].filter(Boolean).join(", "), F.telefon ? "Tel. " + F.telefon : "",
     F.email, F.ustId ? "USt-IdNr. " + F.ustId : ""].filter(Boolean).join("  |  ");
 };
 
@@ -5900,7 +5900,7 @@ function vertragsZeilen(titel, parteiZeilen, paragrafen, ersetze) {
   const leer = "______________________";
   const f = FIRMENDATEN;
   const z = [];
-  z.push("Auftraggeber: EGC-Energie, vertreten durch " + (f.vertreter || leer) + ", "
+  z.push("Auftraggeber: EGC Energie, vertreten durch " + (f.vertreter || leer) + ", "
     + (f.strasse || leer) + ", " + (f.ort || leer) + (f.ustId ? ", USt-IdNr. " + f.ustId : "")
     + ", nachfolgend \"EGC\"");
   z.push("und");
@@ -5940,7 +5940,7 @@ async function vertragPdf(m, mitarbeiter) {
     .replace("{IBAN}", sd.iban || "________________________________"));
   z.push(" ");
   z.push({ text: "Unterschriften", gross: true });
-  z.push("Für EGC-Energie, " + (v.gfName || FIRMENDATEN.vertreter || leer) + ":");
+  z.push("Für EGC Energie, " + (v.gfName || FIRMENDATEN.vertreter || leer) + ":");
   if (gf && gf.bild) z.push(gf); else z.push(" ");
   z.push("Ort, Datum: " + (FIRMENDATEN.ort ? FIRMENDATEN.ort.replace(/^\d+\s*/, "") + ", " : "")
     + (v.gfDatum ? datum(v.gfDatum) : leer));
@@ -6476,7 +6476,7 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
                 <div className="grid sm:grid-cols-2 gap-4 text-xs" style={{ color: C.muted }}>
                   <div>
                     <DateiBild datei={v.gfUnterschrift} hoehe={60} />
-                    <div className="mt-1">EGC-Energie: {v.gfName}, {datum(v.gfDatum)}</div>
+                    <div className="mt-1">EGC Energie: {v.gfName}, {datum(v.gfDatum)}</div>
                   </div>
                   <div>
                     {v.partnerUnterschrift
@@ -7725,7 +7725,7 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
     if (!kunden.length) z.push("Keine Kunden erfasst.");
     z.push("Erstellt am " + datum(heute()) + " um " + jetzt() + " Uhr von " + user.name);
     const datei = erzeugePdf("kundenliste_" + heute() + ".pdf",
-      "Kundenliste EGC-Energie", z);
+      "Kundenliste EGC Energie", z);
     if (datei) dateiLaden(datei);
   };
 
@@ -8828,7 +8828,7 @@ function tippgeberVertragPdf(t, mitarbeiter, user) {
   z.push(" ");
   z.push(" ");
   z.push("______________________________          ______________________________");
-  z.push("EGC-Energie, " + (FIRMENDATEN.vertreter || "") + "                       Tippgeber, " + (t.name || t.firma));
+  z.push("EGC Energie, " + (FIRMENDATEN.vertreter || "") + "                       Tippgeber, " + (t.name || t.firma));
   z.push(" ");
   z.push("Zuständiger Vertriebspartner: " + partner.name);
   const pdf = erzeugePdf("Tippgebervertrag_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
@@ -8893,7 +8893,7 @@ function Tippgeber({ tippgeber, setTippgeber, anfragen, mitarbeiter, user }) {
     z.push(" ");
     z.push({ text: "Gesamt " + eur(summe(t)), gross: true });
     z.push(" ");
-    z.push("Erstellt am " + datum(heute()) + " · EGC-Energie");
+    z.push("Erstellt am " + datum(heute()) + " · EGC Energie");
     const pdf = erzeugePdf("tippgeber_" + (t.firma || t.name).replace(/\W+/g, "_") + ".pdf",
       "Tippgeberabrechnung", z);
     if (pdf) dateiLaden(pdf);
@@ -10117,7 +10117,7 @@ function Kalender({ termine, setTermine, user, leads }) {
   };
 
   const icsLaden = () => {
-    const zeilen = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//EGC-Energie//Vertriebsportal//DE"];
+    const zeilen = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//EGC Energie//Vertriebsportal//DE"];
     alle.forEach((t) => {
       const start = t.datum.replace(/-/g, "") + "T" + (t.zeit || "09:00").replace(":", "") + "00";
       zeilen.push("BEGIN:VEVENT", "UID:" + t.id + "@egc-energie", "DTSTART:" + start,
