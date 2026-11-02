@@ -295,7 +295,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.10.1 · 02.11.2026 · Firmendaten, Schreibweise EGC Energie";
+const VERSION = "v5.10.2 · 02.11.2026 · Angebots-PDF neu gestaltet";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1114,9 +1114,9 @@ function lastgangGrafik(werte, { breite = 1400, hoehe = 430, titel = "", achse =
   g.fillText(einheit, 0, 0); g.restore();
 
   const verlauf = g.createLinearGradient(0, T, 0, T + h);
-  verlauf.addColorStop(0, "rgba(10,22,38,0.92)");
-  verlauf.addColorStop(0.55, "rgba(10,22,38,0.35)");
-  verlauf.addColorStop(1, "rgba(10,22,38,0.03)");
+  verlauf.addColorStop(0, "rgba(10,22,38,0.9)");
+  verlauf.addColorStop(0.5, "rgba(38,92,110,0.45)");
+  verlauf.addColorStop(1, "rgba(108,180,59,0.08)");
   g.beginPath(); g.moveTo(x(0), y(0));
   werte.forEach((v, i) => g.lineTo(x(i), y(v)));
   g.lineTo(x(werte.length - 1), y(0)); g.closePath();
@@ -1225,27 +1225,75 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     return y + z.length * zeile;
   };
   const fuss = () => pdfFussFirma(doc, W, H, RA);
+  /* Schrift verkleinern, bis der Text in die Breite passt */
+  const passend = (t, breite, gr) => { let g = gr; doc.setFontSize(g); while (g > 6 && doc.getTextWidth(String(t)) > breite) doc.setFontSize(g -= 0.5); };
+
+  /* Gestaltung: Verläufe, Transparenz, abgerundete Karten (alles als Vektor, keine Bilder) */
+  const NAVY1 = [7, 16, 29], NAVY2 = [27, 58, 96], GRUEN1 = [74, 140, 38], GRUEN2 = [150, 206, 96],
+        WEISS = [255, 255, 255], GRUENMITTEL = [218, 236, 204];
+  const mische = (f1, f2, t) => f1.map((c, i) => Math.round(c + (f2[i] - c) * t));
+  const deckkraft = (o) => doc.setGState(new doc.GState({ opacity: o, "stroke-opacity": o }));
+  /* Verlaufsfläche, wahlweise mit runden Ecken (r) oder als Kreis (kreis) */
+  const verlauf = (x, y, w, h, f1, f2, { r = 0, quer = true, kreis = false, stufen = 90 } = {}) => {
+    doc.saveGraphicsState();
+    if (kreis) doc.circle(x + w / 2, y + h / 2, w / 2, null);
+    else if (r) doc.roundedRect(x, y, w, h, r, r, null);
+    else doc.rect(x, y, w, h, null);
+    doc.clip(); doc.discardPath();
+    for (let i = 0; i < stufen; i++) {
+      flaeche(mische(f1, f2, i / (stufen - 1)));
+      if (quer) doc.rect(x + (i * w) / stufen, y, w / stufen + 0.25, h, "F");
+      else doc.rect(x, y + (i * h) / stufen, w, h / stufen + 0.25, "F");
+    }
+    doc.restoreGraphicsState();
+  };
+  /* weicher Schatten unter einer Karte */
+  const schatten = (x, y, w, h, r = 2.5) => {
+    flaeche(NAVY);
+    [[1.6, 0.025], [1.0, 0.035], [0.5, 0.05]].forEach(([d, o]) => {
+      deckkraft(o); doc.roundedRect(x - d * 0.3, y + d * 0.6, w + d * 0.6, h + d * 0.5, r + d * 0.4, r + d * 0.4, "F");
+    });
+    deckkraft(1);
+  };
+  const karte = (x, y, w, h, { r = 2.5, fuellung = WEISS, rand = LINIE, mitSchatten = true } = {}) => {
+    if (mitSchatten) schatten(x, y, w, h, r);
+    flaeche(fuellung); doc.roundedRect(x, y, w, h, r, r, "F");
+    if (rand) { strich(rand); doc.setLineWidth(0.25); doc.roundedRect(x, y, w, h, r, r, "S"); }
+  };
+  /* durchscheinender Kreis als Schmuck */
+  const kringel = (x, y, r, f, o, art = "F") => {
+    deckkraft(o);
+    if (art === "F") { flaeche(f); doc.circle(x, y, r, "F"); }
+    else { strich(f); doc.setLineWidth(0.6); doc.circle(x, y, r, "S"); }
+    deckkraft(1);
+  };
   const kopf = (titel) => {
-    flaeche(NAVY); doc.rect(0, 0, W, 26, "F");
+    verlauf(0, 0, W, 26, NAVY1, NAVY2);
+    doc.saveGraphicsState(); doc.rect(0, 0, W, 26, null); doc.clip(); doc.discardPath();
+    kringel(W - 22, -4, 24, GRUEN, 0.16); kringel(W - 52, 30, 16, WEISS, 0.05);
+    kringel(W - 8, -8, 30, WEISS, 0.08, "S");
+    doc.restoreGraphicsState();
     doc.addImage(logo, "JPEG", RA, 6, (420 / 196) * 13, 13);
-    schrift(15, true); farbe([255, 255, 255]); text(titel, W - RA, 16, { align: "right" });
-    flaeche(GRUEN); doc.rect(0, 26, W, 1.2, "F");
+    schrift(15, true); farbe(WEISS); text(titel, W - RA, 16, { align: "right" });
+    verlauf(0, 26, W, 1.3, GRUEN1, GRUEN2);
     fuss();
     return 36;
   };
   const neueSeite = (titel) => { doc.addPage(); return kopf(titel); };
   const ueberschrift = (t, x, y) => {
-    flaeche(GRUEN); doc.rect(x, y - 3.4, 1.2, 4.4, "F");
-    schrift(10, true); farbe(NAVY); text(t.toUpperCase(), x + 3.5, y); return y + 6;
+    verlauf(x, y - 3.6, 1.6, 4.8, GRUEN2, GRUEN1, { r: 0.8, quer: false, stufen: 20 });
+    schrift(10, true); farbe(NAVY); text(t.toUpperCase(), x + 4, y); return y + 6;
   };
   const haken = (x, y) => {
-    strich(GRUEN); doc.setLineWidth(0.6); doc.line(x, y - 1.2, x + 1.2, y); doc.line(x + 1.2, y, x + 3.2, y - 2.8);
+    flaeche(GRUEN); doc.circle(x + 1.6, y - 1.2, 2, "F");
+    strich(WEISS); doc.setLineWidth(0.45);
+    doc.line(x + 0.7, y - 1.2, x + 1.35, y - 0.5); doc.line(x + 1.35, y - 0.5, x + 2.6, y - 2.0);
   };
-  const unterschriften = (y, felder) => {
-    const b = (BR - 8 * (felder.length - 1)) / felder.length;
+  const unterschriften = (y, felder, einzug = 0) => {
+    const b = (BR - 2 * einzug - 8 * (felder.length - 1)) / felder.length;
     strich(TEXT); doc.setLineWidth(0.3);
     felder.forEach((f, i) => {
-      const x = RA + i * (b + 8);
+      const x = RA + einzug + i * (b + 8);
       doc.line(x, y, x + b, y); schrift(7.5); farbe(GRAU); text(f, x, y + 4);
     });
     return y + 10;
@@ -1254,28 +1302,79 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   let y;
   if (!blanko) {
   /* ---------- Deckblatt ---------- */
-  flaeche(NAVY); doc.rect(0, 0, W, 132, "F");
-  doc.addImage(logo, "JPEG", RA, 26, (420 / 196) * 24, 24);
-  schrift(8, true); farbe(GRUEN); text("ENERGIEBERATUNG & VERTRIEB", RA, 60, { charSpace: 0.8 });
-  doc.setDrawColor(40, 58, 82); doc.setLineWidth(0.6);
-  doc.circle(W - 30, 30, 34, "S"); doc.circle(W - 8, 110, 22, "S");
-  flaeche(GRUEN); doc.rect(0, 132, W, 2, "F");
-  schrift(16); farbe(GRAU); text("Ihr individuelles", W / 2, 162, { align: "center" });
-  schrift(30, true); farbe(NAVY); text("Energieangebot", W / 2, 176, { align: "center" });
-  doc.setFont("helvetica", "italic"); doc.setFontSize(10); farbe(GRAU);
-  text("Persönlich zusammengestellt für " + (kunde.firma || ""), W / 2, 186, { align: "center" });
-  y = 206;
-  flaeche(GRUEN); doc.rect(RA + 8, y - 6, 0.8, 52, "F");
-  [["Angebot für", [ansprech, kunde.firma].filter(Boolean).join(", ")], ["Erstellt am", heuteD],
-   ["Gültig bis", gueltig || "–"], ["Ihr Berater", berater.name || ""]].forEach(([k, w]) => {
-    schrift(7.5, true); farbe(GRAU); text(k.toUpperCase(), RA + 14, y, { charSpace: 0.4 });
-    schrift(10.5, true); farbe(TEXT); text(w, RA + 62, y);
-    strich(LINIE); doc.setLineWidth(0.2); doc.line(RA + 62, y + 3, W - RA - 8, y + 3);
-    y += 13;
+  /* großer Kopfbereich mit Verlauf und schräger Unterkante */
+  const HK = 158;
+  verlauf(0, 0, W, HK, NAVY1, NAVY2, { quer: false });
+  doc.saveGraphicsState(); doc.rect(0, 0, W, HK, null); doc.clip(); doc.discardPath();
+  kringel(W - 18, 22, 58, GRUEN, 0.13); kringel(W - 18, 22, 40, NAVY1, 0.18);
+  kringel(W - 18, 22, 70, WEISS, 0.07, "S"); kringel(W - 18, 22, 82, WEISS, 0.04, "S");
+  kringel(18, HK - 10, 34, GRUEN, 0.08); kringel(W - 70, HK - 12, 12, WEISS, 0.06);
+  /* Punkteraster */
+  flaeche(WEISS); deckkraft(0.16);
+  for (let i = 0; i < 9; i++) for (let k = 0; k < 5; k++) doc.circle(W - RA - 2 - i * 4.2, 96 + k * 4.2, 0.45, "F");
+  deckkraft(1);
+  /* zwei geschwungene Linien wie eine Lastkurve */
+  [[0.35, 0.9, 0], [0.18, 0.6, 7]].forEach(([o, lw, dy]) => {
+    deckkraft(o); strich(GRUEN2); doc.setLineWidth(lw);
+    doc.lines([[30, -22, 60, 18, 92, -6], [32, -24, 62, 10, 118, -20]], 0, 128 + dy, [1, 1], "S");
   });
-  flaeche(GRUEN); doc.rect(0, H - 14, W, 14, "F");
-  schrift(8.5, true); farbe([255, 255, 255]);
-  text([F.vertreter, "EGC Energie"].filter(Boolean).join(" · "), W / 2, H - 5.5, { align: "center" });
+  deckkraft(1);
+  doc.restoreGraphicsState();
+  /* schräge Kante: grüner Streifen mit Verlauf, darunter weiß */
+  const vieleck = (p, stil) => doc.lines(p.slice(1).map((q, i) => [q[0] - p[i][0], q[1] - p[i][1]]),
+    p[0][0], p[0][1], [1, 1], stil, true);
+  doc.saveGraphicsState();
+  vieleck([[0, HK], [W, HK - 26], [W, HK - 22.4], [0, HK + 3.6]], null); doc.clip(); doc.discardPath();
+  verlauf(0, HK - 26, W, 30, GRUEN1, GRUEN2, { stufen: 60 });
+  doc.restoreGraphicsState();
+  flaeche(WEISS); vieleck([[0, HK + 3.6], [W, HK - 22.4], [W, HK + 8], [0, HK + 8]], "F");
+
+  doc.addImage(logo, "JPEG", RA, 22, (420 / 196) * 22, 22);
+  schrift(8, true); farbe(GRUEN2); text("ENERGIEBERATUNG & VERTRIEB", RA, 54, { charSpace: 0.8 });
+  schrift(17); farbe([196, 208, 222]); text("Ihr individuelles", RA, 80);
+  schrift(36, true); farbe(WEISS); text("Energieangebot", RA, 95);
+  verlauf(RA, 100, 34, 1.4, GRUEN1, GRUEN2, { r: 0.7, stufen: 30 });
+  doc.setFont("helvetica", "italic"); doc.setFontSize(10.5); farbe([196, 208, 222]);
+  text("Persönlich zusammengestellt für " + (kunde.firma || ""), RA, 110, { maxWidth: BR - 20 });
+
+  /* Karte mit den Eckdaten des Angebots */
+  y = 182;
+  const kh = 64;
+  karte(RA, y, BR, kh, { r: 3.5, rand: null });
+  doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, kh, 3.5, 3.5, null); doc.clip(); doc.discardPath();
+  verlauf(RA, y, 3, kh, GRUEN2, GRUEN1, { quer: false, stufen: 40 });
+  kringel(W - RA - 6, y + kh - 4, 22, GRUEN, 0.07);
+  doc.restoreGraphicsState();
+  strich(LINIE); doc.setLineWidth(0.25); doc.roundedRect(RA, y, BR, kh, 3.5, 3.5, "S");
+  const felder = [["Angebot für", [ansprech, kunde.firma].filter(Boolean).join(", ")], ["Ihr Berater", berater.name || ""],
+    ["Erstellt am", heuteD], ["Gültig bis", gueltig || "–"]];
+  felder.forEach(([k, w], i) => {
+    const sx = RA + 12 + (i % 2) * (BR / 2), sy = y + 15 + Math.floor(i / 2) * 26;
+    flaeche(GRUENHELL); doc.circle(sx + 2.4, sy - 1.6, 4.2, "F");
+    flaeche(GRUEN); doc.circle(sx + 2.4, sy - 1.6, 1.5, "F");
+    schrift(7, true); farbe(GRAU); text(k.toUpperCase(), sx + 9.5, sy - 3, { charSpace: 0.4 });
+    schrift(11, true); farbe(TEXT); passend(w, BR / 2 - 24, 11); text(w, sx + 9.5, sy + 3);
+  });
+  strich(LINIE); doc.setLineWidth(0.2);
+  doc.line(RA + 12, y + kh / 2 + 0.5, W - RA - 10, y + kh / 2 + 0.5);
+  doc.line(RA + BR / 2 + 2, y + 7, RA + BR / 2 + 2, y + kh - 7);
+  /* drei Versprechen aus den Leistungen als runde Plaketten */
+  [EGC_LEISTUNGEN[0], EGC_LEISTUNGEN[4], EGC_LEISTUNGEN[3]].forEach((t, i) => {
+    const pb = (BR - 8) / 3, px = RA + i * (pb + 4), py = y + kh + 14;
+    flaeche(GRUENHELL); doc.roundedRect(px, py, pb, 11, 5.5, 5.5, "F");
+    haken(px + 3.2, py + 6.9);
+    schrift(8, true); farbe(NAVY); passend(t, pb - 13, 8); text(t, px + 9.5, py + 6.8);
+  });
+
+  /* Fußband */
+  verlauf(0, H - 16, W, 16, NAVY1, NAVY2);
+  doc.saveGraphicsState(); doc.rect(0, H - 16, W, 16, null); doc.clip(); doc.discardPath();
+  kringel(W - 20, H + 4, 22, GRUEN, 0.18); kringel(W - 20, H + 4, 30, WEISS, 0.07, "S");
+  doc.restoreGraphicsState();
+  verlauf(0, H - 16, W, 1.2, GRUEN1, GRUEN2);
+  schrift(8.5, true); farbe(WEISS);
+  text([F.vertreter, "EGC Energie"].filter(Boolean).join(" · "), RA, H - 6.5);
+  schrift(8); farbe([196, 208, 222]); text([F.telefon ? "Tel. " + F.telefon : "", F.website].filter(Boolean).join("  ·  "), W - RA - 22, H - 6.5, { align: "right" });
 
   /* ---------- Angebot je Sparte ---------- */
   const sparten = (v.sparte && v.sparte !== "beide") ? [v.sparte]
@@ -1289,38 +1388,52 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
 
     /* Kopfangaben rechts, Kundenkontakt */
-    schrift(8); farbe(GRAU);
-    [["Berater:", berater.name || ""], ["Angebotsdatum:", heuteD], ["Angebot gültig bis:", gueltig || "–"]]
-      .forEach(([k, w], i) => { text(k, W - RA - 62, y + i * 4.6); schrift(8, true); farbe(TEXT);
-        text(w, W - RA, y + i * 4.6, { align: "right" }); schrift(8); farbe(GRAU); });
-    y += 18;
-    strich(GRUEN); doc.setLineWidth(0.5); flaeche([255, 255, 255]); doc.rect(RA, y, BR, 25, "S");
-    flaeche(GRUENHELL); doc.rect(RA, y, BR, 6, "F");
-    schrift(8, true); farbe(NAVY); text("KUNDENKONTAKT", RA + 3, y + 4.2);
-    const kx = [RA + 3, RA + 30, RA + BR / 2 + 3, RA + BR / 2 + 24];
+    /* Kopfangaben als drei kleine Kacheln */
+    const kopfK = [["Ihr Berater", berater.name || "–"], ["Angebotsdatum", heuteD], ["Angebot gültig bis", gueltig || "–"]];
+    const kkb = (BR - 6) / 3;
+    kopfK.forEach(([k, w], i) => {
+      const x = RA + i * (kkb + 3);
+      flaeche(HELL); doc.roundedRect(x, y - 4, kkb, 11, 2, 2, "F");
+      schrift(6.6); farbe(GRAU); text(k.toUpperCase(), x + 3, y, { charSpace: 0.3 });
+      schrift(8.8, true); farbe(i === 2 ? GRUEN1 : TEXT); passend(w, kkb - 5, 8.8); text(w, x + 3, y + 4.6);
+    });
+    y += 12;
+    /* Kundenkontakt als Karte mit grüner Kante */
+    const kkH = 27;
+    karte(RA, y, BR, kkH, { r: 2.5, rand: null });
+    doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, kkH, 2.5, 2.5, null); doc.clip(); doc.discardPath();
+    verlauf(RA, y, 2.2, kkH, GRUEN2, GRUEN1, { quer: false, stufen: 30 });
+    verlauf(RA + 2.2, y, BR, 7, GRUENHELL, WEISS, { stufen: 50 });
+    doc.restoreGraphicsState();
+    schrift(8, true); farbe(NAVY); text("KUNDENKONTAKT", RA + 6, y + 4.8, { charSpace: 0.4 });
+    const kx = [RA + 6, RA + 33, RA + BR / 2 + 4, RA + BR / 2 + 25];
     [["Firma:", kunde.firma, "PLZ + Ort:", [kunde.plz, kunde.ort].filter(Boolean).join(" ")],
      ["Ansprechpartner:", ansprech, "E-Mail:", kunde.email],
      ["Straße + Hausnr.:", kunde.strasse, "Telefon:", kunde.telefon]].forEach((r, i) => {
-      const yy = y + 11 + i * 4.8;
-      schrift(8, true); farbe(TEXT); text(r[0], kx[0], yy); text(r[2], kx[2], yy);
-      schrift(8); text(r[1] || "–", kx[1], yy); text(r[3] || "–", kx[3], yy);
+      const yy = y + 12.5 + i * 4.9;
+      schrift(8); farbe(GRAU); text(r[0], kx[0], yy); text(r[2], kx[2], yy);
+      schrift(8, true); farbe(TEXT); text(r[1] || "–", kx[1], yy); text(r[3] || "–", kx[3], yy);
     });
-    y += 32;
+    y += kkH + 8;
 
     /* Begrüßung und Eckdaten */
     farbe(TEXT);
     y = absatz((ansprech ? "Guten Tag " + ansprech + ", h" : "H") + "erzlichen Dank für Ihre Anfrage. Gerne unterbreiten wir Ihnen nachfolgend ein individuelles Angebot für die Belieferung " +
       (stellen.length > 1 ? "Ihrer Standorte" : "Ihres Standortes") + " mit " + name + ". Unser Ziel ist es, Ihnen nicht nur einen attraktiven Preis, sondern auch eine langfristige und verlässliche Partnerschaft zu bieten.",
       RA, y, BR, 8.5, 3.9) + 2;
-    flaeche(HELL); doc.rect(RA, y, BR, 11, "F");
     const eck = [["Neuer Versorger", v.versorger || "–"], ["Beschaffungsmodell", v.produkt || "–"],
       ["Lieferbeginn", v.lieferbeginn ? datum(v.lieferbeginn) : "–"], ["Laufzeit bis", ende ? datum(ende) : (laufzeitMonate(v) || v.laufzeit) + " Monate"]];
+    const ekb = (BR - 9) / 4;
     eck.forEach(([k, w], i) => {
-      const x = RA + 3 + i * (BR / 4);
-      schrift(6.8); farbe(GRAU); text(k.toUpperCase(), x, y + 4.2);
-      schrift(9, true); farbe(TEXT); text(w, x, y + 8.6);
+      const x = RA + i * (ekb + 3);
+      verlauf(x, y, ekb, 13, i % 2 ? NAVY2 : NAVY1, i % 2 ? [38, 74, 116] : NAVY2, { r: 2.2, stufen: 40 });
+      doc.saveGraphicsState(); doc.roundedRect(x, y, ekb, 13, 2.2, 2.2, null); doc.clip(); doc.discardPath();
+      kringel(x + ekb - 2, y + 1, 7, GRUEN, 0.22);
+      doc.restoreGraphicsState();
+      schrift(6.4); farbe(GRUEN2); text(k.toUpperCase(), x + 3, y + 4.6, { charSpace: 0.3 });
+      schrift(9, true); farbe(WEISS); passend(w, ekb - 5, 9); text(w, x + 3, y + 9.6);
     });
-    y += 16;
+    y += 18;
     /* ohne bisherigen Versorger nur „Unser Angebot“, ohne leere Vergleichsspalten */
     const vergleich = stellen.some((l) => altPreis(vorversorger[l.id]));
     y = ueberschrift(vergleich ? "Ihr aktueller Tarif im Vergleich zu unserem Angebot" : "Unser Angebot für Ihre Lieferstellen", RA, y + 2);
@@ -1351,7 +1464,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
         ["Kosten pro Jahr", alt ? eurx(kostenAlt) : "–", kostenNeu == null ? "–" : eurx(kostenNeu),
           alt && kostenNeu != null ? eurx(kostenAlt - kostenNeu) : "–"],
       ];
-      const hoehe = 12 + zeilen.length * 5.6;
+      const hoehe = 17 + zeilen.length * 5.8;
       if (y + hoehe > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
       schrift(8.5, true); farbe(NAVY);
       text((l.bezeichnung || name) + (l.zaehlerart ? " (" + l.zaehlerart + ")" : ""), RA, y);
@@ -1359,38 +1472,60 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       text(["MaLo " + (l.maloId || "–"), "Zähler " + (l.zaehlernummer || "–"),
         [l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")].filter(Boolean).join("  ·  "),
         W - RA, y, { align: "right" });
-      y += 2;
-      flaeche(NAVY); doc.rect(sp[0], y, BR, 6, "F");
-      schrift(7.5, true); farbe([255, 255, 255]);
-      ["Position", "Ihr aktueller Tarif", "Unser Angebot", "Ersparnis"].forEach((t, i) => { if (sp[i] != null) text(t, sp[i] + 2, y + 4.1); });
-      flaeche(GRUEN); doc.rect(sp[2], y, vergleich ? 42 : RA + BR - sp[2], 6, "F"); farbe(NAVY); text("Unser Angebot", sp[2] + 2, y + 4.1);
-      y += 6;
+      y += 2.5;
+      /* Tabelle als abgerundete Karte: Kopf mit Verlauf, Spalte „Unser Angebot“ grün hinterlegt */
+      const ZH = 5.8, KH = 7, th = KH + zeilen.length * ZH, sb = vergleich ? 42 : RA + BR - sp[2];
+      schatten(RA, y, BR, th, 2.5);
+      doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, th, 2.5, 2.5, null); doc.clip(); doc.discardPath();
+      flaeche(WEISS); doc.rect(RA, y, BR, th, "F");
+      verlauf(RA, y, BR, KH, NAVY1, NAVY2, { stufen: 60 });
+      zeilen.forEach((r, i) => {
+        const zy = y + KH + i * ZH, letzte = i === zeilen.length - 1;
+        if (letzte) { flaeche(GRUENHELL); doc.rect(RA, zy, BR, ZH, "F"); }
+        else if (i % 2) { flaeche(HELL); doc.rect(RA, zy, BR, ZH, "F"); }
+      });
+      flaeche(GRUENHELL); deckkraft(0.85); doc.rect(sp[2], y + KH, sb, th - KH - ZH, "F"); deckkraft(1);
+      flaeche(GRUENMITTEL); doc.rect(sp[2], y + th - ZH, sb, ZH, "F");
+      verlauf(sp[2], y, sb, KH, GRUEN1, GRUEN2, { stufen: 40 });
+      doc.restoreGraphicsState();
+      strich(LINIE); doc.setLineWidth(0.25); doc.roundedRect(RA, y, BR, th, 2.5, 2.5, "S");
+      schrift(7.6, true); farbe(WEISS);
+      ["Position", "Ihr aktueller Tarif", "Unser Angebot", "Ersparnis"].forEach((t, i) => { if (sp[i] != null) text(t, sp[i] + 3, y + 4.7); });
+      y += KH;
       zeilen.forEach((r, i) => {
         const letzte = i === zeilen.length - 1;
-        if (letzte) { flaeche(GRUENHELL); doc.rect(RA, y, BR, 5.6, "F"); }
-        else if (i % 2) { flaeche(HELL); doc.rect(RA, y, BR, 5.6, "F"); }
         schrift(8, letzte); farbe(TEXT);
         r.forEach((t, k) => {
           if (sp[k] == null) return;
-          if (k === 3 && t !== "–") farbe(GRUEN.map((c) => c * 0.75));
-          text(t, sp[k] + 2, y + 3.9); farbe(TEXT);
+          if (k === 3 && t !== "–") { farbe(GRUEN1); schrift(8, true); }
+          if (k === 2 && letzte) farbe(NAVY);
+          text(t, sp[k] + 3, y + 4); farbe(TEXT); schrift(8, letzte);
         });
-        y += 5.6;
+        y += ZH;
       });
-      strich(LINIE); doc.setLineWidth(0.2); doc.rect(RA, y - zeilen.length * 5.6 - 6, BR, zeilen.length * 5.6 + 6, "S");
-      y += 6;
+      y += 7;
     }
 
     /* Ergebnis */
-    if (y + 26 > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+    const seite = () => neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+    if (y + 30 > H - 22) y = seite();
     const spar = summeAlt - summeNeu;
-    flaeche(GRUEN); doc.rect(RA, y, BR, 18, "F");
-    schrift(10, true); farbe([255, 255, 255]);
-    text(mitVergleich ? "IHRE ERSPARNIS PRO JAHR" : "IHRE ENERGIEKOSTEN PRO JAHR", RA + 4, y + 8);
-    schrift(17, true); text(eurx(mitVergleich ? spar : summeNeu), W - RA - 4, y + 9, { align: "right" });
-    schrift(7.5); text(mitVergleich ? (summeAlt > 0 ? "(entspricht ca. " + num(spar / summeAlt * 100, 1) + " % Ersparnis)" : "")
-      : "(ohne Vergleich mit dem bisherigen Versorger)", W - RA - 4, y + 14.5, { align: "right" });
-    y += 24;
+    /* großer Ergebniskasten mit Verlauf */
+    const bh = 22;
+    schatten(RA, y, BR, bh, 3.5);
+    verlauf(RA, y, BR, bh, GRUEN1, GRUEN2, { r: 3.5 });
+    doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, bh, 3.5, 3.5, null); doc.clip(); doc.discardPath();
+    kringel(W - RA - 70, y - 10, 22, WEISS, 0.1); kringel(W - RA - 70, y - 10, 30, WEISS, 0.16, "S");
+    kringel(W - RA + 2, y + bh + 4, 16, WEISS, 0.1); kringel(RA - 4, y + bh + 6, 14, GRUEN1, 0.25);
+    doc.restoreGraphicsState();
+    flaeche(WEISS); doc.circle(RA + 11, y + bh / 2, 6.5, "F");
+    schrift(15, true); farbe(GRUEN1); text("€", RA + 11, y + bh / 2 + 2.6, { align: "center" });
+    schrift(10.5, true); farbe(WEISS);
+    text(mitVergleich ? "IHRE ERSPARNIS PRO JAHR" : "IHRE ENERGIEKOSTEN PRO JAHR", RA + 21, y + 9.6, { charSpace: 0.3 });
+    schrift(7.8); text(mitVergleich ? (summeAlt > 0 ? "entspricht ca. " + num(spar / summeAlt * 100, 1) + " % Ersparnis" : "")
+      : "ohne Vergleich mit dem bisherigen Versorger", RA + 21, y + 15);
+    schrift(21, true); text(eurx(mitVergleich ? spar : summeNeu), W - RA - 6, y + 14, { align: "right" });
+    y += bh + 7;
     summeAlt = 0; summeNeu = 0; mitVergleich = false;
 
     if (v.bemerkung) {
@@ -1398,34 +1533,50 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     }
 
     /* Leistungen, Hinweis, Ansprechpartner, Annahme */
-    if (y + 38 > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+    if (y + 38 > H - 22) y = seite();
     const yl = ueberschrift("Leistungen inklusive", RA, y + 2);
     schrift(8.5); farbe(TEXT);
-    EGC_LEISTUNGEN.forEach((t, i) => { haken(RA + 1, yl + i * 5); text(t, RA + 6, yl + i * 5); });
+    EGC_LEISTUNGEN.forEach((t, i) => { haken(RA + 1, yl + i * 5.2); schrift(8.5); farbe(TEXT); text(t, RA + 7, yl + i * 5.2); });
     ueberschrift("Hinweis", RA + BR / 2 + 4, y + 2);
+    flaeche(HELL); doc.roundedRect(RA + BR / 2 + 4, yl - 4.2, BR / 2 - 4, EGC_LEISTUNGEN.length * 5.2 + 0.5, 2.5, 2.5, "F");
     farbe(TEXT); absatz("Die Preisangaben verstehen sich zzgl. der gesetzlichen Umsatzsteuer. Änderungen der gesetzlichen Umlagen, Steuern und Abgaben bleiben vorbehalten.",
-      RA + BR / 2 + 4, yl, BR / 2 - 4);
-    y = yl + EGC_LEISTUNGEN.length * 5 + 4;
+      RA + BR / 2 + 8, yl, BR / 2 - 12);
+    y = yl + EGC_LEISTUNGEN.length * 5.2 + 4;
 
-    if (y + 58 > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
+    if (y + 72 > H - 22) y = seite();
     y = ueberschrift("Ihr persönlicher Ansprechpartner", RA, y);
     const bild = typeof berater.bild === "string" && /^data:image\/(jpeg|png)/.test(berater.bild) ? berater.bild : null;
-    let bx = RA;
+    const ah = 26, cx = RA + 15, cy = y - 1 + ah / 2;
+    karte(RA, y - 1, BR, ah, { r: 3 });
+    doc.saveGraphicsState(); doc.roundedRect(RA, y - 1, BR, ah, 3, 3, null); doc.clip(); doc.discardPath();
+    kringel(W - RA - 6, y + ah - 2, 20, GRUEN, 0.09); kringel(W - RA - 6, y + ah - 2, 27, GRUEN, 0.14, "S");
+    doc.restoreGraphicsState();
     if (bild) {
-      doc.addImage(bild, /png/.test(bild.slice(0, 20)) ? "PNG" : "JPEG", RA, y - 2, 20, 20);
-      strich(GRUEN); doc.setLineWidth(0.8); doc.rect(RA, y - 2, 20, 20, "S"); bx = RA + 25;
+      doc.saveGraphicsState(); doc.circle(cx, cy, 9.5, null); doc.clip(); doc.discardPath();
+      doc.addImage(bild, /png/.test(bild.slice(0, 20)) ? "PNG" : "JPEG", cx - 9.5, cy - 9.5, 19, 19);
+      doc.restoreGraphicsState();
+    } else {
+      verlauf(cx - 9.5, cy - 9.5, 19, 19, NAVY1, NAVY2, { kreis: true, stufen: 30 });
+      const ini = String(berater.name || "EGC").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+      schrift(12, true); farbe(WEISS); text(ini, cx, cy + 1.6, { align: "center" });
     }
-    schrift(9, true); farbe(TEXT); text(berater.name || "", bx, y + 2);
-    schrift(8.5); farbe(GRAU);
-    [berater.email, berater.telefon, berater.rolle].filter(Boolean).forEach((t, i) => text(t, bx, y + 7 + i * 4.4));
-    y += 24;
+    strich(GRUEN); doc.setLineWidth(0.9); doc.circle(cx, cy, 10.2, "S");
+    const bx = RA + 31;
+    schrift(10.5, true); farbe(NAVY); text(berater.name || "", bx, y + 5.5);
+    schrift(8.3); farbe(GRAU);
+    [berater.email, berater.telefon, berater.rolle].filter(Boolean).forEach((t, i) => text(t, bx, y + 11 + i * 4.4));
+    y += ah + 6;
 
-    flaeche(HELL); doc.rect(RA, y, BR, 30, "F");
-    schrift(9, true); farbe(NAVY); text("Angebot angenommen:", RA + 4, y + 6);
+    const nh = 32;
+    flaeche(HELL); doc.roundedRect(RA, y, BR, nh, 3, 3, "F");
+    strich(GRUEN); doc.setLineWidth(0.4); doc.setLineDashPattern([1.6, 1.2], 0);
+    doc.roundedRect(RA, y, BR, nh, 3, 3, "S"); doc.setLineDashPattern([], 0);
+    haken(RA + 4, y + 7.4);
+    schrift(9.5, true); farbe(NAVY); text("Angebot angenommen:", RA + 9.5, y + 7);
     schrift(8.5); farbe(TEXT);
     text("Hiermit akzeptiere ich das oben stehende Angebot und beauftrage EGC Energie mit dem Abschluss des Energieliefervertrags.",
-      RA + 4, y + 11, { maxWidth: BR - 8 });
-    unterschriften(y + 23, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"]);
+      RA + 4, y + 12.5, { maxWidth: BR - 8 });
+    unterschriften(y + 24, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"], 4);
   }
 
   /* ---------- Lastgang-Analyse für RLM-Lieferstellen mit Lastgang ---------- */
@@ -1453,12 +1604,16 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     const kb = (BR - 9) / 4;
     kz.forEach(([k, w, u], i) => {
       const x = RA + i * (kb + 3);
-      strich(GRUEN); doc.setLineWidth(0.4); doc.rect(x, y, kb, 17, "S");
-      schrift(6.8); farbe(GRAU); text(k, x + 2.5, y + 4.5);
-      schrift(11, true); farbe(NAVY); text(w, x + 2.5, y + 11);
-      if (u) { schrift(6.2); farbe(GRAU); text(u, x + 2.5, y + 15); }
+      karte(x, y, kb, 18, { r: 2.5 });
+      doc.saveGraphicsState(); doc.roundedRect(x, y, kb, 18, 2.5, 2.5, null); doc.clip(); doc.discardPath();
+      verlauf(x, y, kb, 1.6, GRUEN1, GRUEN2, { stufen: 30 });
+      kringel(x + kb - 1, y + 18, 8, GRUEN, 0.08);
+      doc.restoreGraphicsState();
+      schrift(6.8); farbe(GRAU); text(k, x + 3, y + 6);
+      schrift(11.5, true); farbe(NAVY); text(w, x + 3, y + 12.2);
+      if (u) { schrift(6.2); farbe(GRAU); text(u, x + 3, y + 16); }
     });
-    y += 22;
+    y += 23;
     const gh = BR * (430 / 1400);
     doc.addImage(bilder.jahr, "PNG", RA, y, BR, gh); y += gh + 3;
     if (y + gh + 8 > H - 18) y = neueSeite("LASTGANG-ANALYSE");
@@ -1587,25 +1742,39 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   /* ---------- Nächste Schritte ---------- */
   if (!blanko) {
   doc.addPage();
-  flaeche(NAVY); doc.rect(0, 0, W, 44, "F");
-  doc.addImage(logo, "JPEG", RA, 12, (420 / 196) * 16, 16);
-  flaeche(GRUEN); doc.rect(0, 44, W, 1.2, "F");
-  schrift(14); farbe(GRAU); text("Ihre", RA, 62);
-  schrift(24, true); farbe(NAVY); text("nächsten Schritte", RA, 73);
+  verlauf(0, 0, W, 46, NAVY1, NAVY2);
+  doc.saveGraphicsState(); doc.rect(0, 0, W, 46, null); doc.clip(); doc.discardPath();
+  kringel(W - 26, 8, 34, GRUEN, 0.14); kringel(W - 26, 8, 44, WEISS, 0.07, "S"); kringel(W - 80, 50, 14, WEISS, 0.05);
+  doc.restoreGraphicsState();
+  doc.addImage(logo, "JPEG", RA, 14, (420 / 196) * 16, 16);
+  verlauf(0, 46, W, 1.3, GRUEN1, GRUEN2);
+  schrift(14); farbe(GRAU); text("Ihre", RA, 64);
+  schrift(26, true); farbe(NAVY); text("nächsten Schritte", RA, 75);
+  verlauf(RA, 79, 30, 1.3, GRUEN1, GRUEN2, { r: 0.65, stufen: 30 });
   doc.setFont("helvetica", "italic"); doc.setFontSize(9); farbe(GRAU);
-  text("So geht es nach Ihrem Energieangebot weiter:", RA, 80);
-  y = 96;
+  text("So geht es nach Ihrem Energieangebot weiter:", RA, 86);
+  y = 100;
   EGC_SCHRITTE.forEach(([t, inhalt], i) => {
-    flaeche(NAVY); doc.circle(RA + 5, y, 4.6, "F");
-    schrift(10, true); farbe([255, 255, 255]); text(String(i + 1), RA + 5, y + 1.3, { align: "center" });
-    if (i < EGC_SCHRITTE.length - 1) { strich(GRUEN); doc.setLineWidth(0.6); doc.line(RA + 5, y + 6, RA + 5, y + 24); }
-    schrift(10.5, true); farbe(NAVY); text(t, RA + 15, y + 1);
-    farbe(TEXT); absatz(inhalt, RA + 15, y + 6, BR - 15, 8.5, 3.9);
+    schrift(8.5); const zl = doc.splitTextToSize(inhalt, BR - 24);
+    const ch = 10 + zl.length * 3.9;
+    if (i < EGC_SCHRITTE.length - 1) {
+      strich(GRUEN2); doc.setLineWidth(0.7); doc.setLineDashPattern([1, 1.2], 0);
+      doc.line(RA + 5, y + 5.5, RA + 5, y + 27); doc.setLineDashPattern([], 0);
+    }
+    flaeche(HELL); doc.roundedRect(RA + 13, y - 5, BR - 13, ch, 2.5, 2.5, "F");
+    verlauf(RA + 0.2, y - 4.8, 9.6, 9.6, GRUEN2, GRUEN1, { kreis: true, quer: false, stufen: 30 });
+    schrift(10.5, true); farbe(WEISS); text(String(i + 1), RA + 5, y + 1.6, { align: "center" });
+    schrift(10.5, true); farbe(NAVY); text(t, RA + 17, y + 1);
+    farbe(TEXT); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+    doc.text(zl, RA + 17, y + 6, { lineHeightFactor: 1.35 });
     y += 29;
   });
-  flaeche(NAVY); doc.rect(0, H - 22, W, 22, "F");
-  flaeche(GRUEN); doc.rect(0, H - 22, W, 1.2, "F");
-  schrift(8); farbe([185, 198, 212]);
+  verlauf(0, H - 22, W, 22, NAVY1, NAVY2);
+  doc.saveGraphicsState(); doc.rect(0, H - 22, W, 22, null); doc.clip(); doc.discardPath();
+  kringel(18, H + 6, 24, GRUEN, 0.14); kringel(W - 18, H - 26, 18, WEISS, 0.05);
+  doc.restoreGraphicsState();
+  verlauf(0, H - 22, W, 1.3, GRUEN1, GRUEN2);
+  schrift(8); farbe([196, 208, 222]);
   text(firmenzeile(), W / 2, H - 10, { align: "center" });
   }
 
