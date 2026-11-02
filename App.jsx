@@ -295,7 +295,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.10.3 · 02.11.2026 · Tippgeber durch die Geschäftsführung";
+const VERSION = "v5.10.4 · 02.11.2026 · Vollmacht auf zwei Seiten";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1193,7 +1193,7 @@ const ladeJsPdf = () => {
 /* Service- & Beratungsauftrag ohne Kundendaten, zum Ausfüllen von Hand */
 const blankoAuftragPdf = () => egcAngebotPdf(
   { kunde: {}, partnerId: null,
-    lieferstellen: [1, 2, 3, 4].map((i) => ({ id: "leer" + i, medium: "strom" })) },
+    lieferstellen: [1, 2].map((i) => ({ id: "leer" + i, medium: "strom" })) },
   {}, { mitarbeiter: [], blanko: true });
 
 /* Erzeugt das Angebot als PDF. Gibt ein Dateiobjekt zurück wie ein Upload. */
@@ -1648,11 +1648,11 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   [["Firma / Herr / Frau", (kunde.firma || "") + (ansprech ? " · " + ansprech : "")], ["Straße, Hausnummer", kunde.strasse],
    ["PLZ, Ort", [kunde.plz, kunde.ort].filter(Boolean).join(" ")],
    ["Telefon / E-Mail", [kunde.telefon, kunde.email].filter(Boolean).join(" · ")], ["Geburtsdatum", ""]].forEach(([k, w], i) => {
-    if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.6, "F"); }
-    schrift(8); farbe(GRAU); text(k, RA + 2, y + 3.9); schrift(8.5); farbe(TEXT); text(w || "", RA + 50, y + 3.9);
-    y += 5.6;
+    if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.1, "F"); }
+    schrift(8); farbe(GRAU); text(k, RA + 2, y + 3.6); schrift(8.5); farbe(TEXT); text(w || "", RA + 50, y + 3.6);
+    y += 5.1;
   });
-  y += 5;
+  y += 4;
   y = ueberschrift("Lieferadressen", RA, y);
   if (blanko) {
     strich(TEXT); doc.setLineWidth(0.3); doc.rect(RA, y - 2.8, 2.8, 2.8, "S");
@@ -1675,40 +1675,40 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     [["akt. Versorger", vv.versorger || l.versorger, "Kundennummer", l.kundennummer],
      ["Verbrauch", l.verbrauch ? num(zahlLesen(l.verbrauch) || 0) + " kWh" : "", "Zählernummer", l.zaehlernummer],
      ["Lieferbeginn", v.lieferbeginn ? datum(v.lieferbeginn) : "", "MaLo", l.maloId]].forEach((r, i) => {
-      if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.2, "F"); }
-      schrift(7.8); farbe(GRAU); text(r[0], RA + 2, y + 3.6); text(r[2], RA + halb + 2, y + 3.6);
-      farbe(TEXT); text(blanko ? "" : r[1] || "", RA + 32, y + 3.6); text(blanko ? "" : r[3] || "", RA + halb + 32, y + 3.6);
-      y += 5.2;
+      if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 4.8, "F"); }
+      schrift(7.8); farbe(GRAU); text(r[0], RA + 2, y + 3.4); text(r[2], RA + halb + 2, y + 3.4);
+      farbe(TEXT); text(blanko ? "" : r[1] || "", RA + 32, y + 3.4); text(blanko ? "" : r[3] || "", RA + halb + 32, y + 3.4);
+      y += 4.8;
     });
-    y += 3;
+    y += 4;
   }
   schrift(8.5, true); farbe(TEXT); text("IBAN:", RA, y + 4);
   strich(TEXT); doc.setLineWidth(0.3); doc.line(RA + 14, y + 4.5, W - RA, y + 4.5);
-  y += 11;
+  y += 10;
 
   /* Zusatzbemerkungen: vorgefüllter Text der Kalkulation, darunter Linien zum Ausfüllen von Hand */
-  if (y + 34 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
+  if (y + 26 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
   schrift(8.5, true); farbe(TEXT); text("Zusatzbemerkungen:", RA, y); y += 2;
   const zb = String(vollmachtBemerkung || "").trim();
   strich(LINIE); doc.setLineWidth(0.3);
-  const boxH = Math.max(22, zb ? doc.splitTextToSize(zb, BR - 6).length * 3.8 + 14 : 22);
+  const boxH = Math.max(16, zb ? doc.splitTextToSize(zb, BR - 6).length * 3.8 + 9 : 16);
   doc.rect(RA, y, BR, boxH, "S");
   let yb = y + 5;
   if (zb) { farbe(TEXT); yb = absatz(zb, RA + 3, yb, BR - 6, 8.5, 3.8) + 1; }
   strich(LINIE); doc.setLineWidth(0.2);
   for (let yy = yb + 3; yy < y + boxH - 1; yy += 6) doc.line(RA + 3, yy, W - RA - 3, yy);
-  y += boxH + 7;
-  if (y + 60 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
+  y += boxH + 6;
+  if (y + 74 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
   strich(TEXT); doc.setLineWidth(0.3); doc.rect(RA, y - 3, 3.4, 3.4, "S");
   strich(GRUEN); doc.setLineWidth(0.6); doc.line(RA + 0.6, y - 1.3, RA + 1.4, y - 0.4); doc.line(RA + 1.4, y - 0.4, RA + 2.9, y - 2.5);
   schrift(8.5, true); farbe(NAVY); text(EGC_AUFTRAG.einleitung, RA + 5.5, y); y += 5;
   EGC_AUFTRAG.abschnitte.forEach(([t, inhalt]) => {
-    schrift(8.5, true); farbe(TEXT); text(t, RA, y); y += 4;
-    farbe(TEXT); y = absatz(inhalt, RA, y, BR, 8, 3.6) + 2;
+    schrift(8.3, true); farbe(TEXT); text(t, RA, y); y += 3.9;
+    farbe(TEXT); y = absatz(inhalt, RA, y, BR, 7.8, 3.75) + 2.5;
   });
-  y += 6;
+  y += 4;
   y = ueberschrift("Unterschriften Vollmacht / Lastschriftmandat / Datenschutz", RA, y);
-  unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
+  unterschriften(y + 12, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
 
   y = neueSeite("DATENSCHUTZ");
   EGC_AUFTRAG.datenschutz.forEach(([t, inhalt]) => {
@@ -1719,24 +1719,6 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   if (y + 24 > H - 22) y = neueSeite("DATENSCHUTZ");
   y = ueberschrift("Unterschrift Einwilligung", RA, y + 4);
   y = unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
-  if (blanko) {
-    y = neueSeite("WEITERE ZÄHLERPUNKTE");
-    for (let i = 0; i < 7; i++) {
-      strich(TEXT); doc.setLineWidth(0.3);
-      schrift(8.5, true); farbe(NAVY);
-      doc.rect(RA, y - 2.6, 2.8, 2.8, "S"); text("Strom", RA + 4, y);
-      doc.rect(RA + 18, y - 2.6, 2.8, 2.8, "S"); text("Erdgas", RA + 22, y);
-      schrift(7.8); farbe(GRAU); text("Lieferadresse:", RA + 40, y);
-      strich(LINIE); doc.line(RA + 60, y + 0.5, W - RA, y + 0.5);
-      y += 1.5;
-      [["akt. Versorger", "Kundennummer"], ["Verbrauch", "Zählernummer"], ["Lieferbeginn", "MaLo"]].forEach((r, k) => {
-        if (k % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.2, "F"); }
-        schrift(7.8); farbe(GRAU); text(r[0], RA + 2, y + 3.6); text(r[1], RA + halb + 2, y + 3.6);
-        y += 5.2;
-      });
-      y += 3.5;
-    }
-  }
   } /* Ende Service- & Beratungsauftrag */
 
   /* ---------- Nächste Schritte ---------- */
