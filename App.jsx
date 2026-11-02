@@ -295,7 +295,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.10 · 01.11.2026 · Angebot im EGC-Design";
+const VERSION = "v5.10.1 · 02.11.2026 · Firmendaten in allen Dokumenten";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -707,7 +707,7 @@ function erzeugePdf(dateiname, titel, zeilen) {
 
     /* Fußzeile */
     c += "q 0.85 0.87 0.89 rg 48 52 499 0.8 re f Q\n";
-    c += "BT " + grau + " rg /F1 8 Tf 48 38 Td (EGC-Energie  ·  Energate-Consulting) Tj ET\n";
+    c += "BT " + grau + " rg /F1 7 Tf 48 38 Td (" + pdfText(firmenzeile()) + ") Tj ET\n";
     c += "BT " + grau + " rg /F1 8 Tf 470 38 Td (Seite " + (nr + 1) + " von " + seiten.length + ") Tj ET\n";
     return c;
   });
@@ -996,7 +996,7 @@ function Lastganganalyse({ datei }) {
 
 /* ------------------------------------------------------------------ */
 /*  Angebot im EGC-Design                                              */
-/*  Nach der Excel-Vorlage „Energate Angebot“: Deckblatt, Strom- und   */
+/*  Nach der bisherigen Excel-Vorlage: Deckblatt, Strom- und           */
 /*  Gasangebot mit Vergleich zum bisherigen Versorger, Lastgang-       */
 /*  Analyse, Service- & Beratungsauftrag, nächste Schritte.            */
 /*  Alle Preise netto.                                                 */
@@ -1227,9 +1227,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const fuss = () => {
     strich(LINIE); doc.setLineWidth(0.3); doc.line(RA, H - 14, W - RA, H - 14);
     schrift(7); farbe(GRAU);
-    const teile = [[F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "),
-      [F.strasse, F.ort].filter(Boolean).join(", "), F.email, F.ustId ? "USt-IdNr.: " + F.ustId : ""].filter(Boolean);
-    text(teile.join("  |  "), RA, H - 9);
+    text(firmenzeile(), RA, H - 9);
   };
   const kopf = (titel) => {
     flaeche(NAVY); doc.rect(0, 0, W, 26, "F");
@@ -1485,7 +1483,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const halb = BR / 2;
   schrift(8, true); farbe(GRAU); text("ZWISCHEN", RA, y);
   schrift(9, true); farbe(TEXT); text("EGC-Energie", RA, y + 5);
-  schrift(9); [F.vertreter ? "vertreten durch " + F.vertreter : "", F.strasse, F.ort].filter(Boolean)
+  schrift(9); [F.vertreter ? "vertreten durch " + F.vertreter : "", F.strasse, F.ort, F.telefon ? "Tel. " + F.telefon : ""].filter(Boolean)
     .forEach((t, i) => text(t, RA, y + 9.5 + i * 4.4));
   schrift(8); farbe(GRAU);
   [["Berater:", berater.name], ["E-Mail:", berater.email], ["Kontakt:", berater.telefon]].forEach(([k, w], i) => {
@@ -1588,8 +1586,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   flaeche(NAVY); doc.rect(0, H - 22, W, 22, "F");
   flaeche(GRUEN); doc.rect(0, H - 22, W, 1.2, "F");
   schrift(8); farbe([185, 198, 212]);
-  text([[F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "), [F.strasse, F.ort].filter(Boolean).join(", "), F.email]
-    .filter(Boolean).join("  |  "), W / 2, H - 10, { align: "center" });
+  text(firmenzeile(), W / 2, H - 10, { align: "center" });
   }
 
   /* Seitenzahlen (beim Angebot ohne Deckblatt und Schlussseite) */
@@ -1678,8 +1675,7 @@ async function individualAnfragePdf(a, mitarbeiter, anlagen) {
     flaeche(GRUEN); doc.rect(0, 26, W, 1.2, "F");
     doc.setDrawColor(...LINIE); doc.setLineWidth(0.3); doc.line(RA, H - 14, W - RA, H - 14);
     schrift(7); farbe(GRAU);
-    text([[F.vertreter, "EGC-Energie"].filter(Boolean).join(" · "), [F.strasse, F.ort].filter(Boolean).join(", "), F.email]
-      .filter(Boolean).join("  |  "), RA, H - 9);
+    text(firmenzeile(), RA, H - 9);
     return 36;
   };
   const titel = (t, y) => { flaeche(GRUEN); doc.rect(RA, y - 3.4, 1.2, 4.4, "F"); schrift(10, true); farbe(NAVY); text(t.toUpperCase(), RA + 3.5, y); return y + 6; };
@@ -1704,7 +1700,7 @@ async function individualAnfragePdf(a, mitarbeiter, anlagen) {
 
   y = titel("Angefragt von", y);
   y = tabelle([["Vermittler", [F.vertreter, "EGC-Energie"].filter(Boolean).join(" · ")],
-    ["Anschrift", [F.strasse, F.ort].filter(Boolean).join(", ")], ["E-Mail", F.email],
+    ["Anschrift", [F.strasse, F.ort].filter(Boolean).join(", ")], ["Telefon", F.telefon], ["E-Mail", F.email],
     ["Vertriebspartner", partner.name]], y);
 
   y = titel("Kunde", y);
@@ -1816,7 +1812,7 @@ function angebotPdf(a, v) {
   z.push("Alle Preise netto zuzüglich Steuern, Abgaben, Umlagen und Netzentgelten,");
   z.push("soweit nicht anders angegeben. Angebot freibleibend.");
   z.push(" ");
-  z.push("EGC-Energie · Energate-Consulting");
+  z.push("EGC-Energie · " + [FIRMENDATEN.strasse, FIRMENDATEN.ort].filter(Boolean).join(", "));
   return erzeugePdf("angebot_" + a.id + "_" + (v.produkt || "").toLowerCase().replace(/[^a-z]/g, "") + ".pdf",
     "Angebot " + a.id, z);
 }
@@ -5767,8 +5763,25 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
    Wortlaut der Geschäftsführung (Handelsvertretervertrag, Tippgebervertrag).
    Platzhalter in geschweiften Klammern werden beim Erzeugen ersetzt.
    Die Firmendaten von EGC (vertreten durch, Anschrift) pflegt die Geschäftsführung. */
-let FIRMENDATEN = { vertreter: "", strasse: "", ort: "", email: "", ustId: "" };
-const setzeFirmendaten = (f) => { FIRMENDATEN = { vertreter: "", strasse: "", ort: "", email: "", ustId: "", ...(f || {}) }; };
+/* Offizielle Angaben von EGC-Energie. Die Geschäftsführung kann sie unter
+   „Verträge“ ändern; leere Felder in der Datenbank überschreiben die Vorgabe nicht. */
+const FIRMENDATEN_VORGABE = {
+  vertreter: "Karsten Trautmann", strasse: "In den Erlenwiesen 11", ort: "66914 Waldmohr",
+  telefon: "06373 8920114", email: "", ustId: "DE365107489",
+};
+const firmendatenMit = (f) => {
+  const z = { ...FIRMENDATEN_VORGABE };
+  Object.entries(f || {}).forEach(([k, v]) => { if (v != null && String(v).trim() !== "") z[k] = v; });
+  return z;
+};
+let FIRMENDATEN = firmendatenMit();
+const setzeFirmendaten = (f) => { FIRMENDATEN = firmendatenMit(f); };
+/* eine Zeile für Fußzeilen: Name · Anschrift · Telefon · E-Mail · USt-IdNr. */
+const firmenzeile = () => {
+  const F = FIRMENDATEN;
+  return ["EGC-Energie", [F.strasse, F.ort].filter(Boolean).join(", "), F.telefon ? "Tel. " + F.telefon : "",
+    F.email, F.ustId ? "USt-IdNr. " + F.ustId : ""].filter(Boolean).join("  |  ");
+};
 
 const HV_PARAGRAFEN = [
  { h: "§ 1 Vertragsverhältnis", n: [
@@ -5888,7 +5901,8 @@ function vertragsZeilen(titel, parteiZeilen, paragrafen, ersetze) {
   const f = FIRMENDATEN;
   const z = [];
   z.push("Auftraggeber: EGC-Energie, vertreten durch " + (f.vertreter || leer) + ", "
-    + (f.strasse || leer) + ", " + (f.ort || leer) + ", nachfolgend \"EGC\"");
+    + (f.strasse || leer) + ", " + (f.ort || leer) + (f.ustId ? ", USt-IdNr. " + f.ustId : "")
+    + ", nachfolgend \"EGC\"");
   z.push("und");
   parteiZeilen.forEach((x) => z.push(x));
   z.push("schließen folgenden " + titel + ".");
@@ -9291,6 +9305,8 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
               onChange={(v) => setFirmendaten({ ...firmendaten, strasse: v })} />
             <Feld label="PLZ und Ort" value={firmendaten.ort}
               onChange={(v) => setFirmendaten({ ...firmendaten, ort: v })} />
+            <Feld label="Telefon" value={firmendaten.telefon || ""}
+              onChange={(v) => setFirmendaten({ ...firmendaten, telefon: v })} />
             <Feld label="E-Mail Kundenservice" value={firmendaten.email || ""}
               onChange={(v) => setFirmendaten({ ...firmendaten, email: v })} />
             <Feld label="USt-IdNr." value={firmendaten.ustId || ""}
@@ -11984,7 +12000,7 @@ export default function App() {
   const [bonusSatz, setBonusSatz] = useState("10");
   const [tippgeber, setTippgeber] = useState([]);
   const [strukturanfragen, setStrukturanfragen] = useState([]);
-  const [firmendaten, setFirmendaten] = useState({ vertreter: "", strasse: "", ort: "" });
+  const [firmendaten, setFirmendaten] = useState(firmendatenMit());
   const [bonusziele, setBonusziele] = useState(BONUSZIELE_START);
   const [firmenanteil, setFirmenanteil] = useState("");
   const [listenAnsicht, setListenAnsicht] = useState(null);
@@ -12028,7 +12044,7 @@ export default function App() {
     if (e.bonus != null) { setBonusSatz(String(e.bonus)); setzeBonus(e.bonus); }
     if (e.bonusziele) setBonusziele({ ...BONUSZIELE_START, ...e.bonusziele });
     if (e.firmenanteil != null) setFirmenanteil(String(e.firmenanteil));
-    if (e.firmendaten) setFirmendaten({ vertreter: "", strasse: "", ort: "", ...e.firmendaten });
+    if (e.firmendaten) setFirmendaten(firmendatenMit(e.firmendaten));
   };
 
   const sammlungLaden = async (n) => {
