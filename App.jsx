@@ -5786,7 +5786,7 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
 const FIRMENDATEN_VORGABE = {
   vertreter: "Karsten Trautmann", strasse: "In den Erlenwiesen 11", ort: "66914 Waldmohr",
   telefon: "06373 8920114", email: "anfrage@egc-energie.de", website: "www.egc-energie.de",
-  ustId: "DE365107489", iban: "DE97 1001 0123 9973 1963 88", bic: "QNTODEB2XXX",
+  ustId: "DE365107489", bank: "Qonto", iban: "DE97 1001 0123 9973 1963 88", bic: "QNTODEB2XXX",
 };
 /* dreispaltige Fußzeile mit den Pflichtangaben (für jsPDF-Dokumente, Maße in mm) */
 function pdfFussFirma(doc, W, H, RA) {
@@ -5796,7 +5796,7 @@ function pdfFussFirma(doc, W, H, RA) {
   const spalten = [
     ["EGC Energie" + (F.vertreter ? " · " + F.vertreter : ""), F.strasse, F.ort],
     [F.telefon ? "Tel. " + F.telefon : "", F.email, F.website],
-    [F.iban ? "IBAN " + F.iban : "", F.bic ? "BIC " + F.bic : "", F.ustId ? "USt-IdNr. " + F.ustId : ""],
+    [F.iban ? (F.bank ? F.bank + " · " : "") + "IBAN " + F.iban : "", F.bic ? "BIC " + F.bic : "", F.ustId ? "USt-IdNr. " + F.ustId : ""],
   ];
   const x = [RA, RA + 62, RA + 112];
   spalten.forEach((z, i) => z.filter(Boolean).forEach((t, k) => doc.text(String(t), x[i], H - 12.6 + k * 3.1)));
@@ -9345,6 +9345,8 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
               onChange={(v) => setFirmendaten({ ...firmendaten, ustId: v })} />
             <Feld label="Website" value={firmendaten.website || ""}
               onChange={(v) => setFirmendaten({ ...firmendaten, website: v })} />
+            <Feld label="Bank" value={firmendaten.bank || ""}
+              onChange={(v) => setFirmendaten({ ...firmendaten, bank: v })} />
             <Feld label="IBAN" value={firmendaten.iban || ""}
               onChange={(v) => setFirmendaten({ ...firmendaten, iban: v })} />
             <Feld label="BIC" value={firmendaten.bic || ""}
