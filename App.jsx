@@ -283,8 +283,11 @@ const passwortRegeln = (pw) => [
   { ok: /[^A-Za-z0-9]/.test(pw || ""), text: "mindestens ein Sonderzeichen" },
 ];
 
-const stammdatenLuecken = (sd) => {
+/* Angestellte: Provision wird nur angezeigt, abgerechnet wird über die Lohnabrechnung.
+   Firmierung, Gewerbe, Bank und Ausweis sind dann keine Pflicht. */
+const stammdatenLuecken = (sd, angestellt = false) => {
   const f = [];
+  if (angestellt) return f;
   if (!sd.firma) f.push("Firmierung");
   if (!sd.strasse || !sd.plz || !sd.ort) f.push("Anschrift");
   if (!sd.gewerbe) f.push("Gewerbeanmeldung");
@@ -295,7 +298,7 @@ const stammdatenLuecken = (sd) => {
   return f;
 };
 
-const VERSION = "v5.10.4 · 02.11.2026 · Vollmacht auf zwei Seiten";
+const VERSION = "v5.10.5 · 03.11.2026 · Angestellte im Vertrieb";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -5707,7 +5710,7 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
   const [unterschrift, setUnterschrift] = useState(null);
   const offen = ["registriert", "abgelehnt"].includes(user.status);
   const vertrag = user.vertrag && user.vertrag.gfUnterschrift ? user.vertrag : null;
-  const luecken = [...stammdatenLuecken(sd),
+  const luecken = [...stammdatenLuecken(sd, !!user.angestellt),
     ...(vertrag && !vertrag.partnerUnterschrift ? ["Unterschrift unter den Handelsvertretervertrag"] : [])];
 
   const schreib = (aend) =>
@@ -5821,7 +5824,9 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
             ) : (
               <div className="flex items-center gap-2 p-3 rounded mb-4 text-sm"
                    style={{ background: "#F1F7F0", border: "1px solid " + C.ok, color: C.ok }}>
-                <Check size={15} /> Alle Unterlagen liegen vor.
+                <Check size={15} /> {user.angestellt
+                  ? "Du bist bei EGC angestellt: Gewerbeanmeldung, Bank und Ausweis sind nicht nötig."
+                  : "Alle Unterlagen liegen vor."}
               </div>
             )}
             <div className="flex flex-wrap gap-2">
@@ -6475,10 +6480,11 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
       satz: parseFloat(String(neu.satz).replace(",", ".")) || 0,
       upline: neu.upline || null, email: neu.email, telefon: "",
       status: "eingeladen", passwort: "", bild: null, einladung: code,
-      stammdaten: leereStammdaten(),
+      stammdaten: leereStammdaten(), angestellt: neu.beschaeftigung === "angestellt",
     };
     setMitarbeiter([...mitarbeiter, m]);
-    if (notieren) notieren("Mitarbeiter", m.name + " angelegt als " + m.rolle + " mit " + m.satz + " %");
+    if (notieren) notieren("Mitarbeiter", m.name + " angelegt als " + m.rolle + " mit " + m.satz + " %"
+      + (m.angestellt ? " (angestellt)" : ""));
     setLink({ name: m.name, url: window.location.origin + "/?code=" + code });
     setNeu(null);
   };
@@ -6538,6 +6544,10 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
             options={["Vertriebspartner", "Teamleiter"]} />
           <Feld label="Team" value={neu.team} onChange={(v) => setNeu({ ...neu, team: v })} placeholder="Süd" />
           <Feld label="Provisionssatz in %" value={neu.satz} onChange={(v) => setNeu({ ...neu, satz: v })} />
+          <Select label="Beschäftigung" value={neu.beschaeftigung || "selbststaendig"}
+            onChange={(v) => setNeu({ ...neu, beschaeftigung: v })}
+            options={[{ value: "selbststaendig", label: "Selbstständig (Handelsvertreter)" },
+                      { value: "angestellt", label: "Angestellt bei EGC" }]} />
           <Select label="Zugeordnet an (Overhead)" value={neu.upline || ""}
             onChange={(v) => setNeu({ ...neu, upline: v || null })}
             options={[{ value: "", label: "Keine Zuordnung" },
@@ -6549,6 +6559,13 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
           </Btn>
           <Btn variante="hell" onClick={() => setNeu(null)}>Abbrechen</Btn>
         </div>
+        {neu.beschaeftigung === "angestellt" && (
+          <p className="text-xs mt-3" style={{ color: C.muted, maxWidth: "60ch" }}>
+            Angestellt: Provision und Ziele werden im Portal angezeigt wie bei allen anderen.
+            Abgerechnet wird über eure Lohnabrechnung. Es gibt keinen Handelsvertretervertrag;
+            Gewerbeanmeldung, Bankverbindung und Ausweis sind keine Pflicht.
+          </p>
+        )}
       </div>
     );
 
@@ -6565,7 +6582,7 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
           <div className="flex-1">
             <div className="text-lg">{gewaehlt.name}</div>
             <div className="text-xs" style={{ color: C.muted }}>
-              {gewaehlt.rolle} · Team {gewaehlt.team} · {gewaehlt.email}
+              {gewaehlt.rolle}{gewaehlt.angestellt ? " (angestellt)" : ""} · Team {gewaehlt.team} · {gewaehlt.email}
               {gewaehlt.telefon ? " · " + gewaehlt.telefon : ""}
             </div>
           </div>
@@ -6577,6 +6594,12 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
           <div className="grid sm:grid-cols-2 gap-4">
             <Feld label="Provisionssatz in %" value={gewaehlt.satz}
               onChange={(v) => setz(gewaehlt.id, { satz: parseFloat(v.replace(",", ".")) || 0 })} />
+            {istGF && (
+              <Select label="Beschäftigung" value={gewaehlt.angestellt ? "angestellt" : "selbststaendig"}
+                onChange={(v) => setz(gewaehlt.id, { angestellt: v === "angestellt" })}
+                options={[{ value: "selbststaendig", label: "Selbstständig (Handelsvertreter)" },
+                          { value: "angestellt", label: "Angestellt bei EGC" }]} />
+            )}
             <Select label="Zugeordnet an (Overhead)" value={gewaehlt.upline || ""}
               onChange={(v) => setz(gewaehlt.id, { upline: v || null })}
               options={[{ value: "", label: "Keine Zuordnung" },
@@ -6650,7 +6673,12 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
           </div>
         )}
 
-        {istGF && (() => {
+        {istGF && gewaehlt.angestellt && (
+          <div className="rounded p-5 text-sm" style={{ background: C.card, border: "1px solid " + C.line, color: C.muted }}>
+            Angestellt bei EGC: kein Handelsvertretervertrag, die Provision rechnet ihr über die Lohnabrechnung ab.
+          </div>
+        )}
+        {istGF && !gewaehlt.angestellt && (() => {
           const v = gewaehlt.vertrag || {};
           return (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
@@ -6736,12 +6764,13 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
           </div>
         )}
 
-        {istGF && gewaehlt.status === "pruefung" && (
+        {istGF && (gewaehlt.status === "pruefung" || (gewaehlt.angestellt && gewaehlt.status === "registriert")) && (
           <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
             <div className="text-sm mb-3">Prüfung und Freigabe</div>
             <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "60ch" }}>
-              Prüfe Gewerbeanmeldung, Ausweis und Bankverbindung auf Übereinstimmung mit der
-              Firmierung. Nach der Freigabe kann nur noch die Geschäftsführung diese Daten ändern.
+              {gewaehlt.angestellt
+                ? "Angestellt bei EGC: keine Gewerbeanmeldung nötig. Du kannst direkt freischalten."
+                : "Prüfe Gewerbeanmeldung, Ausweis und Bankverbindung auf Übereinstimmung mit der Firmierung. Nach der Freigabe kann nur noch die Geschäftsführung diese Daten ändern."}
             </p>
             <label className="block mb-4">
               <span className="block text-xs mb-1" style={{ color: C.muted }}>
@@ -9513,6 +9542,11 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
                   <div className="text-sm">{m.name}</div>
                   <div className="text-xs" style={{ color: C.muted }}>{m.rolle} · {num(m.satz || 0, 0)} %</div>
                 </div>
+                {m.angestellt ? (
+                  <div className="w-52 text-xs" style={{ color: C.muted }}>
+                    Angestellt bei EGC · kein Handelsvertretervertrag, Abrechnung über die Lohnabrechnung
+                  </div>
+                ) : (
                 <div className="w-52 text-xs">
                   <div style={{ color: v.gfUnterschrift ? C.ok : C.warn }}>
                     {v.gfUnterschrift ? "✓ von EGC unterschrieben " + datum(v.gfDatum) : "EGC hat noch nicht unterschrieben"}
@@ -9521,12 +9555,13 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
                     {v.partnerUnterschrift ? "✓ vom Partner unterschrieben " + datum(v.partnerDatum) : "Partner hat noch nicht unterschrieben"}
                   </div>
                 </div>
+                )}
                 <div className="w-56">
                   <Select label="Struktur" value={m.upline || ""} onChange={(x) => strukturSetzen(m, x)}
                     options={[{ value: "", label: "Keine Zuordnung" },
                       ...moeglicheKoepfe(m).map((k) => ({ value: k.id, label: k.name + " · " + k.rolle }))]} />
                 </div>
-                {v.gfUnterschrift && (
+                {v.gfUnterschrift && !m.angestellt && (
                   <button className="text-xs" style={{ color: C.strom }}
                     onClick={() => vertragPdf(m, mitarbeiter)}>Vertrag als PDF</button>
                 )}
@@ -11555,6 +11590,7 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
                 <div className="text-xs" style={{ color: C.muted }}>
                   {z.anfrage.id} · {z.person.name} ({z.person.rolle}
                   {z.person.overhead ? ", Overhead" : ""}
+                  {(mitarbeiter.find((m) => m.id === z.person.id) || {}).angestellt ? ", angestellt · über die Lohnabrechnung" : ""}
                   {z.person.vonPartner ? ", von " + ((mitarbeiter.find((m) => m.id === z.person.vonPartner) || {}).name || "Partner") : ""})
                   {" · fällig " + datum(z.faellig)}
                 </div>
