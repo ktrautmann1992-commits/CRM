@@ -1,7 +1,7 @@
 {
-  "name": "EGC-Energie Vertriebsportal",
+  "name": "EGC Energie Vertriebsportal",
   "short_name": "EGC Portal",
-  "description": "Vertriebsportal der EGC-Energie",
+  "description": "Vertriebsportal der EGC Energie",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0A1626",

@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.10.5 · 03.11.2026 · Angestellte im Vertrieb";
+const VERSION = "v5.10.6 · 03.11.2026 · Abstand zur Statusleiste auf dem iPhone";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -6893,7 +6893,7 @@ function Registrierung({ einladung, onFertig, onAbbruch }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4"
-         style={{ background: C.ink, fontFamily: FONT }}>
+         style={{ background: C.ink, fontFamily: FONT, paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
       <div className="w-full max-w-md">
         <img src={LOGO} alt="EGC Energie" className="w-44 mx-auto mb-8" />
         <div className="rounded p-6" style={{ background: C.card }}>
@@ -6974,7 +6974,7 @@ function Login({ onAngemeldet, onEinladung, startCode }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4"
-         style={{ background: C.ink, fontFamily: FONT }}>
+         style={{ background: C.ink, fontFamily: FONT, paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
       <div className="w-full max-w-md">
         <img src={LOGO} alt="EGC Energie" className="w-44 mx-auto mb-8" />
         <div className="rounded p-6" style={{ background: C.card }}>
@@ -12918,7 +12918,7 @@ export default function App() {
   if (sitzung === "pruefen" || (sitzung === "aktiv" && !user))
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-4 gap-4"
-           style={{ background: C.ink, fontFamily: FONT, color: "#8B9BB0" }}>
+           style={{ background: C.ink, fontFamily: FONT, color: "#8B9BB0", paddingTop: "env(safe-area-inset-top)" }}>
         <img src={LOGO} alt="EGC Energie" className="w-44" />
         <p className="text-sm">{sitzung === "aktiv" ? "Zugang nicht gefunden." : "Daten werden geladen …"}</p>
         {sitzung === "aktiv" && (
@@ -13168,9 +13168,12 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row"
-         style={{ background: C.paper, color: C.text, fontFamily: FONT }}>
+         style={{ background: C.paper, color: C.text, fontFamily: FONT, paddingBottom: "env(safe-area-inset-bottom)" }}>
       {/* Seitenleiste, auf dem Handy als einklappbare Kopfzeile */}
       <aside className="lg:w-64 shrink-0 lg:px-4 lg:py-5" style={{ background: C.ink, color: "#fff" }}>
+        {/* Als App auf dem iPhone liegt die Statusleiste (Uhrzeit, Akku) über der Seite:
+            so viel Platz frei lassen, wie sie hoch ist. Im Browser ist der Wert 0. */}
+        <div className="lg:hidden" style={{ height: "env(safe-area-inset-top)" }} />
         {/* Kopfzeile mobil */}
         <div className="flex items-center gap-3 px-4 py-3 lg:px-0 lg:py-0 lg:block lg:mb-6">
           <button title="Zur Übersicht"
