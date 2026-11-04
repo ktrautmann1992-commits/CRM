@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.12 · 04.11.2026 · Dienstleistungsvertrag im EGC-Design";
+const VERSION = "v5.13 · 04.11.2026 · Dienstleistungsvertrag mit oder ohne Honorar, Verschwiegenheitserklärung";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1198,12 +1198,24 @@ const ladeJsPdf = () => {
 /*  Gilt für alle Kunden. Nur Kalkulation und Geschäftsführung         */
 /*  erzeugen ihn: blanko oder mit der Anschrift des Kunden.            */
 /* ------------------------------------------------------------------ */
-const DLV_TEXT = {
+/* honorar: { mit: true, betrag: 300 } · { mit: false } · blanko mit Honorar: { mit: true, betrag: null } */
+const dlvText = (honorar = { mit: true, betrag: 300 }) => {
+  const mit = honorar.mit !== false;
+  const P = honorar.betrag == null ? "________ EUR" : num(honorar.betrag, 2) + " EUR";
+  const LZ = mit ? "6" : "5";   /* Ziffer der Laufzeit: ohne Honorar entfällt die Referenzregelung */
+  const LAUF = "solange die Energiebeschaffung des Auftraggebers über einen von EGC Energie vermittelten Energieliefervertrag erfolgt";
+  const t = {
   titel: "DIENSTLEISTUNGSVERTRAG",
   untertitel: "Energiebeschaffung und Erstattungsprüfung für Gewerbe & Industrie",
+  mit,
   konditionen: [
-    ["Energiebeschaffung", "300,00 EUR zzgl. gesetzlicher Umsatzsteuer pro Monat; nur wenn keine Referenzfreigabe besteht"],
-    ["Referenzkunde", "Die 300,00-EUR-Servicepauschale für die Energiebeschaffung entfällt vollständig, solange die Referenzfreigabe besteht"],
+    ...(mit ? [
+      ["Energiebeschaffung", P + " zzgl. gesetzlicher Umsatzsteuer pro Monat; nur wenn keine Referenzfreigabe besteht"],
+      ["Referenzkunde", "Die Servicepauschale von " + P + " für die Energiebeschaffung entfällt vollständig, solange die Referenzfreigabe besteht"],
+    ] : [
+      ["Energiebeschaffung", "Ohne Servicepauschale. Die Leistungen dieses Vertrags gelten, " + LAUF + "."],
+      ["Laufzeit", "Für die Dauer der über EGC Energie vermittelten Energielieferverträge des Auftraggebers"],
+    ]),
     ["Erfolgshonorar Erstattungen / Entlastungen", "20 % zzgl. gesetzlicher Umsatzsteuer ausschließlich auf tatsächlich realisierte Erstattungen bzw. bestätigte finanzielle Entlastungen aus den Leistungen gemäß Ziffer 2.2"],
   ],
   einleitung: "Zwischen dem oben bezeichneten Auftraggeber und EGC Energie als Auftragnehmer wird folgender Dienstleistungsvertrag geschlossen.",
@@ -1212,7 +1224,9 @@ const DLV_TEXT = {
       "Der Auftragnehmer unterstützt den Auftraggeber in zwei voneinander getrennten Leistungsbereichen: (a) bei der laufenden Energiebeschaffung und energiewirtschaftlichen Betreuung für Strom und Erdgas sowie (b) bei der Prüfung möglicher Erstattungs- und Entlastungsansprüche. Die Prüfung und Bearbeitung der unter Ziffer 2.2 genannten Erstattungs- und Entlastungsthemen erfolgt vollständig über den Auftragnehmer. Der Auftragnehmer ist berechtigt, hierfür im Hintergrund spezialisierte Kooperations- und Dienstleistungspartner einzubinden. Für beide Leistungsbereiche gelten die jeweils gesondert geregelten Vergütungen gemäß Ziffer 4.",
       "Soweit für einzelne Themen rechtliche oder steuerliche Beratung, Vertretung oder eine förmliche Antragstellung erforderlich ist, erfolgt diese nicht als Rechts- oder Steuerberatung durch den Auftragnehmer. Hierfür können nach Abstimmung spezialisierte Partner, Rechtsanwälte oder Steuerberater eingebunden werden."]],
     ["2. Leistungsumfang", [
-      "2.1 Energiebeschaffung und laufende Betreuung. Der Auftragnehmer unterstützt den Auftraggeber insbesondere bei der Beschaffung von Strom und Erdgas, bei Markt- und Angebotsvergleichen, der Abstimmung von Lieferverträgen sowie der laufenden energiewirtschaftlichen Betreuung. Für diesen Leistungsbereich gilt ausschließlich die monatliche Servicepauschale gemäß Ziffer 4.1. Das Erfolgshonorar gemäß Ziffer 4.2 fällt hierfür ausdrücklich nicht an.",
+      "2.1 Energiebeschaffung und laufende Betreuung. Der Auftragnehmer unterstützt den Auftraggeber insbesondere bei der Beschaffung von Strom und Erdgas, bei Markt- und Angebotsvergleichen, der Abstimmung von Lieferverträgen sowie der laufenden energiewirtschaftlichen Betreuung. " + (mit
+        ? "Für diesen Leistungsbereich gilt ausschließlich die monatliche Servicepauschale gemäß Ziffer 4.1."
+        : "Für diesen Leistungsbereich fällt keine Vergütung an, " + LAUF + " (Ziffer " + LZ + ").") + " Das Erfolgshonorar gemäß Ziffer 4.2 fällt hierfür ausdrücklich nicht an.",
       "2.2 Prüfung von Erstattungs- und Entlastungspotenzialen. Zusätzlich werden – abhängig von Branche, Verbrauch, Lieferstellen, Vertragslage und verfügbarer Datenbasis – durch den Auftragnehmer insbesondere folgende Erstattungs- und Entlastungsthemen geprüft und bearbeitet:",
       { punkte: [
         "Energiesteuer auf Erdgas und mögliche Entlastungs- bzw. Erstattungsansprüche,",
@@ -1227,33 +1241,40 @@ const DLV_TEXT = {
       "Der Auftraggeber stellt dem Auftragnehmer alle für die Prüfung und Bearbeitung erforderlichen Informationen, Rechnungen, Verträge, Verbrauchs- und Messdaten, Vollmachten sowie sonstigen Unterlagen vollständig und rechtzeitig zur Verfügung. Änderungen der Unternehmens-, Verbrauchs- oder Lieferstellendaten sind unverzüglich mitzuteilen.",
       "Der Auftraggeber bestätigt, dass die übermittelten Angaben nach bestem Wissen vollständig und richtig sind. Verzögerungen oder Nachteile, die aus fehlenden, verspäteten oder unrichtigen Angaben entstehen, fallen nicht in den Verantwortungsbereich des Auftragnehmers."]],
     ["4. Vergütung", [
-      "4.1 Vergütung für Energiebeschaffung und laufende Betreuung. Ausschließlich für die Leistungen gemäß Ziffer 2.1 wird eine monatliche Servicepauschale in Höhe von 300,00 EUR zzgl. gesetzlicher Umsatzsteuer vereinbart. Diese Servicepauschale wird jedoch nur berechnet, wenn der Auftraggeber keine Referenzfreigabe gemäß Ziffer 5 erteilt bzw. eine erteilte Referenzfreigabe später widerruft. Die Abrechnung erfolgt monatlich im Voraus; Rechnungen sind innerhalb von 14 Kalendertagen nach Zugang fällig.",
+      mit
+        ? "4.1 Vergütung für Energiebeschaffung und laufende Betreuung. Ausschließlich für die Leistungen gemäß Ziffer 2.1 wird eine monatliche Servicepauschale in Höhe von " + P + " zzgl. gesetzlicher Umsatzsteuer vereinbart. Diese Servicepauschale wird jedoch nur berechnet, wenn der Auftraggeber keine Referenzfreigabe gemäß Ziffer 5 erteilt bzw. eine erteilte Referenzfreigabe später widerruft. Die Abrechnung erfolgt monatlich im Voraus; Rechnungen sind innerhalb von 14 Kalendertagen nach Zugang fällig."
+        : "4.1 Energiebeschaffung und laufende Betreuung ohne Servicepauschale. Für die Leistungen gemäß Ziffer 2.1 wird keine Servicepauschale berechnet. Die Leistungen gelten für den Auftraggeber, " + LAUF + ".",
       "4.2 Erfolgshonorar ausschließlich für Erstattungs- und Entlastungsleistungen. Für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 2.1 fällt kein Erfolgshonorar an. Das Erfolgshonorar in Höhe von 20 % zzgl. gesetzlicher Umsatzsteuer wird ausschließlich auf tatsächlich realisierte Erstattungen oder bestätigte finanzielle Entlastungen erhoben, die aus den unter Ziffer 2.2 beschriebenen und über den Auftragnehmer geprüften oder bearbeiteten Erstattungs- und Entlastungsthemen resultieren.",
       "Als realisierter wirtschaftlicher Vorteil im Sinne von Ziffer 4.2 gilt ausschließlich ein dem Auftraggeber tatsächlich ausgezahlter, gutgeschriebener, verrechneter oder von der zuständigen Stelle bzw. dem Vertragspartner verbindlich bestätigter Erstattungs- oder Entlastungsbetrag aus einer Prüfung bzw. Bearbeitung gemäß Ziffer 2.2. Eine reine Potenzialberechnung, unverbindliche Schätzung oder bloße Empfehlung löst kein Erfolgshonorar aus.",
       "Das Erfolgshonorar wird mit Realisierung bzw. verbindlicher Bestätigung des jeweiligen wirtschaftlichen Vorteils aus den Leistungen gemäß Ziffer 2.2 fällig. Der Auftraggeber informiert den Auftragnehmer unverzüglich über entsprechende Bescheide, Gutschriften, Verrechnungen oder sonstige Bestätigungen und stellt auf Anfrage geeignete Nachweise zur Verfügung."]],
-    ["5. Referenzkundenregelung", [
-      "5.1 Erteilt der Auftraggeber dem Auftragnehmer die nachstehende Referenzfreigabe, entfällt ausschließlich die monatliche Servicepauschale von 300,00 EUR zzgl. gesetzlicher Umsatzsteuer für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 4.1 vollständig für die Dauer dieser Freigabe. Das Erfolgshonorar für Erstattungs- und Entlastungsleistungen gemäß Ziffer 4.2 bleibt hiervon unberührt.",
+    ...(!mit ? [] : [["5. Referenzkundenregelung", [
+      "5.1 Erteilt der Auftraggeber dem Auftragnehmer die nachstehende Referenzfreigabe, entfällt ausschließlich die monatliche Servicepauschale von " + P + " zzgl. gesetzlicher Umsatzsteuer für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 4.1 vollständig für die Dauer dieser Freigabe. Das Erfolgshonorar für Erstattungs- und Entlastungsleistungen gemäß Ziffer 4.2 bleibt hiervon unberührt.",
       "5.2 Die Referenzfreigabe berechtigt den Auftragnehmer, den Auftraggeber als Referenzkunden namentlich zu benennen, insbesondere in Vertriebsunterlagen, Präsentationen, auf der Unternehmenswebseite sowie gegenüber Interessenten und Geschäftspartnern. Die Nutzung eines Logos, von Marken, konkreten Einsparbeträgen, Zitaten, Fallstudien oder weitergehenden Kundendaten bedarf einer gesonderten Freigabe in Textform.",
-      "5.3 Die Referenzfreigabe kann vom Auftraggeber jederzeit mit Wirkung für die Zukunft in Textform widerrufen werden. Ab dem auf den Widerruf folgenden Kalendermonat wird für die Energiebeschaffung und laufende Betreuung die monatliche Servicepauschale von 300,00 EUR zzgl. gesetzlicher Umsatzsteuer berechnet. Bereits veröffentlichte Druckunterlagen müssen nicht vernichtet werden; digitale Nennungen werden innerhalb einer angemessenen Frist entfernt."]],
-    ["6. Laufzeit und Kündigung", [
-      "Der Vertrag beginnt mit Unterzeichnung und wird zunächst für 12 Monate geschlossen. Er verlängert sich jeweils um weitere 12 Monate, wenn er nicht mit einer Frist von 3 Monaten zum Ende der jeweiligen Vertragslaufzeit in Textform gekündigt wird. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.",
+      "5.3 Die Referenzfreigabe kann vom Auftraggeber jederzeit mit Wirkung für die Zukunft in Textform widerrufen werden. Ab dem auf den Widerruf folgenden Kalendermonat wird für die Energiebeschaffung und laufende Betreuung die monatliche Servicepauschale von " + P + " zzgl. gesetzlicher Umsatzsteuer berechnet. Bereits veröffentlichte Druckunterlagen müssen nicht vernichtet werden; digitale Nennungen werden innerhalb einer angemessenen Frist entfernt."]]]),
+    [LZ + ". Laufzeit und Kündigung", [
+      mit
+        ? "Der Vertrag beginnt mit Unterzeichnung und wird zunächst für 12 Monate geschlossen. Er verlängert sich jeweils um weitere 12 Monate, wenn er nicht mit einer Frist von 3 Monaten zum Ende der jeweiligen Vertragslaufzeit in Textform gekündigt wird. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt."
+        : "Der Vertrag beginnt mit Unterzeichnung und läuft für die Dauer der über EGC Energie vermittelten Energielieferverträge des Auftraggebers, einschließlich Verlängerungen und Folgeverträgen. Er endet, ohne dass es einer Kündigung bedarf, wenn kein über EGC Energie vermittelter Energieliefervertrag des Auftraggebers mehr besteht. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.",
       "Ein während der Vertragslaufzeit begründeter Anspruch auf das Erfolgshonorar gemäß Ziffer 4.2 bleibt auch nach Vertragsende bestehen, wenn der wirtschaftliche Vorteil auf einer während der Vertragslaufzeit über den Auftragnehmer vorgenommenen Prüfung, Antragstellung oder Bearbeitung gemäß Ziffer 2.2 beruht. Für Leistungen der Energiebeschaffung gemäß Ziffer 2.1 entsteht daraus kein Erfolgshonorar."]],
-    ["7. Zusammenarbeit mit Partnern", [
+    [(mit ? "7" : "6") + ". Zusammenarbeit mit Partnern", [
       "Der Auftragnehmer ist berechtigt, zur technischen, fachlichen oder rechtlichen Bearbeitung geeignete Kooperationspartner und Dienstleister einzubeziehen, soweit dies zur Vertragserfüllung erforderlich ist. Personenbezogene Daten und vertrauliche Unternehmensdaten werden dabei nur im erforderlichen Umfang und unter Beachtung der geltenden Datenschutzbestimmungen weitergegeben. Externe kostenpflichtige Leistungen, die nicht von der vereinbarten Vergütung umfasst sind, bedürfen vor Beauftragung der Freigabe des Auftraggebers."]],
-    ["8. Haftung und Entscheidungshoheit", [
+    [(mit ? "8" : "7") + ". Haftung und Entscheidungshoheit", [
       "Die endgültige Entscheidung über Anträge, Vertragsänderungen, Beschaffungsentscheidungen und sonstige Maßnahmen verbleibt beim Auftraggeber. Der Auftragnehmer schuldet eine fachgerechte Dienstleistung, jedoch keinen bestimmten Erstattungs-, Einspar- oder Beschaffungserfolg.",
       "Der Auftragnehmer haftet unbeschränkt bei Vorsatz und grober Fahrlässigkeit sowie bei Verletzung von Leben, Körper oder Gesundheit. Bei leicht fahrlässiger Verletzung wesentlicher Vertragspflichten ist die Haftung auf den vertragstypischen, vorhersehbaren Schaden begrenzt. Im Übrigen ist die Haftung für leichte Fahrlässigkeit ausgeschlossen, soweit gesetzlich zulässig."]],
-    ["9. Vertraulichkeit und Datenschutz", [
+    [(mit ? "9" : "8") + ". Vertraulichkeit und Datenschutz", [
       "Beide Parteien behandeln alle ihnen im Zusammenhang mit diesem Vertrag bekannt werdenden vertraulichen Informationen und Geschäftsgeheimnisse vertraulich. Gesetzliche Offenlegungs- und Aufbewahrungspflichten bleiben unberührt. Die Verarbeitung personenbezogener Daten erfolgt nach den anwendbaren datenschutzrechtlichen Vorschriften."]],
-    ["10. Schlussbestimmungen", [
+    [(mit ? "10" : "9") + ". Schlussbestimmungen", [
       "Änderungen und Ergänzungen dieses Vertrages bedürfen mindestens der Textform, soweit nicht gesetzlich eine strengere Form vorgeschrieben ist. Es gilt das Recht der Bundesrepublik Deutschland. Soweit gesetzlich zulässig und beide Parteien Kaufleute sind, wird als Gerichtsstand der Sitz des Auftragnehmers vereinbart.",
       "Sollten einzelne Bestimmungen dieses Vertrages ganz oder teilweise unwirksam oder undurchführbar sein oder werden, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt. Anstelle der unwirksamen oder undurchführbaren Bestimmung gilt die gesetzliche Regelung."]],
   ],
-  freigabeJa: "Ja, wir erteilen die Referenzfreigabe gemäß Ziffer 5. Die monatliche Servicepauschale von 300,00 EUR zzgl. USt. für die Energiebeschaffung entfällt. Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt bestehen.",
-  freigabeNein: "Nein, wir erteilen keine Referenzfreigabe. Für die Energiebeschaffung wird die monatliche Servicepauschale von 300,00 EUR zzgl. USt. berechnet. Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt hiervon unberührt.",
+  freigabeJa: "Ja, wir erteilen die Referenzfreigabe gemäß Ziffer 5. Die monatliche Servicepauschale von " + P + " zzgl. USt. für die Energiebeschaffung entfällt. Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt bestehen.",
+  freigabeNein: "Nein, wir erteilen keine Referenzfreigabe. Für die Energiebeschaffung wird die monatliche Servicepauschale von " + P + " zzgl. USt. berechnet. Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt hiervon unberührt.",
+  };
+  return t;
 };
 
-async function dienstleistungsvertragPdf(kunde = null) {
+async function dienstleistungsvertragPdf(kunde = null, honorar = { mit: true, betrag: 300 }) {
+  const DLV_TEXT = dlvText(honorar);
   const jsPDF = await ladeJsPdf();
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const W = 210, H = 297, RA = 18, BR = W - 2 * RA, UNTEN = H - 24;
@@ -1300,8 +1321,7 @@ async function dienstleistungsvertragPdf(kunde = null) {
   const absatz = (t, x, breite, gr = 8.8, zeile = 4.1) => {
     schrift(gr); fa(TEXT);
     const z = doc.splitTextToSize(String(t), breite);
-    /* nach einem Seitenwechsel stellt die Fußzeile eine kleine graue Schrift ein: je Zeile neu setzen */
-    z.forEach((zeileText) => { platz(zeile); schrift(gr); fa(TEXT); doc.text(zeileText, x, y); y += zeile; });
+    z.forEach((zeileText) => { platz(zeile); doc.text(zeileText, x, y); y += zeile; });
   };
   const ueberschrift = (t) => {
     platz(14);
@@ -1364,13 +1384,13 @@ async function dienstleistungsvertragPdf(kunde = null) {
           schrift(8.8); const z = doc.splitTextToSize(p, BR - 7);
           platz(z.length * 4.1);
           fl(GRUEN); doc.circle(RA + 2, y - 1.2, 0.8, "F");
-          schrift(8.8); fa(TEXT); z.forEach((zt) => { doc.text(zt, RA + 6, y); y += 4.1; });
+          fa(TEXT); z.forEach((zt) => { doc.text(zt, RA + 6, y); y += 4.1; });
         });
         y += 1.5;
         return;
       }
       /* „2.1 Titel. Text“: Nummer und Titel fett */
-      const m = /^(\d+\.\d+ [^.,]{3,70}\.)\s(.*)$/.exec(t);
+      const m = /^(\d+\.\d+ [^.]+\.)\s(.*)$/.exec(t);
       if (m) { platz(10); schrift(8.8, true); fa(NAVY); doc.text(m[1], RA, y); y += 4.3; absatz(m[2], RA, BR); }
       else absatz(t, RA, BR);
       y += 2.2;
@@ -1380,10 +1400,10 @@ async function dienstleistungsvertragPdf(kunde = null) {
 
   /* ---------- Referenzfreigabe und Unterschriften ---------- */
   y = neueSeite();
-  schrift(16, true); fa(NAVY); doc.text("Referenzfreigabe", RA, y + 2);
-  schrift(8.5, true); fa(GRUEN1); doc.text("OPTIONALE FREIGABE ZUR BEFREIUNG VON DER SERVICEPAUSCHALE", RA, y + 9, { charSpace: 0.3 });
-  y += 20;
-  [DLV_TEXT.freigabeJa, DLV_TEXT.freigabeNein].forEach((t) => {
+  schrift(16, true); fa(NAVY); doc.text(DLV_TEXT.mit ? "Referenzfreigabe" : "Unterschriften", RA, y + 2);
+  if (DLV_TEXT.mit) { schrift(8.5, true); fa(GRUEN1); doc.text("OPTIONALE FREIGABE ZUR BEFREIUNG VON DER SERVICEPAUSCHALE", RA, y + 9, { charSpace: 0.3 }); }
+  y += DLV_TEXT.mit ? 20 : 12;
+  (DLV_TEXT.mit ? [DLV_TEXT.freigabeJa, DLV_TEXT.freigabeNein] : []).forEach((t) => {
     schrift(9.2); const z = doc.splitTextToSize(t, BR - 20);
     const h = z.length * 4.4 + 9;
     fl(HELL); doc.roundedRect(RA, y, BR, h, 2.5, 2.5, "F");
@@ -1414,8 +1434,175 @@ async function dienstleistungsvertragPdf(kunde = null) {
   for (let i = 1; i <= n; i++) { doc.setPage(i); schrift(7); fa(GRAU); doc.text("Seite " + i + " von " + n, W - RA, H - 6.4, { align: "right" }); }
 
   const roh = doc.output("datauristring");
-  const name = blanko ? "Dienstleistungsvertrag_Blanko.pdf"
+  const name = blanko ? "Dienstleistungsvertrag_Blanko_" + (DLV_TEXT.mit ? "mit" : "ohne") + "_Honorar.pdf"
     : "Dienstleistungsvertrag_" + String(k.firma || "Kunde").replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf";
+  return { name, typ: "application/pdf", groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Verschwiegenheitserklärung (NDA)                                   */
+/*  EGC verpflichtet sich gegenüber dem Kunden: Daten nur auswerten    */
+/*  und zur Angebotseinholung an Versorger geben, nie an Dritte.       */
+/*  Unterschreibt immer die Geschäftsführung. Nur Kalkulation und      */
+/*  Geschäftsführung haben Zugriff.                                    */
+/* ------------------------------------------------------------------ */
+const NDA_ZIFFERN = [
+  ["1. Gegenstand und Zweck", [
+    "Der Kunde stellt EGC Energie (nachfolgend „EGC“) Informationen und Unterlagen zur Verfügung, damit EGC seinen Energiebedarf auswerten, ihn zur Energiebeschaffung beraten und Angebote von Energieversorgern einholen kann (nachfolgend „Zweck“). Diese Erklärung regelt den vertraulichen Umgang mit diesen Informationen."]],
+  ["2. Vertrauliche Informationen", [
+    "Vertraulich sind alle Informationen, die EGC im Zusammenhang mit dem Zweck vom Kunden erhält, gleich in welcher Form, insbesondere Verbrauchs-, Mess- und Lastgangdaten, Zähler- und Marktlokationsdaten, Rechnungen, Energielieferverträge, Preise und Konditionen, Angaben zu Standorten und Betriebsabläufen sowie sonstige Unternehmens- und Geschäftsdaten des Kunden."]],
+  ["3. Pflichten von EGC", [
+    "EGC behandelt die vertraulichen Informationen streng vertraulich und verwendet sie ausschließlich für den Zweck. EGC schützt sie mit mindestens der Sorgfalt, die EGC auf eigene vertrauliche Informationen anwendet, und trifft angemessene technische und organisatorische Schutzmaßnahmen.",
+    "EGC darf die Informationen auswerten, aufbereiten und daraus Analysen, Kalkulationen und Angebotsvergleiche für den Kunden erstellen."]],
+  ["4. Zulässige Weitergabe", [
+    "EGC darf vertrauliche Informationen nur weitergeben",
+    { punkte: [
+      "an Energieversorger, soweit dies zur Einholung von Angeboten und zum Abschluss von Energielieferverträgen für den Kunden erforderlich ist, und nur im dafür nötigen Umfang,",
+      "an eigene Mitarbeiter und Vertriebsbeauftragte von EGC, die die Informationen für den Zweck benötigen und zur Verschwiegenheit verpflichtet sind,",
+      "an technische Dienstleister, die EGC zur Datenverarbeitung einsetzt und vertraglich zur Vertraulichkeit verpflichtet hat (z. B. Auftragsverarbeitung nach Art. 28 DSGVO),",
+      "soweit EGC gesetzlich, behördlich oder gerichtlich zur Offenlegung verpflichtet ist; EGC informiert den Kunden darüber, soweit zulässig."] },
+    "Eine Weitergabe an sonstige Dritte ist ausgeschlossen. Insbesondere verkauft EGC keine Daten des Kunden und gibt sie nicht für Werbezwecke Dritter weiter. Eine Weitergabe darüber hinaus bedarf der vorherigen Zustimmung des Kunden in Textform."]],
+  ["5. Ausnahmen", [
+    "Die Pflichten gelten nicht für Informationen, die nachweislich allgemein bekannt sind oder ohne Verschulden von EGC allgemein bekannt werden, die EGC bereits vor der Übermittlung rechtmäßig bekannt waren oder die EGC von einem Dritten ohne Verletzung einer Vertraulichkeitspflicht erhalten hat."]],
+  ["6. Rückgabe und Löschung", [
+    "Auf Verlangen des Kunden gibt EGC die erhaltenen Unterlagen zurück oder löscht sie, soweit keine gesetzlichen Aufbewahrungspflichten entgegenstehen. Bereits an Energieversorger zur Angebotseinholung übermittelte Daten unterliegen den Datenschutzbestimmungen des jeweiligen Versorgers."]],
+  ["7. Laufzeit", [
+    "Diese Erklärung gilt ab Unterzeichnung für die Dauer der Zusammenarbeit und darüber hinaus für drei Jahre nach deren Ende."]],
+  ["8. Datenschutz", [
+    "Soweit personenbezogene Daten betroffen sind, verarbeitet EGC sie nach den geltenden datenschutzrechtlichen Vorschriften, insbesondere der Datenschutz-Grundverordnung (DSGVO)."]],
+  ["9. Schlussbestimmungen", [
+    "Änderungen und Ergänzungen bedürfen der Textform. Es gilt das Recht der Bundesrepublik Deutschland. Soweit gesetzlich zulässig und beide Parteien Kaufleute sind, ist Gerichtsstand der Sitz von EGC. Sollte eine Bestimmung unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt."]],
+];
+
+/* kunde = null: blanko. unterschrift: { bild (Datei), name, datum } der Geschäftsführung */
+async function ndaPdf(kunde = null, unterschrift = null) {
+  const jsPDF = await ladeJsPdf();
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+  const W = 210, H = 297, RA = 18, BR = W - 2 * RA, UNTEN = H - 24;
+  const NAVY = [10, 22, 38], NAVY1 = [7, 16, 29], NAVY2 = [27, 58, 96], GRUEN = [108, 180, 59],
+        GRUEN1 = [74, 140, 38], GRUEN2 = [150, 206, 96], TEXT = [22, 33, 44], GRAU = [107, 119, 135],
+        LINIE = [216, 221, 228], HELL = [246, 248, 250], WEISS = [255, 255, 255];
+  const F = FIRMENDATEN, k = kunde || {}, blanko = !kunde;
+  const logo = "data:image/jpeg;base64," + LOGO_PDF;
+  const fl = (c) => doc.setFillColor(c[0], c[1], c[2]);
+  const st = (c) => doc.setDrawColor(c[0], c[1], c[2]);
+  const fa = (c) => doc.setTextColor(c[0], c[1], c[2]);
+  const schrift = (g, fett) => { doc.setFont("helvetica", fett ? "bold" : "normal"); doc.setFontSize(g); };
+  const mische = (a, b, t) => a.map((c, i) => Math.round(c + (b[i] - c) * t));
+  const dk = (o) => doc.setGState(new doc.GState({ opacity: o, "stroke-opacity": o }));
+  const verlauf = (x, y, w, h, f1, f2, { r = 0, quer = true, n = 80 } = {}) => {
+    doc.saveGraphicsState();
+    if (r) doc.roundedRect(x, y, w, h, r, r, null); else doc.rect(x, y, w, h, null);
+    doc.clip(); doc.discardPath();
+    for (let i = 0; i < n; i++) {
+      fl(mische(f1, f2, i / (n - 1)));
+      if (quer) doc.rect(x + (i * w) / n, y, w / n + 0.25, h, "F"); else doc.rect(x, y + (i * h) / n, w, h / n + 0.25, "F");
+    }
+    doc.restoreGraphicsState();
+  };
+  const kringel = (x, y, r, c, o, art = "F") => {
+    dk(o); if (art === "F") { fl(c); doc.circle(x, y, r, "F"); } else { st(c); doc.setLineWidth(0.6); doc.circle(x, y, r, "S"); } dk(1);
+  };
+  const kopf = () => {
+    verlauf(0, 0, W, 24, NAVY1, NAVY2);
+    doc.saveGraphicsState(); doc.rect(0, 0, W, 24, null); doc.clip(); doc.discardPath();
+    kringel(W - 22, -4, 22, GRUEN, 0.16); kringel(W - 8, -8, 28, WEISS, 0.08, "S");
+    doc.restoreGraphicsState();
+    doc.addImage(logo, "JPEG", RA, 5.5, (420 / 196) * 12, 12);
+    schrift(12.5, true); fa(WEISS); doc.text("VERSCHWIEGENHEITSERKLÄRUNG", W - RA, 14.8, { align: "right" });
+    verlauf(0, 24, W, 1.2, GRUEN1, GRUEN2);
+    pdfFussFirma(doc, W, H, RA);
+    return 36;
+  };
+  let y = kopf();
+  const platz = (h) => { if (y + h > UNTEN) { doc.addPage(); y = kopf(); } };
+  const absatz = (t, x = RA, breite = BR) => {
+    const z = (schrift(8.8), doc.splitTextToSize(String(t), breite));
+    z.forEach((zt) => { platz(4.1); schrift(8.8); fa(TEXT); doc.text(zt, x, y); y += 4.1; });
+  };
+  const ueberschrift = (t) => {
+    platz(14);
+    verlauf(RA, y - 3.6, 1.6, 4.8, GRUEN2, GRUEN1, { r: 0.8, quer: false, n: 20 });
+    schrift(10.5, true); fa(NAVY); doc.text(t, RA + 4, y); y += 6.5;
+  };
+
+  schrift(20, true); fa(NAVY); doc.text("Verschwiegenheitserklärung", RA, y + 6);
+  schrift(10.5); fa(GRAU); doc.text("Vertraulicher Umgang mit Kundendaten (NDA)", RA, y + 13);
+  verlauf(RA, y + 17, 30, 1.3, GRUEN1, GRUEN2, { r: 0.65, n: 30 });
+  y += 26;
+
+  const partei = (rolle, zeilen, leer, h = 30) => {
+    fl(HELL); doc.roundedRect(RA, y, BR, h, 2.5, 2.5, "F");
+    doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, h, 2.5, 2.5, null); doc.clip(); doc.discardPath();
+    verlauf(RA, y, 2.2, h, GRUEN2, GRUEN1, { quer: false, n: 30 });
+    doc.restoreGraphicsState();
+    schrift(8, true); fa(GRAU); doc.text(rolle, RA + 7, y + 7, { charSpace: 0.5 });
+    const x = RA + 52;
+    zeilen.forEach(([wert, platzhalter], i) => {
+      const yy = y + 8 + i * 6.6;
+      if (leer) { schrift(7); fa(GRAU); doc.text(platzhalter, x, yy + 3.6); st(LINIE); doc.setLineWidth(0.3); doc.line(x, yy + 0.8, W - RA - 6, yy + 0.8); }
+      else { schrift(i === 0 ? 10.5 : 9.2, i === 0); fa(TEXT); doc.text(wert || "", x, yy); }
+    });
+    y += h + 4;
+  };
+  partei("KUNDE", [[k.firma, "Firma"], [k.strasse, "Straße, Hausnummer"], [[k.plz, k.ort].filter(Boolean).join(" "), "PLZ, Ort"]], blanko, 26);
+  partei("EGC", [["EGC Energie"], [F.vertreter ? "vertreten durch " + F.vertreter + " (Geschäftsführung)" : ""], [[F.strasse, F.ort].filter(Boolean).join(", ")]], false, 26);
+  y += 2;
+  absatz("EGC Energie verpflichtet sich gegenüber dem oben genannten Kunden wie folgt:");
+  y += 3;
+
+  NDA_ZIFFERN.forEach(([titel, teile]) => {
+    ueberschrift(titel);
+    teile.forEach((t) => {
+      if (t && t.punkte) {
+        t.punkte.forEach((p) => {
+          schrift(8.8); const z = doc.splitTextToSize(p, BR - 7);
+          platz(z.length * 4.1);
+          fl(GRUEN); doc.circle(RA + 2, y - 1.2, 0.8, "F");
+          schrift(8.8); fa(TEXT); z.forEach((zt) => { doc.text(zt, RA + 6, y); y += 4.1; });
+        });
+        y += 1.5; return;
+      }
+      absatz(t); y += 2.2;
+    });
+    y += 1.5;
+  });
+
+  /* Unterschriften: Geschäftsführung immer, Kunde zur Kenntnis */
+  platz(62);
+  y += 4;
+  schrift(10.5, true); fa(NAVY); doc.text("Unterschriften", RA, y); y += 8;
+  const halb = (BR - 14) / 2, x2 = RA + halb + 14;
+  const ort = (F.ort || "").replace(/^\d+\s*/, "");
+  schrift(8); fa(GRAU);
+  doc.text("Für EGC Energie (Geschäftsführung)", RA, y);
+  doc.text("Kunde (zur Kenntnis genommen)", x2, y);
+  y += 4;
+  if (unterschrift && unterschrift.bild) {
+    try {
+      const b = unterschrift.bild;
+      const url = b.url || (await dateiInhalt(b));
+      const hh = 16, bb = Math.min(halb, (hh * (b.breite || 600)) / (b.hoehe || 200));
+      doc.addImage(url, /png/.test(String(url).slice(0, 30)) ? "PNG" : "JPEG", RA, y, bb, hh);
+    } catch (e) { /* ohne Bild bleibt die Linie */ }
+  }
+  y += 18;
+  st(TEXT); doc.setLineWidth(0.3); doc.line(RA, y, RA + halb, y); doc.line(x2, y, x2 + halb, y);
+  schrift(8); fa(GRAU);
+  /* voller Name aus den Firmendaten, wenn der Zugang nur den Vornamen trägt (z. B. „Karsten“) */
+  const gfName = unterschrift && unterschrift.name;
+  doc.text(F.vertreter && (!gfName || F.vertreter.startsWith(gfName)) ? F.vertreter + " (Geschäftsführung)" : gfName || "", RA, y + 4.5);
+  doc.text("Unterschrift, Name in Druckbuchstaben", x2, y + 4.5);
+  y += 12;
+  schrift(8.5); fa(TEXT);
+  doc.text(ort + ", " + (unterschrift && unterschrift.datum ? datum(unterschrift.datum) : "____________"), RA, y);
+  doc.text("Ort, Datum: ______________________", x2, y);
+
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) { doc.setPage(i); schrift(7); fa(GRAU); doc.text("Seite " + i + " von " + n, W - RA, H - 6.4, { align: "right" }); }
+  const roh = doc.output("datauristring");
+  const name = blanko ? "Verschwiegenheitserklaerung_Blanko.pdf"
+    : "Verschwiegenheitserklaerung_" + String(k.firma || "Kunde").replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf";
   return { name, typ: "application/pdf", groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
 }
 
@@ -3863,9 +4050,15 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   /* Dienstleistungsvertrag: vom Vertrieb gewünscht oder von der Kalkulation festgelegt */
   const [dlvNoetig, setDlvNoetig] = useState(!!a.dienstleistungsvertrag || !!(a.kalkulation && a.kalkulation.dienstleistungsvertrag));
   const [dlvLaeuft, setDlvLaeuft] = useState(false);
+  const [dlvHonorar, setDlvHonorar] = useState((a.kalkulation && a.kalkulation.dienstleistungsHonorar) || { mit: true, betrag: "300" });
+  /* „mit Honorar“ und 0 € gilt als ohne Honorar */
+  const dlvHonorarWert = () => {
+    const b = zahlLesen(dlvHonorar.betrag);
+    return dlvHonorar.mit && b > 0 ? { mit: true, betrag: b } : { mit: false };
+  };
   const dlvErzeugen = async () => {
     setDlvLaeuft(true);
-    try { const d = await dienstleistungsvertragPdf(a.kunde || {}); setDlv(d); dateiLaden(d); }
+    try { const d = await dienstleistungsvertragPdf(a.kunde || {}, dlvHonorarWert()); setDlv(d); dateiLaden(d); }
     catch (e) { alert("Der Dienstleistungsvertrag konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
     setDlvLaeuft(false);
   };
@@ -3876,6 +4069,16 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const istKalk = user.rolle === "Kalkulation";
   const istPartner = istBeteiligt(a, user.id);
   const istVM = user.rolle === "Vertragsmanagement";
+  /* Verschwiegenheitserklärung: nur Kalkulation und Geschäftsführung, unterschreibt immer die Geschäftsführung */
+  const ndaSicht = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
+  const [ndaBild, setNdaBild] = useState(null);
+  const [ndaLaeuft, setNdaLaeuft] = useState(false);
+  const ndaLaden = async () => {
+    setNdaLaeuft(true);
+    try { dateiLaden(await ndaPdf(a.kunde || {}, a.nda && a.nda.gf)); }
+    catch (e) { alert("Die Verschwiegenheitserklärung konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+    setNdaLaeuft(false);
+  };
 
   /* bisheriger Versorger je Lieferstelle, für den Vergleich im Angebot */
   const [vorv, setVorv] = useState((a.kalkulation && a.kalkulation.vorversorger) || {});
@@ -3915,6 +4118,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         datum: heute(),
         vollmacht,
         dienstleistungsvertrag: dlvNoetig ? dlv : null,
+        dienstleistungsHonorar: dlvNoetig ? dlvHonorar : null,
         vorversorger: vorv,
         vollmachtBemerkung: vmBemerkung,
         gewaehlt: null,
@@ -4821,6 +5025,31 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     </label>
                     {dlvNoetig && (
                       <div className="space-y-3">
+                        <div className="flex flex-wrap gap-2">
+                          {[[true, "Mit Honorar"], [false, "Ohne Honorar"]].map(([w, label]) => (
+                            <button key={label} onClick={() => setDlvHonorar({ ...dlvHonorar, mit: w })}
+                              className="px-3 py-2 rounded text-sm flex items-center gap-2"
+                              style={dlvHonorar.mit === w ? { background: C.ink, color: "#fff" }
+                                : { background: "#fff", color: C.text, border: "1px solid " + C.line }}>
+                              <span className="w-3.5 h-3.5 rounded-full inline-block"
+                                style={{ border: "2px solid " + (dlvHonorar.mit === w ? "#fff" : C.muted),
+                                         background: dlvHonorar.mit === w ? C.gruen : "transparent" }} />
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        {dlvHonorar.mit ? (
+                          <div className="sm:max-w-xs">
+                            <Feld label="Honorar in € pro Monat (zzgl. USt.)" value={dlvHonorar.betrag}
+                              onChange={(v) => setDlvHonorar({ ...dlvHonorar, betrag: v })} />
+                          </div>
+                        ) : null}
+                        <p className="text-xs" style={{ color: C.muted }}>
+                          {dlvHonorarWert().mit
+                            ? "Servicepauschale " + num(dlvHonorarWert().betrag, 2) + " € pro Monat, entfällt bei Referenzfreigabe. Laufzeit 12 Monate mit Verlängerung."
+                            : "Ohne Honorar: Die Leistungen gelten, solange die Energiebeschaffung über einen von EGC Energie vermittelten Vertrag läuft. So lange läuft auch der Dienstleistungsvertrag."}
+                          {" "}Das Erfolgshonorar von 20 % auf Erstattungen bleibt in beiden Fällen.
+                        </p>
                         <Btn icon={FileSignature} onClick={dlvErzeugen} disabled={dlvLaeuft}>
                           {dlvLaeuft ? "Wird erzeugt …" : dlv ? "Dienstleistungsvertrag neu erzeugen" : "Dienstleistungsvertrag erzeugen (PDF)"}
                         </Btn>
@@ -5561,6 +5790,55 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     </Btn>
                     <Btn variante="hell" onClick={() => setAblehnung({ ...ablehnung, offen: false })}>Abbrechen</Btn>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Verschwiegenheitserklärung (NDA) */}
+          {ndaSicht && (
+            <div className="rounded p-5" style={{ background: C.card,
+                 border: "1px solid " + (a.nda && a.nda.status === "angefordert" ? C.gas : C.line) }}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+                <span className="text-sm">Verschwiegenheitserklärung (NDA)</span>
+                {a.nda && <span className="text-xs" style={{ color: a.nda.status === "unterschrieben" ? C.ok : C.gas }}>
+                  {a.nda.status === "unterschrieben"
+                    ? "unterschrieben von " + a.nda.gf.name + " am " + datum(a.nda.gf.datum)
+                    : "wartet auf Unterschrift der Geschäftsführung"}
+                </span>}
+              </div>
+              <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "62ch" }}>
+                Falls der Kunde sie verlangt: EGC wertet seine Daten aus und gibt sie zur Angebotseinholung an
+                Versorger, aber nicht an Dritte. Unterschreibt immer die Geschäftsführung. Sichtbar nur für
+                Kalkulation und Geschäftsführung.
+              </p>
+              {!a.nda && istKalk && (
+                <Btn variante="hell" icon={FileSignature}
+                  onClick={() => onUpdate({ ...a, nda: { status: "angefordert", von: user.name, datum: heute() } })}>
+                  Bei der Geschäftsführung anfordern
+                </Btn>
+              )}
+              {istGF && (!a.nda || a.nda.status === "angefordert") && (
+                <div className="space-y-3">
+                  {a.nda && <p className="text-sm">Angefordert von {a.nda.von} am {datum(a.nda.datum)}.</p>}
+                  <Unterschrift label="Unterschrift Geschäftsführung" onChange={setNdaBild} />
+                  <Btn icon={Check} disabled={!ndaBild} onClick={() => {
+                    onUpdate({ ...a, nda: { ...(a.nda || { von: user.name, datum: heute() }), status: "unterschrieben",
+                      gf: { name: user.name, datum: heute(), bild: ndaBild } } });
+                    setNdaBild(null);
+                  }}>Unterschreiben</Btn>
+                </div>
+              )}
+              {a.nda && a.nda.status === "unterschrieben" && (
+                <div className="flex flex-wrap gap-2">
+                  <Btn icon={FileText} onClick={ndaLaden} disabled={ndaLaeuft}>
+                    {ndaLaeuft ? "Wird erzeugt …" : "Verschwiegenheitserklärung als PDF"}
+                  </Btn>
+                  {istGF && (
+                    <Btn variante="hell" onClick={() => onUpdate({ ...a, nda: { ...a.nda, status: "angefordert", gf: null } })}>
+                      Neu unterschreiben
+                    </Btn>
+                  )}
                 </div>
               )}
             </div>
@@ -8054,12 +8332,16 @@ function Ablage({ ablage, setAblage, user, start }) {
             try { dateiLaden(await blankoAuftragPdf()); }
             catch (e) { alert("Die Vorlage konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
           }}>Vollmacht blanko (PDF)</Btn>
-          {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && (
-            <Btn variante="hell" icon={FileSignature} onClick={async () => {
-              try { dateiLaden(await dienstleistungsvertragPdf()); }
+          {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && [
+            ["Dienstleistungsvertrag mit Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: true, betrag: null })],
+            ["Dienstleistungsvertrag ohne Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: false })],
+            ["Verschwiegenheitserklärung (blanko)", () => ndaPdf(null)],
+          ].map(([label, erzeugen]) => (
+            <Btn key={label} variante="hell" icon={FileSignature} onClick={async () => {
+              try { dateiLaden(await erzeugen()); }
               catch (e) { alert("Die Vorlage konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
-            }}>Dienstleistungsvertrag blanko (PDF)</Btn>
-          )}
+            }}>{label}</Btn>
+          ))}
           {darfPflegen && (
             <Btn icon={Plus} onClick={() => setEntwurf(leererEintrag(bereich))}>Unterlage hinzufügen</Btn>
           )}
@@ -8387,6 +8669,9 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
       .forEach((a) => zu("ruecksprache", a.id, "Rücksprache erbeten: " + a.kunde.firma, { ansicht: "ruecksprachen", vorgang: a.id }, a.angelegt));
     mitarbeiter.filter((x) => x.status === "pruefung")
       .forEach((x) => zu("stammdaten", x.id, "Stammdaten zur Freigabe: " + x.name, { ansicht: "partner" }, heute()));
+    anfragen.filter((a) => a.nda && a.nda.status === "angefordert")
+      .forEach((a) => zu("nda", a.id, "Verschwiegenheitserklärung unterschreiben: " + a.kunde.firma,
+        { ansicht: "alle", vorgang: a.id }, a.nda.datum));
   }
 
   if (user.rolle === "Vertragsmanagement") {
