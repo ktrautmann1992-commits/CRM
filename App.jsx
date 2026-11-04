@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.10.7 · 04.11.2026 · Angestellte nicht mehr als Handelsvertreter bezeichnet";
+const VERSION = "v5.11 · 04.11.2026 · Eigene Übersicht für Kalkulation, Vertragsmanagement, Finanzbuchhaltung, Leadmanagement";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -11485,11 +11485,10 @@ function faelligkeiten(a) {
   });
 }
 
-function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeffnen }) {
-  const [wer, setWer] = useState("alle");
-  const [nurOffen, setNurOffen] = useState(false);
+/* Alle Auszahlungen je Empfänger und Lieferjahr, mit Fälligkeit und ob schon bezahlt.
+   Grundlage für die Provisionsabrechnung und die Übersicht der Finanzbuchhaltung. */
+function auszahlungsZeilen(anfragen, mitarbeiter, wer = "alle") {
   const abg = anfragen.filter((a) => a.status === "abgeschlossen" && a.kalkulation);
-
   const zeilen = [];
   abg.forEach((a) => {
     faelligkeiten(a).forEach((f) => {
@@ -11512,6 +11511,13 @@ function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeff
       });
     });
   });
+  return zeilen;
+}
+
+function Abrechnung({ anfragen, mitarbeiter, user, setAnfragen, notieren, onOeffnen }) {
+  const [wer, setWer] = useState("alle");
+  const [nurOffen, setNurOffen] = useState(false);
+  const zeilen = auszahlungsZeilen(anfragen, mitarbeiter, wer);
 
   const gefiltert = nurOffen ? zeilen.filter((z) => !z.bezahlt) : zeilen;
 
@@ -11863,7 +11869,219 @@ function Rangliste({ titel, zeilen, hinweis, geld = true }) {
   );
 }
 
-function Dashboard({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, leads,
+/* ------------------------------------------------------------------ */
+/*  Übersicht für den Innendienst                                      */
+/*  Kalkulation, Vertragsmanagement, Finanzbuchhaltung und             */
+/*  Leadmanagement schließen keine Verträge ab und bekommen keine      */
+/*  Provision. Sie sehen, was bei ihnen ansteht, nicht Quote, Menge    */
+/*  oder Provision des Vertriebs.                                      */
+/* ------------------------------------------------------------------ */
+const INNENDIENST = ["Kalkulation", "Vertragsmanagement", "Finanzbuchhaltung", "Leadmanagement"];
+const VM_SCHRITTE = ["Vertrag zu erstellen", "Vertrag versendet", "Vertrag unterschrieben",
+  "Beim Versorger eingereicht", "Lieferung aktiv"];
+
+function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smartmeter, termine,
+                             aufgaben, setAufgaben, onOeffnen, onListe }) {
+  const rolle = user.rolle;
+  const seit = (d) => { const t = tageZwischen(d, heute()); return t == null ? "" : t === 0 ? "seit heute" : "seit " + t + (t === 1 ? " Tag" : " Tagen"); };
+  const st = (x) => anfragen.filter((a) => a.status === x);
+  const offeneProbleme = (probleme || []).filter((p) => p.status !== "erledigt");
+
+  /* Kachel: Zahl, Farbe, Ziel (Ansicht oder Liste); 0 wird blass dargestellt */
+  const Kachel = ({ k, v, farbe, klick, klein }) => (
+    <button onClick={klick} disabled={!klick} className="rounded p-4 text-left w-full"
+      style={{ background: C.card, border: "1px solid " + (v && farbe === C.warn ? C.warn : C.line),
+               cursor: klick ? "pointer" : "default" }}>
+      <div className="text-xs mb-2" style={{ color: C.muted }}>{k}</div>
+      <div className="text-2xl" style={{ color: v ? (farbe || C.text) : C.muted, fontVariantNumeric: "tabular-nums" }}>{v}</div>
+      {klein && <div className="text-xs mt-1" style={{ color: C.muted }}>{klein}</div>}
+    </button>
+  );
+  const Karte = ({ titel, rechts, children }) => (
+    <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+      <div className="flex items-baseline justify-between gap-3 px-4 py-3" style={{ borderBottom: "1px solid " + C.line }}>
+        <span className="text-sm">{titel}</span>{rechts}
+      </div>
+      {children}
+    </div>
+  );
+  const Reihe = ({ i, links, unten, rechts, klick }) => (
+    <button onClick={klick} disabled={!klick} className="w-full text-left flex items-center gap-4 px-4 py-3 text-sm"
+      style={{ borderTop: i ? "1px solid " + C.line : "none", cursor: klick ? "pointer" : "default" }}>
+      <span className="flex-1 min-w-0">{links}
+        {unten && <span className="block text-xs" style={{ color: C.muted }}>{unten}</span>}
+      </span>
+      <span className="text-xs" style={{ color: C.muted, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{rechts}</span>
+    </button>
+  );
+  const Leer = ({ text }) => <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>{text}</div>;
+  const liste = (titel, l) => () => onListe(titel, l);
+  const ansicht = (id) => () => onOeffnen(null, id);
+
+  let kacheln = [], arbeit = null, hinweis = "";
+
+  if (rolle === "Kalkulation") {
+    hinweis = "Anfragen kalkulieren, Angebote zurückgeben, Aufträge beim Versorger einreichen und bestätigen.";
+    const neu = st("eingereicht"), angefragt = st("angefragt"), klaer = st("klaerfall"),
+          auftraege = st("uebermittelt"), eingereicht = st("einreichung");
+    const sm = (smartmeter || []).filter((v) => v.status === "eingereicht");
+    kacheln = [
+      { k: "Neue Anfragen", v: neu.length, farbe: C.strom, klick: liste("Neue Anfragen", neu) },
+      { k: "Beim Versorger angefragt", v: angefragt.length, farbe: C.gas, klick: liste("Beim Versorger angefragt", angefragt) },
+      { k: "Neue Aufträge einreichen", v: auftraege.length, farbe: C.warn, klick: ansicht("auftraege") },
+      { k: "Bestätigung vom Versorger offen", v: eingereicht.length, farbe: C.gas, klick: ansicht("versorger") },
+      { k: "Unterlagen beim Vertrieb angefordert", v: klaer.length, klick: liste("Unterlagen angefordert", klaer) },
+      { k: "Smartmeter zu prüfen", v: sm.length, farbe: C.strom, klick: ansicht("smartmeter") },
+    ];
+    const reihe = [...auftraege, ...neu, ...angefragt].sort((x, y) => (x.angelegt || "").localeCompare(y.angelegt || ""));
+    arbeit = (
+      <Karte titel="Als Nächstes" rechts={<span className="text-xs" style={{ color: C.muted }}>älteste zuerst</span>}>
+        {reihe.length === 0 ? <Leer text="Nichts offen. Alle Anfragen sind bearbeitet." /> :
+          reihe.slice(0, 12).map((a, i) => (
+            <Reihe key={a.id} i={i} links={a.kunde.firma}
+              unten={STATUS[a.status].label + " · " + a.partnerName + " · " + a.id}
+              rechts={seit(a.angelegt)} klick={() => onOeffnen(a.id)} />
+          ))}
+      </Karte>
+    );
+  }
+
+  if (rolle === "Vertragsmanagement") {
+    hinweis = "Abgeschlossene Verträge an den Versorger weiterleiten und bis zur Lieferung begleiten.";
+    const vertraege = st("abgeschlossen");
+    const schritt = (a) => VM_SCHRITTE.includes(a.vertragsStatus) ? a.vertragsStatus : "Vertrag zu erstellen";
+    const je = (x) => vertraege.filter((a) => schritt(a) === x);
+    const laufenAus = vertraege.filter((a) => {
+      const rest = monateBis(vertragsende(a));
+      return rest != null && rest >= 0 && rest <= VERLAENGERUNG_VORLAUF[1];
+    });
+    const stornos = offeneProbleme.filter((p) => p.art === "Storno");
+    kacheln = [
+      { k: "Neu: Vertrag zu erstellen", v: je("Vertrag zu erstellen").length, farbe: C.warn,
+        klick: liste("Vertrag zu erstellen", je("Vertrag zu erstellen")) },
+      { k: "Vertrag versendet", v: je("Vertrag versendet").length, farbe: C.gas,
+        klick: liste("Vertrag versendet", je("Vertrag versendet")) },
+      { k: "Unterschrieben, an Versorger weiterleiten", v: je("Vertrag unterschrieben").length, farbe: C.warn,
+        klick: liste("Unterschrieben, an den Versorger weiterleiten", je("Vertrag unterschrieben")) },
+      { k: "Beim Versorger eingereicht", v: je("Beim Versorger eingereicht").length, farbe: C.strom,
+        klick: liste("Beim Versorger eingereicht", je("Beim Versorger eingereicht")) },
+      { k: "Lieferung aktiv", v: je("Lieferung aktiv").length, farbe: C.ok,
+        klick: liste("Lieferung aktiv", je("Lieferung aktiv")) },
+      { k: "Laufen in 6 Monaten aus", v: laufenAus.length, farbe: C.gas, klick: liste("Laufen in 6 Monaten aus", laufenAus) },
+      { k: "Problemfälle offen", v: offeneProbleme.filter((p) => p.art !== "Storno").length, farbe: C.warn, klick: ansicht("probleme") },
+      { k: "Stornierungen offen", v: stornos.length, farbe: C.warn, klick: ansicht("stornos") },
+    ];
+    const reihe = vertraege.filter((a) => ["Vertrag zu erstellen", "Vertrag versendet", "Vertrag unterschrieben"].includes(schritt(a)))
+      .sort((x, y) => VM_SCHRITTE.indexOf(schritt(y)) - VM_SCHRITTE.indexOf(schritt(x))
+        || ((x.provisionErhalten || {}).datum || x.angelegt || "").localeCompare((y.provisionErhalten || {}).datum || y.angelegt || ""));
+    arbeit = (
+      <Karte titel="Noch nicht beim Versorger" rechts={<span className="text-xs" style={{ color: C.muted }}>{reihe.length} {reihe.length === 1 ? "Vertrag" : "Verträge"}</span>}>
+        {reihe.length === 0 ? <Leer text="Alle abgeschlossenen Verträge sind beim Versorger." /> :
+          reihe.slice(0, 12).map((a, i) => (
+            <Reihe key={a.id} i={i} links={a.kunde.firma}
+              unten={schritt(a) + " · " + a.partnerName + " · " + a.id}
+              rechts={a.provisionErhalten ? "abgeschlossen " + datum(a.provisionErhalten.datum) : ""}
+              klick={() => onOeffnen(a.id)} />
+          ))}
+      </Karte>
+    );
+  }
+
+  if (rolle === "Finanzbuchhaltung") {
+    hinweis = "Provisionen auszahlen, Fälligkeiten im Blick behalten, Stornierungen verrechnen.";
+    const zeilen = auszahlungsZeilen(anfragen, mitarbeiter);
+    const offen = zeilen.filter((z) => !z.bezahlt), faellig = offen.filter((z) => z.ueberfaellig);
+    const jahr = String(new Date().getFullYear());
+    const bezahltJahr = zeilen.filter((z) => z.bezahlt && String(z.datum || "").startsWith(jahr));
+    const summe = (l) => l.reduce((t, z) => t + z.person.betrag, 0);
+    const wartetVersorger = st("bestaetigt");
+    const stornos = offeneProbleme.filter((p) => p.art === "Storno");
+    kacheln = [
+      { k: "Auszahlungen fällig", v: faellig.length, farbe: C.warn, klein: eur(summe(faellig)), klick: ansicht("abrechnung") },
+      { k: "Offen, noch nicht fällig", v: offen.length - faellig.length, farbe: C.gas,
+        klein: eur(summe(offen) - summe(faellig)), klick: ansicht("abrechnung") },
+      { k: "Ausgezahlt " + jahr, v: bezahltJahr.length, farbe: C.ok, klein: eur(summe(bezahltJahr)), klick: ansicht("abrechnung") },
+      { k: "Zahlung vom Versorger ausstehend", v: wartetVersorger.length, farbe: C.strom,
+        klick: liste("Vom Versorger bestätigt, Provision noch nicht eingegangen", wartetVersorger) },
+      { k: "Stornierungen offen", v: stornos.length, farbe: C.warn, klick: ansicht("stornos") },
+    ];
+    const reihe = [...faellig].sort((x, y) => (x.faellig || "").localeCompare(y.faellig || ""));
+    arbeit = (
+      <Karte titel="Fällige Auszahlungen"
+        rechts={<button className="text-xs" style={{ color: C.strom }} onClick={ansicht("abrechnung")}>zur Abrechnung</button>}>
+        {reihe.length === 0 ? <Leer text="Keine fälligen Auszahlungen." /> :
+          reihe.slice(0, 12).map((z, i) => (
+            <Reihe key={z.key} i={i} links={z.person.name + " · " + eur(z.person.betrag)}
+              unten={z.anfrage.kunde.firma + " · Lieferjahr " + z.jahr + " · " + z.person.rolle
+                + ((mitarbeiter.find((m) => m.id === z.person.id) || {}).angestellt ? " · über die Lohnabrechnung" : "")}
+              rechts={"fällig " + datum(z.faellig)} klick={ansicht("abrechnung")} />
+          ))}
+      </Karte>
+    );
+  }
+
+  if (rolle === "Leadmanagement") {
+    hinweis = "Leads aufnehmen, an den Vertrieb verteilen und nachhalten.";
+    const alle = leads || [];
+    const sp = (x) => alle.filter((l) => leadSpalte(l) === x);
+    const frei = alle.filter((l) => !l.zugewiesen && !["auftrag", "verloren"].includes(leadSpalte(l)));
+    const wv = alle.filter((l) => leadSpalte(l) === "wiedervorlage");
+    kacheln = [
+      { k: "Neue Leads", v: sp("neu").length, farbe: C.ok, klick: ansicht("leads") },
+      { k: "Noch keinem Partner zugewiesen", v: frei.length, farbe: C.warn, klick: ansicht("leads") },
+      { k: "Im Erstgespräch", v: sp("erstgespraech").length, farbe: C.strom, klick: ansicht("leads") },
+      { k: "Angebot und Verhandlung", v: sp("angebot").length + sp("verhandlung").length, farbe: C.gas, klick: ansicht("leads") },
+      { k: "Wiedervorlage", v: wv.length, farbe: C.gas, klick: ansicht("leads") },
+      { k: "Zum Auftrag geworden", v: sp("auftrag").length, farbe: C.ok, klick: ansicht("leads") },
+    ];
+    arbeit = (
+      <Karte titel="Noch zu verteilen" rechts={<span className="text-xs" style={{ color: C.muted }}>{frei.length} {frei.length === 1 ? "Lead" : "Leads"}</span>}>
+        {frei.length === 0 ? <Leer text="Alle Leads sind verteilt." /> :
+          frei.sort((x, y) => (x.angelegt || "").localeCompare(y.angelegt || "")).slice(0, 12).map((l, i) => (
+            <Reihe key={l.id} i={i} links={l.firma || l.ansprechpartner || l.id}
+              unten={(LEAD_STATUS[leadSpalte(l)] || {}).label + (l.ort ? " · " + l.ort : "")}
+              rechts={seit(l.angelegt)} klick={ansicht("leads")} />
+          ))}
+      </Karte>
+    );
+  }
+
+  const wocheEnde = (() => { const d = new Date(); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10); })();
+  const meineTermine = (termine || []).filter((t) => t.fuerId === user.id && t.datum >= heute() && t.datum <= wocheEnde)
+    .sort((a, b) => (a.datum + (a.zeit || "")).localeCompare(b.datum + (b.zeit || "")));
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="text-lg">Guten Tag, {String(user.name || "").replace(/^Team\s+/, "Team ")}</div>
+        <div className="text-sm" style={{ color: C.muted }}>{hinweis}</div>
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {kacheln.map((x) => <Kachel key={x.k} {...x} />)}
+      </div>
+      {arbeit}
+      <Aufgaben aufgaben={aufgaben} setAufgaben={setAufgaben} user={user}
+        mitarbeiter={mitarbeiter} kompakt onOeffnen={onOeffnen} />
+      <Karte titel="Termine"
+        rechts={<button className="text-xs" style={{ color: C.strom }} onClick={ansicht("kalender")}>Kalender öffnen</button>}>
+        {meineTermine.length === 0 ? <Leer text="Diese Woche steht nichts an." /> :
+          meineTermine.map((t, i) => (
+            <Reihe key={t.id} i={i} links={t.titel} unten={(t.zeit ? t.zeit + " Uhr · " : "") + (t.ort || "")}
+              rechts={t.datum === heute() ? "heute" : datum(t.datum)} klick={ansicht("kalender")} />
+          ))}
+      </Karte>
+    </div>
+  );
+}
+
+/* Übersicht: Innendienst und Vertrieb haben je eine eigene */
+function Dashboard(props) {
+  return INNENDIENST.includes(props.user.rolle)
+    ? <ArbeitsUebersicht key={props.user.id} {...props} />
+    : <VertriebsUebersicht key={props.user.id} {...props} />;
+}
+
+function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, leads,
                     setMitarbeiter, aufgaben, setAufgaben, bonusziele }) {
   const [bereich, setBereich] = useState("meine");
   const [anpassen, setAnpassen] = useState(false);
@@ -13031,6 +13249,7 @@ export default function App() {
       <Dashboard anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
         termine={termine} leads={leads} setMitarbeiter={setMitarbeiter}
         aufgaben={aufgaben} setAufgaben={setAufgaben} bonusziele={bonusziele}
+        probleme={probleme} smartmeter={smartmeter}
         onOeffnen={(id, ziel) => { if (ziel) { setOffen(null); setAnsicht(ziel); } else setOffen(id); }}
         onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />
     );
