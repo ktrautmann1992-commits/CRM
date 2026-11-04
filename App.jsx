@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.13 · 04.11.2026 · Dienstleistungsvertrag mit oder ohne Honorar, Verschwiegenheitserklärung";
+const VERSION = "v5.13.1 · 04.11.2026 · Referenzfreigabe: erlassen, erstes Jahr oder vergünstigt";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1202,6 +1202,29 @@ const ladeJsPdf = () => {
 const dlvText = (honorar = { mit: true, betrag: 300 }) => {
   const mit = honorar.mit !== false;
   const P = honorar.betrag == null ? "________ EUR" : num(honorar.betrag, 2) + " EUR";
+  /* Referenzfreigabe: Servicepauschale komplett erlassen, nur im ersten Jahr erlassen oder vergünstigt */
+  const REF = ["komplett", "jahr", "rabatt"].includes(honorar.referenz) ? honorar.referenz : "komplett";
+  const R = honorar.rabattBetrag == null || honorar.rabattBetrag === "" ? "________ EUR" : num(honorar.rabattBetrag, 2) + " EUR";
+  const refKurz = {
+    komplett: "Die Servicepauschale von " + P + " für die Energiebeschaffung entfällt vollständig, solange die Referenzfreigabe besteht",
+    jahr: "Die Servicepauschale von " + P + " für die Energiebeschaffung entfällt in den ersten 12 Monaten der Vertragslaufzeit, solange die Referenzfreigabe besteht; danach wird sie in voller Höhe berechnet",
+    rabatt: "Solange die Referenzfreigabe besteht, ermäßigt sich die Servicepauschale für die Energiebeschaffung auf " + R + " zzgl. gesetzlicher Umsatzsteuer pro Monat",
+  }[REF];
+  const ref41 = {
+    komplett: "Diese Servicepauschale wird jedoch nur berechnet, wenn der Auftraggeber keine Referenzfreigabe gemäß Ziffer 5 erteilt bzw. eine erteilte Referenzfreigabe später widerruft.",
+    jahr: "Erteilt der Auftraggeber die Referenzfreigabe gemäß Ziffer 5, wird die Servicepauschale in den ersten 12 Monaten der Vertragslaufzeit nicht berechnet; ab dem 13. Vertragsmonat oder nach einem Widerruf der Referenzfreigabe wird sie in voller Höhe berechnet.",
+    rabatt: "Erteilt der Auftraggeber die Referenzfreigabe gemäß Ziffer 5, ermäßigt sich die Servicepauschale für die Dauer der Freigabe auf " + R + " zzgl. gesetzlicher Umsatzsteuer pro Monat; nach einem Widerruf der Referenzfreigabe wird sie in voller Höhe berechnet.",
+  }[REF];
+  const ref51 = {
+    komplett: "entfällt ausschließlich die monatliche Servicepauschale von " + P + " zzgl. gesetzlicher Umsatzsteuer für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 4.1 vollständig für die Dauer dieser Freigabe.",
+    jahr: "entfällt ausschließlich die monatliche Servicepauschale von " + P + " zzgl. gesetzlicher Umsatzsteuer für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 4.1 für die ersten 12 Monate der Vertragslaufzeit, längstens für die Dauer dieser Freigabe.",
+    rabatt: "ermäßigt sich ausschließlich die monatliche Servicepauschale für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 4.1 für die Dauer dieser Freigabe von " + P + " auf " + R + ", jeweils zzgl. gesetzlicher Umsatzsteuer.",
+  }[REF];
+  const refJa = {
+    komplett: "Die monatliche Servicepauschale von " + P + " zzgl. USt. für die Energiebeschaffung entfällt.",
+    jahr: "Die monatliche Servicepauschale von " + P + " zzgl. USt. für die Energiebeschaffung entfällt in den ersten 12 Monaten.",
+    rabatt: "Die monatliche Servicepauschale für die Energiebeschaffung ermäßigt sich von " + P + " auf " + R + " zzgl. USt.",
+  }[REF];
   const LZ = mit ? "6" : "5";   /* Ziffer der Laufzeit: ohne Honorar entfällt die Referenzregelung */
   const LAUF = "solange die Energiebeschaffung des Auftraggebers über einen von EGC Energie vermittelten Energieliefervertrag erfolgt";
   const t = {
@@ -1210,8 +1233,9 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
   mit,
   konditionen: [
     ...(mit ? [
-      ["Energiebeschaffung", P + " zzgl. gesetzlicher Umsatzsteuer pro Monat; nur wenn keine Referenzfreigabe besteht"],
-      ["Referenzkunde", "Die Servicepauschale von " + P + " für die Energiebeschaffung entfällt vollständig, solange die Referenzfreigabe besteht"],
+      ["Energiebeschaffung", P + " zzgl. gesetzlicher Umsatzsteuer pro Monat" + (REF === "komplett"
+        ? "; nur wenn keine Referenzfreigabe besteht" : "; bei Referenzfreigabe gilt die Regelung „Referenzkunde“")],
+      ["Referenzkunde", refKurz],
     ] : [
       ["Energiebeschaffung", "Ohne Servicepauschale. Die Leistungen dieses Vertrags gelten, " + LAUF + "."],
       ["Laufzeit", "Für die Dauer der über EGC Energie vermittelten Energielieferverträge des Auftraggebers"],
@@ -1242,14 +1266,14 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
       "Der Auftraggeber bestätigt, dass die übermittelten Angaben nach bestem Wissen vollständig und richtig sind. Verzögerungen oder Nachteile, die aus fehlenden, verspäteten oder unrichtigen Angaben entstehen, fallen nicht in den Verantwortungsbereich des Auftragnehmers."]],
     ["4. Vergütung", [
       mit
-        ? "4.1 Vergütung für Energiebeschaffung und laufende Betreuung. Ausschließlich für die Leistungen gemäß Ziffer 2.1 wird eine monatliche Servicepauschale in Höhe von " + P + " zzgl. gesetzlicher Umsatzsteuer vereinbart. Diese Servicepauschale wird jedoch nur berechnet, wenn der Auftraggeber keine Referenzfreigabe gemäß Ziffer 5 erteilt bzw. eine erteilte Referenzfreigabe später widerruft. Die Abrechnung erfolgt monatlich im Voraus; Rechnungen sind innerhalb von 14 Kalendertagen nach Zugang fällig."
+        ? "4.1 Vergütung für Energiebeschaffung und laufende Betreuung. Ausschließlich für die Leistungen gemäß Ziffer 2.1 wird eine monatliche Servicepauschale in Höhe von " + P + " zzgl. gesetzlicher Umsatzsteuer vereinbart. " + ref41 + " Die Abrechnung erfolgt monatlich im Voraus; Rechnungen sind innerhalb von 14 Kalendertagen nach Zugang fällig."
         : "4.1 Energiebeschaffung und laufende Betreuung ohne Servicepauschale. Für die Leistungen gemäß Ziffer 2.1 wird keine Servicepauschale berechnet. Die Leistungen gelten für den Auftraggeber, " + LAUF + ".",
       "4.2 Erfolgshonorar ausschließlich für Erstattungs- und Entlastungsleistungen. Für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 2.1 fällt kein Erfolgshonorar an. Das Erfolgshonorar in Höhe von 20 % zzgl. gesetzlicher Umsatzsteuer wird ausschließlich auf tatsächlich realisierte Erstattungen oder bestätigte finanzielle Entlastungen erhoben, die aus den unter Ziffer 2.2 beschriebenen und über den Auftragnehmer geprüften oder bearbeiteten Erstattungs- und Entlastungsthemen resultieren.",
       "Als realisierter wirtschaftlicher Vorteil im Sinne von Ziffer 4.2 gilt ausschließlich ein dem Auftraggeber tatsächlich ausgezahlter, gutgeschriebener, verrechneter oder von der zuständigen Stelle bzw. dem Vertragspartner verbindlich bestätigter Erstattungs- oder Entlastungsbetrag aus einer Prüfung bzw. Bearbeitung gemäß Ziffer 2.2. Eine reine Potenzialberechnung, unverbindliche Schätzung oder bloße Empfehlung löst kein Erfolgshonorar aus.",
       "Das Erfolgshonorar wird mit Realisierung bzw. verbindlicher Bestätigung des jeweiligen wirtschaftlichen Vorteils aus den Leistungen gemäß Ziffer 2.2 fällig. Der Auftraggeber informiert den Auftragnehmer unverzüglich über entsprechende Bescheide, Gutschriften, Verrechnungen oder sonstige Bestätigungen und stellt auf Anfrage geeignete Nachweise zur Verfügung."]],
     ...(!mit ? [] : [["5. Referenzkundenregelung", [
-      "5.1 Erteilt der Auftraggeber dem Auftragnehmer die nachstehende Referenzfreigabe, entfällt ausschließlich die monatliche Servicepauschale von " + P + " zzgl. gesetzlicher Umsatzsteuer für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 4.1 vollständig für die Dauer dieser Freigabe. Das Erfolgshonorar für Erstattungs- und Entlastungsleistungen gemäß Ziffer 4.2 bleibt hiervon unberührt.",
-      "5.2 Die Referenzfreigabe berechtigt den Auftragnehmer, den Auftraggeber als Referenzkunden namentlich zu benennen, insbesondere in Vertriebsunterlagen, Präsentationen, auf der Unternehmenswebseite sowie gegenüber Interessenten und Geschäftspartnern. Die Nutzung eines Logos, von Marken, konkreten Einsparbeträgen, Zitaten, Fallstudien oder weitergehenden Kundendaten bedarf einer gesonderten Freigabe in Textform.",
+      "5.1 Erteilt der Auftraggeber dem Auftragnehmer die nachstehende Referenzfreigabe, " + ref51 + " Das Erfolgshonorar für Erstattungs- und Entlastungsleistungen gemäß Ziffer 4.2 bleibt hiervon unberührt.",
+      "5.2 Die Referenzfreigabe berechtigt den Auftragnehmer ausschließlich, den Auftraggeber mit seinem Firmennamen als Referenzkunden zu nennen, etwa auf der Unternehmenswebseite, in Vertriebsunterlagen und Präsentationen sowie gegenüber Interessenten und Geschäftspartnern, verbunden mit dem Hinweis, dass der Auftragnehmer den Auftraggeber in Energiefragen betreut. Angaben zu Beschaffungsmodell, Energiepreisen, Konditionen, Jahresverbrauch, Einsparungen oder sonstigen Vertragsinhalten werden dabei nicht genannt. Die Nutzung eines Logos, von Marken, Zitaten oder Fallstudien bedarf einer gesonderten Freigabe in Textform.",
       "5.3 Die Referenzfreigabe kann vom Auftraggeber jederzeit mit Wirkung für die Zukunft in Textform widerrufen werden. Ab dem auf den Widerruf folgenden Kalendermonat wird für die Energiebeschaffung und laufende Betreuung die monatliche Servicepauschale von " + P + " zzgl. gesetzlicher Umsatzsteuer berechnet. Bereits veröffentlichte Druckunterlagen müssen nicht vernichtet werden; digitale Nennungen werden innerhalb einer angemessenen Frist entfernt."]]]),
     [LZ + ". Laufzeit und Kündigung", [
       mit
@@ -1267,7 +1291,10 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
       "Änderungen und Ergänzungen dieses Vertrages bedürfen mindestens der Textform, soweit nicht gesetzlich eine strengere Form vorgeschrieben ist. Es gilt das Recht der Bundesrepublik Deutschland. Soweit gesetzlich zulässig und beide Parteien Kaufleute sind, wird als Gerichtsstand der Sitz des Auftragnehmers vereinbart.",
       "Sollten einzelne Bestimmungen dieses Vertrages ganz oder teilweise unwirksam oder undurchführbar sein oder werden, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt. Anstelle der unwirksamen oder undurchführbaren Bestimmung gilt die gesetzliche Regelung."]],
   ],
-  freigabeJa: "Ja, wir erteilen die Referenzfreigabe gemäß Ziffer 5. Die monatliche Servicepauschale von " + P + " zzgl. USt. für die Energiebeschaffung entfällt. Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt bestehen.",
+  freigabeUnter: { komplett: "OPTIONALE FREIGABE ZUR BEFREIUNG VON DER SERVICEPAUSCHALE",
+    jahr: "OPTIONALE FREIGABE ZUR BEFREIUNG IM ERSTEN VERTRAGSJAHR",
+    rabatt: "OPTIONALE FREIGABE ZUR ERMÄSSIGUNG DER SERVICEPAUSCHALE" }[REF],
+  freigabeJa: "Ja, wir erteilen die Referenzfreigabe gemäß Ziffer 5 (Nennung nur mit Firmennamen, ohne Preise, Verbrauch oder Beschaffungsmodell). " + refJa + " Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt bestehen.",
   freigabeNein: "Nein, wir erteilen keine Referenzfreigabe. Für die Energiebeschaffung wird die monatliche Servicepauschale von " + P + " zzgl. USt. berechnet. Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt hiervon unberührt.",
   };
   return t;
@@ -1401,7 +1428,7 @@ async function dienstleistungsvertragPdf(kunde = null, honorar = { mit: true, be
   /* ---------- Referenzfreigabe und Unterschriften ---------- */
   y = neueSeite();
   schrift(16, true); fa(NAVY); doc.text(DLV_TEXT.mit ? "Referenzfreigabe" : "Unterschriften", RA, y + 2);
-  if (DLV_TEXT.mit) { schrift(8.5, true); fa(GRUEN1); doc.text("OPTIONALE FREIGABE ZUR BEFREIUNG VON DER SERVICEPAUSCHALE", RA, y + 9, { charSpace: 0.3 }); }
+  if (DLV_TEXT.mit) { schrift(8.5, true); fa(GRUEN1); doc.text(DLV_TEXT.freigabeUnter, RA, y + 9, { charSpace: 0.3 }); }
   y += DLV_TEXT.mit ? 20 : 12;
   (DLV_TEXT.mit ? [DLV_TEXT.freigabeJa, DLV_TEXT.freigabeNein] : []).forEach((t) => {
     schrift(9.2); const z = doc.splitTextToSize(t, BR - 20);
@@ -4054,7 +4081,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   /* „mit Honorar“ und 0 € gilt als ohne Honorar */
   const dlvHonorarWert = () => {
     const b = zahlLesen(dlvHonorar.betrag);
-    return dlvHonorar.mit && b > 0 ? { mit: true, betrag: b } : { mit: false };
+    const ref = dlvHonorar.referenz || "komplett";
+    const rb = zahlLesen(dlvHonorar.rabattBetrag);
+    return dlvHonorar.mit && b > 0
+      ? { mit: true, betrag: b, referenz: ref, rabattBetrag: ref === "rabatt" && !isNaN(rb) && rb > 0 ? rb : null }
+      : { mit: false };
   };
   const dlvErzeugen = async () => {
     setDlvLaeuft(true);
@@ -5039,14 +5070,38 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                           ))}
                         </div>
                         {dlvHonorar.mit ? (
-                          <div className="sm:max-w-xs">
-                            <Feld label="Honorar in € pro Monat (zzgl. USt.)" value={dlvHonorar.betrag}
-                              onChange={(v) => setDlvHonorar({ ...dlvHonorar, betrag: v })} />
+                          <div className="space-y-3">
+                            <div className="sm:max-w-xs">
+                              <Feld label="Honorar in € pro Monat (zzgl. USt.)" value={dlvHonorar.betrag}
+                                onChange={(v) => setDlvHonorar({ ...dlvHonorar, betrag: v })} />
+                            </div>
+                            <div>
+                              <span className="block text-xs mb-1" style={{ color: C.muted }}>Wenn der Kunde die Referenzfreigabe erteilt:</span>
+                              <div className="flex flex-wrap gap-2">
+                                {[["komplett", "Komplett erlassen"], ["jahr", "Nur im ersten Jahr erlassen"], ["rabatt", "Vergünstigt"]].map(([w, label]) => (
+                                  <button key={w} onClick={() => setDlvHonorar({ ...dlvHonorar, referenz: w })}
+                                    className="px-3 py-1.5 rounded text-sm"
+                                    style={(dlvHonorar.referenz || "komplett") === w ? { background: C.ink, color: "#fff" }
+                                      : { background: "#fff", color: C.text, border: "1px solid " + C.line }}>{label}</button>
+                                ))}
+                              </div>
+                            </div>
+                            {dlvHonorar.referenz === "rabatt" && (
+                              <div className="sm:max-w-xs">
+                                <Feld label="Vergünstigte Servicepauschale in € pro Monat" value={dlvHonorar.rabattBetrag || ""}
+                                  onChange={(v) => setDlvHonorar({ ...dlvHonorar, rabattBetrag: v })}
+                                  fehler={dlvHonorar.rabattBetrag && zahlLesen(dlvHonorar.rabattBetrag) >= zahlLesen(dlvHonorar.betrag)
+                                    ? "Muss unter dem Honorar liegen" : null} />
+                              </div>
+                            )}
                           </div>
                         ) : null}
                         <p className="text-xs" style={{ color: C.muted }}>
                           {dlvHonorarWert().mit
-                            ? "Servicepauschale " + num(dlvHonorarWert().betrag, 2) + " € pro Monat, entfällt bei Referenzfreigabe. Laufzeit 12 Monate mit Verlängerung."
+                            ? "Servicepauschale " + num(dlvHonorarWert().betrag, 2) + " € pro Monat. Bei Referenzfreigabe "
+                              + ({ komplett: "entfällt sie ganz", jahr: "entfällt sie im ersten Jahr",
+                                   rabatt: "kostet sie " + (dlvHonorarWert().rabattBetrag ? num(dlvHonorarWert().rabattBetrag, 2) + " €" : "den eingetragenen Betrag") }[dlvHonorarWert().referenz])
+                              + ". Laufzeit 12 Monate mit Verlängerung."
                             : "Ohne Honorar: Die Leistungen gelten, solange die Energiebeschaffung über einen von EGC Energie vermittelten Vertrag läuft. So lange läuft auch der Dienstleistungsvertrag."}
                           {" "}Das Erfolgshonorar von 20 % auf Erstattungen bleibt in beiden Fällen.
                         </p>
