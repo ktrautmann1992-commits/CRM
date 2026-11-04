@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.11 · 04.11.2026 · Eigene Übersicht für Kalkulation, Vertragsmanagement, Finanzbuchhaltung, Leadmanagement";
+const VERSION = "v5.11.1 · 04.11.2026 · Kalkulationen im Überblick";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2705,7 +2705,7 @@ function DateiChip({ datei, label, klein }) {
   const inhalt = (
     <>
       <FileText size={klein ? 14 : 15} style={{ color: datei.url || datei.pfad ? C.strom : C.muted }} />
-      <span className="flex-1 truncate">{datei.name}</span>
+      <span className="flex-1 min-w-0 truncate">{datei.name}</span>
       {datei.groesse ? (
         <span className="text-xs" style={{ color: C.muted }}>{kb(datei.groesse)}</span>
       ) : null}
@@ -11870,6 +11870,105 @@ function Rangliste({ titel, zeilen, hinweis, geld = true }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Alle bisher erstellten Kalkulationen, je Kunde mit allen Varianten */
+/* ------------------------------------------------------------------ */
+function Kalkulationen({ anfragen, onOeffnen }) {
+  const [suche, setSuche] = useState("");
+  const [filter, setFilter] = useState("alle");
+  const GRUPPE = {
+    offen: { label: "Beim Kunden", st: ["angebot", "klaerfall", "ruecksprache"] },
+    auftrag: { label: "Auftrag erteilt", st: ["uebermittelt", "einreichung", "bestaetigt", "abgeschlossen"] },
+    abgelehnt: { label: "Nicht abgeschlossen", st: ["abgelehnt"] },
+  };
+  const norm = (t) => String(t || "").toLowerCase();
+  const alle = anfragen.filter((a) => a.kalkulation)
+    .sort((x, y) => (y.kalkulation.datum || "").localeCompare(x.kalkulation.datum || ""));
+  const treffer = alle.filter((a) => {
+    if (filter !== "alle" && !GRUPPE[filter].st.includes(a.status)) return false;
+    if (!suche.trim()) return true;
+    const t = norm(suche);
+    return [a.kunde.firma, a.kunde.ort, a.id, a.partnerName, a.kalkulation.bearbeiter,
+      ...varianten(a).flatMap((v) => [v.versorger, v.produkt]),
+      ...a.lieferstellen.flatMap((l) => [l.maloId, l.zaehlernummer, l.ort])].some((x) => norm(x).includes(t));
+  });
+  const anzahl = (id) => id === "alle" ? alle.length : alle.filter((a) => GRUPPE[id].st.includes(a.status)).length;
+  const gewaehltIds = (a) => gewaehlte(a).map((v) => v.id);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded p-3 space-y-3" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <Feld label="Suchen: Kunde, Ort, Versorger, Vertriebspartner, MaLo, Zähler" value={suche} onChange={setSuche} />
+        <div className="flex flex-wrap gap-2">
+          {[["alle", "Alle"], ...Object.entries(GRUPPE).map(([id, g]) => [id, g.label])].map(([id, label]) => (
+            <button key={id} onClick={() => setFilter(id)} className="px-3 py-1.5 rounded text-sm"
+              style={filter === id ? { background: C.ink, color: "#fff" }
+                : { background: "#fff", color: C.text, border: "1px solid " + C.line }}>
+              {label} ({anzahl(id)})
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {treffer.length === 0 ? (
+        <div className="rounded p-8 text-center text-sm" style={{ border: "1px dashed " + C.line, color: C.muted }}>
+          {alle.length === 0 ? "Noch keine Kalkulationen erstellt." : "Keine Kalkulation passt zur Suche."}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {treffer.map((a) => {
+            const k = a.kalkulation, gw = gewaehltIds(a);
+            return (
+              <div key={a.id} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+                <button className="w-full text-left" onClick={() => onOeffnen(a.id)}>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-sm">{a.kunde.firma || a.id}</span>
+                    <span className="text-xs px-2 py-0.5 rounded"
+                      style={{ color: (STATUS[a.status] || {}).color, border: "1px solid " + C.line }}>
+                      {(STATUS[a.status] || {}).label}
+                    </span>
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: C.muted }}>
+                    {[a.id, a.kunde.ort, "Vertrieb: " + (a.partnerName || "–"),
+                      "kalkuliert " + datum(k.datum) + (k.bearbeiter ? " von " + k.bearbeiter : ""),
+                      num(verbrauchGesamt(a)) + " kWh/Jahr"].filter(Boolean).join(" · ")}
+                  </div>
+                </button>
+                <div className="mt-3 space-y-2">
+                  {varianten(a).map((v, i) => (
+                    <div key={v.id || i} className="rounded px-3 py-2 text-sm"
+                      style={{ background: gw.includes(v.id) ? "#F1F7F0" : "#F6F8FA",
+                               border: "1px solid " + (gw.includes(v.id) ? C.ok : C.line) }}>
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span>Variante {i + 1}: {[v.versorger, v.produkt].filter(Boolean).join(" · ") || "–"}</span>
+                        {gw.includes(v.id) && <span className="text-xs" style={{ color: C.ok }}>vom Kunden gewählt</span>}
+                      </div>
+                      <div className="text-xs mt-0.5" style={{ color: C.muted }}>
+                        {[SPARTEN.find((x) => x.value === (v.sparte || "beide"))?.label,
+                          laufzeitMonate(v) ? laufzeitMonate(v) + " Monate" : "",
+                          v.lieferbeginn ? "ab " + datum(v.lieferbeginn) : "",
+                          enddatum(v) ? "bis " + datum(enddatum(v)) : "",
+                          "Aufschlag " + num(parseFloat(v.aufschlag) || 0, 3) + " ct/kWh",
+                          v.gueltigBis ? "gültig bis " + datum(v.gueltigBis) : ""].filter(Boolean).join(" · ")}
+                      </div>
+                      {(v.angebot || v.individualangebot) && (
+                        <div className="space-y-2 mt-2 min-w-0">
+                          {v.angebot && <DateiChip datei={v.angebot} klein />}
+                          {v.individualangebot && <DateiChip datei={v.individualangebot} klein />}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Übersicht für den Innendienst                                      */
 /*  Kalkulation, Vertragsmanagement, Finanzbuchhaltung und             */
 /*  Leadmanagement schließen keine Verträge ab und bekommen keine      */
@@ -11932,6 +12031,7 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
       { k: "Bestätigung vom Versorger offen", v: eingereicht.length, farbe: C.gas, klick: ansicht("versorger") },
       { k: "Unterlagen beim Vertrieb angefordert", v: klaer.length, klick: liste("Unterlagen angefordert", klaer) },
       { k: "Smartmeter zu prüfen", v: sm.length, farbe: C.strom, klick: ansicht("smartmeter") },
+      { k: "Kalkulationen bisher", v: anfragen.filter((a) => a.kalkulation).length, farbe: C.ink, klick: ansicht("kalkulationen") },
     ];
     const reihe = [...auftraege, ...neu, ...angefragt].sort((x, y) => (x.angelegt || "").localeCompare(y.angelegt || ""));
     arbeit = (
@@ -12992,6 +13092,7 @@ export default function App() {
       { id: "versorger", label: "Versorgerbestätigung", icon: FileSignature },
       { id: "auftraege", label: "Neue Aufträge", icon: FileSignature, badge: neueAuftraege },
       { id: "smartmeter", label: "Smartmeter", icon: Zap, badge: offeneSmartmeter },
+      { id: "kalkulationen", label: "Kalkulationen", icon: Calculator },
       { id: "alle", label: "Alle Vorgänge", icon: Inbox },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
@@ -13267,6 +13368,8 @@ export default function App() {
         onUebernehmen={ausLead}
         onGelesen={(id) => setLeads(leads.map((l) => (l.id === id ? { ...l, gelesen: true } : l)))} />
     );
+  } else if (ansicht === "kalkulationen") {
+    inhalt = <Kalkulationen anfragen={anfragen} onOeffnen={setOffen} />;
   } else if (ansicht === "auftraege") {
     inhalt = (
       <Liste anfragen={anfragen.filter((a) => a.status === "uebermittelt")}
