@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.10.6 · 03.11.2026 · Abstand zur Statusleiste auf dem iPhone";
+const VERSION = "v5.10.7 · 04.11.2026 · Angestellte nicht mehr als Handelsvertreter bezeichnet";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -5770,7 +5770,7 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
         </div>
       )}
 
-      {vertrag && (
+      {vertrag && !user.angestellt && (
         <div className="rounded p-5" style={{ background: C.card,
              border: "1px solid " + (vertrag.partnerUnterschrift ? C.line : C.gas) }}>
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
@@ -5808,7 +5808,7 @@ function MeineStammdaten({ user, mitarbeiter, setMitarbeiter }) {
 
       <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
         <div className="flex items-baseline justify-between mb-4">
-          <span className="text-sm">Stammdaten als Handelsvertreter</span>
+          <span className="text-sm">{user.angestellt ? "Persönliche Daten (angestellt bei EGC)" : "Stammdaten als Handelsvertreter"}</span>
           {!offen && <span className="text-xs" style={{ color: C.muted }}>schreibgeschützt</span>}
         </div>
 
@@ -6736,7 +6736,7 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
         {gewaehlt.status !== "eingeladen" && (
           <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
             <div className="flex items-baseline justify-between mb-4">
-              <span className="text-sm">Stammdaten als Handelsvertreter</span>
+              <span className="text-sm">{gewaehlt.angestellt ? "Persönliche Daten (angestellt bei EGC)" : "Stammdaten als Handelsvertreter"}</span>
               {istGF && gewaehlt.status === "aktiv" && (
                 <button className="text-sm" style={{ color: C.strom }}
                   onClick={() => { setSd(gewaehlt.stammdaten || leereStammdaten()); setBearbeiten(!bearbeiten); }}>
@@ -9414,7 +9414,7 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
     <div>
       <div className="flex flex-wrap gap-2 mb-5">
         <Reiter id="tippgeber">Tippgeber ({tippgeber.length}{wartend.length ? ", " + wartend.length + " offen" : ""})</Reiter>
-        <Reiter id="partner">Handelsvertreter ({vertrieb.length})</Reiter>
+        <Reiter id="partner">Vertriebsmitarbeiter ({vertrieb.length})</Reiter>
         <Reiter id="firma">Firmendaten</Reiter>
       </div>
 
