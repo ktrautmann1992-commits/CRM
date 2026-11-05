@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.14 · 05.11.2026 · Visitenkarten";
+const VERSION = "v5.14.1 · 05.11.2026 · Visitenkarten nur Vertrieb, mit Titel";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1709,11 +1709,14 @@ const visitenkartenDaten = (m) => {
   return {
     name: m.name || "",
     titel: v.titel || BERUF_VORGABE[m.rolle] || m.rolle || "",
-    telefon: v.telefon || m.telefon || FIRMENDATEN.telefon || "",
-    mobil: v.mobil || "",
+    zusatz: v.zusatz || "",
+    telefon: v.telefon || FIRMENDATEN.telefon || "",
+    mobil: v.mobil || m.telefon || "",
     email: v.email || m.email || "",
   };
 };
+/* Visitenkarten gibt es vorerst nur für den Vertrieb */
+const VISITENKARTE_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
 
 async function visitenkartePdf(m) {
   const p = visitenkartenDaten(m);
@@ -1759,11 +1762,9 @@ async function visitenkartePdf(m) {
   doc.lines([[14, -9, 28, 7, 44, -3], [16, -10, 30, 4, 50, -8]], 0, Y(44), [1, 1], "S"); dk(1);
   doc.restoreGraphicsState();
   doc.addImage(logoT, "PNG", X(9), Y(15), (420 / 196) * 15, 15);
-  verlauf(X(9), Y(34), 18, 0.9, GRUEN1, GRUEN2, { n: 30, r: 0.45 });
-  doc.setFont("helvetica", "bold"); doc.setFontSize(6.2); fa(GRUEN2);
-  doc.text("ENERGIEBERATUNG & VERTRIEB", X(9), Y(39.5), { charSpace: 0.5 });
+  verlauf(X(9), Y(35), 18, 0.9, GRUEN1, GRUEN2, { n: 30, r: 0.45 });
   doc.setFont("helvetica", "normal"); doc.setFontSize(6.8); fa([196, 208, 222]);
-  doc.text(F.website || "", X(9), Y(47));
+  doc.text(F.website || "", X(9), Y(42));
 
   /* Rückseite */
   doc.addPage([W, H], "landscape");
@@ -1774,7 +1775,14 @@ async function visitenkartePdf(m) {
   doc.restoreGraphicsState();
   doc.setFont("helvetica", "bold"); fa(NAVY1); passend(p.name, 48, 11); doc.text(p.name, X(9), Y(12));
   doc.setFont("helvetica", "normal"); fa(GRUEN1); passend(p.titel, 48, 7.2); doc.text(p.titel, X(9), Y(16.6));
-  verlauf(X(9), Y(19.6), 12, 0.7, GRUEN1, GRUEN2, { n: 20, r: 0.35 });
+  /* Zusatztitel (z. B. staatlich geprüfter Techniker): nur wenn eingetragen, höchstens zwei Zeilen */
+  let yz = 16.6;
+  if (p.zusatz) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(5.4); fa(GRAU);
+    doc.splitTextToSize(p.zusatz, 66).slice(0, 2).forEach((z) => { yz += 2.7; doc.text(z, X(9), Y(yz)); });
+  }
+  const linieY = p.zusatz ? yz + 2.4 : 19.6;
+  verlauf(X(9), Y(linieY), 12, 0.7, GRUEN1, GRUEN2, { n: 20, r: 0.35 });
   const sym = (art, x, y) => {
     fl(GRUEN); doc.circle(x, y - 0.95, 1.55, "F"); st(WEISS); doc.setLineWidth(0.22);
     if (art === "tel") doc.roundedRect(x - 0.45, y - 1.85, 0.9, 1.8, 0.2, 0.2, "S");
@@ -1782,12 +1790,14 @@ async function visitenkartePdf(m) {
     if (art === "web") { doc.circle(x, y - 0.95, 0.8, "S"); doc.line(x - 0.8, y - 0.95, x + 0.8, y - 0.95); }
     if (art === "ort") { doc.circle(x, y - 1.2, 0.5, "S"); doc.line(x - 0.45, y - 1, x, y - 0.1); doc.line(x + 0.45, y - 1, x, y - 0.1); }
   };
-  const zeilen = [p.telefon ? ["tel", "Tel. " + p.telefon] : null, p.mobil ? ["tel", "Mobil " + p.mobil] : null,
+  const zeilen = [p.mobil ? ["tel", "Mobil " + p.mobil] : null, p.telefon ? ["tel", "Tel. " + p.telefon] : null,
     p.email ? ["mail", p.email] : null, F.website ? ["web", F.website] : null,
     ["ort", [F.strasse, F.ort].filter(Boolean).join(", ")]].filter(Boolean);
-  const abstand = zeilen.length > 4 ? 4.6 : 5.2;
+  const start = Math.max(27.5, linieY + 6.6);
+  /* letzte Zeile spätestens 6 mm über der Schnittkante */
+  const abstand = Math.min(5.2, (49 - start) / Math.max(1, zeilen.length - 1));
   zeilen.forEach(([a, t], i) => {
-    const yy = Y(28 + i * abstand); sym(a, X(10.5), yy);
+    const yy = Y(start + i * abstand); sym(a, X(10.5), yy);
     doc.setFont("helvetica", "normal"); fa(TEXT); passend(t, 44, 6.6); doc.text(t, X(14), yy);
   });
   fl([246, 248, 250]); doc.roundedRect(X(60), Y(23.5), 19, 22.5, 1.5, 1.5, "F");
@@ -8569,10 +8579,11 @@ function Ablage({ ablage, setAblage, user, start }) {
             try { dateiLaden(await blankoAuftragPdf()); }
             catch (e) { alert("Die Vorlage konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
           }}>Vollmacht blanko (PDF)</Btn>
-          <Btn variante="hell" icon={CircleUser} onClick={async () => {
+          {VISITENKARTE_ROLLEN.includes(user.rolle) && <Btn variante="hell" icon={CircleUser} onClick={async () => {
+            if (!visitenkartenDaten(user).mobil) alert("Für deine Visitenkarte fehlt noch die Mobilnummer. Bitte die Geschäftsführung, sie einzutragen.");
             try { dateiLaden(await visitenkartePdf(user)); }
             catch (e) { alert("Die Visitenkarte konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
-          }}>Meine Visitenkarte (PDF)</Btn>
+          }}>Meine Visitenkarte (PDF)</Btn>}
           {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && [
             ["Dienstleistungsvertrag mit Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: true, betrag: null, erfolg: null })],
             ["Dienstleistungsvertrag ohne Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: false, erfolg: null })],
@@ -10370,11 +10381,12 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
       {reiter === "visitenkarten" && (
         <div className="space-y-3">
           <p className="text-xs" style={{ color: C.muted, maxWidth: "62ch" }}>
-            Was du hier einträgst, steht auf der Visitenkarte. Leere Felder nehmen die Angaben aus dem
-            Profil. Jeder lädt seine Karte selbst unter „Unterlagen“ herunter: Druckdatei 85 × 55 mm mit
+            Visitenkarten für den Vertrieb. Was du hier einträgst, steht auf der Karte; leere Felder nehmen
+            die Angaben aus dem Profil (Mobil aus der Telefonnummer des Partners, Festnetz der Firma). Der Titel
+            erscheint nur, wenn er ausgefüllt ist. Jeder lädt seine Karte selbst unter „Unterlagen“ herunter: Druckdatei 85 × 55 mm mit
             3 mm Beschnitt, Vorder- und Rückseite, mit QR-Code zum Speichern des Kontakts.
           </p>
-          {mitarbeiter.filter((m) => m.status !== "gesperrt" && !/^t-/.test(m.id))
+          {mitarbeiter.filter((m) => VISITENKARTE_ROLLEN.includes(m.rolle) && m.status !== "gesperrt" && !/^t-/.test(m.id))
             .sort((x, y) => (x.name || "").localeCompare(y.name || "")).map((m) => {
             const v = m.visitenkarte || {}, d = visitenkartenDaten(m);
             const setV = (k, w) => setMitarbeiter(mitarbeiter.map((x) => (x.id === m.id
@@ -10390,9 +10402,12 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
                 </div>
                 <div className="grid sm:grid-cols-2 gap-3">
                   <Feld label="Berufsbezeichnung" value={v.titel || ""} placeholder={d.titel} onChange={(w) => setV("titel", w)} />
+                  <Feld label="Titel (freiwillig), z. B. staatl. gepr. Techniker, Energiemanager ISO 50001" value={v.zusatz || ""}
+                    onChange={(w) => setV("zusatz", w)} />
                   <Feld label="E-Mail auf der Karte" value={v.email || ""} placeholder={d.email} onChange={(w) => setV("email", w)} />
-                  <Feld label="Telefon" value={v.telefon || ""} placeholder={d.telefon} onChange={(w) => setV("telefon", w)} />
-                  <Feld label="Mobil (freiwillig)" value={v.mobil || ""} onChange={(w) => setV("mobil", w)} />
+                  <Feld label="Mobil" value={v.mobil || ""} placeholder={d.mobil || "fehlt noch"} onChange={(w) => setV("mobil", w)}
+                    fehler={!d.mobil ? "Mobilnummer fehlt" : null} />
+                  <Feld label="Telefon (Festnetz)" value={v.telefon || ""} placeholder={d.telefon} onChange={(w) => setV("telefon", w)} />
                 </div>
               </div>
             );
