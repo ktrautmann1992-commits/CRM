@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.14.1 · 05.11.2026 · Visitenkarten nur Vertrieb, mit Titel";
+const VERSION = "v5.14.2 · 05.11.2026 · Visitenkarte unter Marketing";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -8579,11 +8579,6 @@ function Ablage({ ablage, setAblage, user, start }) {
             try { dateiLaden(await blankoAuftragPdf()); }
             catch (e) { alert("Die Vorlage konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
           }}>Vollmacht blanko (PDF)</Btn>
-          {VISITENKARTE_ROLLEN.includes(user.rolle) && <Btn variante="hell" icon={CircleUser} onClick={async () => {
-            if (!visitenkartenDaten(user).mobil) alert("Für deine Visitenkarte fehlt noch die Mobilnummer. Bitte die Geschäftsführung, sie einzutragen.");
-            try { dateiLaden(await visitenkartePdf(user)); }
-            catch (e) { alert("Die Visitenkarte konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
-          }}>Meine Visitenkarte (PDF)</Btn>}
           {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && [
             ["Dienstleistungsvertrag mit Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: true, betrag: null, erfolg: null })],
             ["Dienstleistungsvertrag ohne Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: false, erfolg: null })],
@@ -8602,6 +8597,47 @@ function Ablage({ ablage, setAblage, user, start }) {
       </div>
 
       <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "60ch" }}>{aktuell.text}</p>
+
+      {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && (() => {
+        const d = visitenkartenDaten(user);
+        const frei = !!(user.visitenkarte && user.visitenkarte.freigegeben);
+        return (
+          <div className="rounded p-4 mb-4" style={{ background: C.card, border: "1px solid " + (frei ? C.gruen : C.line) }}>
+            <div className="text-sm mb-3">Deine Visitenkarte</div>
+            {frei ? (
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="rounded overflow-hidden flex shrink-0" style={{ width: 230, height: 149, border: "1px solid " + C.line }}>
+                  <div style={{ width: 8, background: "linear-gradient(#96CE60,#4A8C26)" }} />
+                  <div className="p-3 flex-1 min-w-0" style={{ background: "#fff" }}>
+                    <div className="text-sm truncate" style={{ fontWeight: 600, color: C.ink }}>{d.name}</div>
+                    <div className="text-xs truncate" style={{ color: "#4A8C26" }}>{d.titel}</div>
+                    {d.zusatz && <div className="truncate" style={{ fontSize: 9, color: C.muted }}>{d.zusatz}</div>}
+                    <div className="mt-2 space-y-0.5" style={{ fontSize: 10, color: C.text }}>
+                      {d.mobil && <div className="truncate">Mobil {d.mobil}</div>}
+                      {d.telefon && <div className="truncate">Tel. {d.telefon}</div>}
+                      <div className="truncate">{d.email}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex-1 min-w-48">
+                  <p className="text-xs mb-3" style={{ color: C.muted }}>
+                    Druckdatei 85 × 55 mm mit 3 mm Beschnitt, Vorder- und Rückseite, mit QR-Code zum
+                    Speichern deines Kontakts. Bei jeder Online-Druckerei hochladbar.
+                  </p>
+                  <Btn icon={FileText} onClick={async () => {
+                    try { dateiLaden(await visitenkartePdf(user)); }
+                    catch (e) { alert("Die Visitenkarte konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+                  }}>Druckdatei herunterladen (PDF)</Btn>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs" style={{ color: C.muted }}>
+                Deine Visitenkarte wird von der Geschäftsführung erstellt und erscheint hier, sobald sie freigegeben ist.
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       {drin.length === 0 ? (
         <div className="rounded p-8 text-center text-sm"
@@ -10383,7 +10419,8 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
           <p className="text-xs" style={{ color: C.muted, maxWidth: "62ch" }}>
             Visitenkarten für den Vertrieb. Was du hier einträgst, steht auf der Karte; leere Felder nehmen
             die Angaben aus dem Profil (Mobil aus der Telefonnummer des Partners, Festnetz der Firma). Der Titel
-            erscheint nur, wenn er ausgefüllt ist. Jeder lädt seine Karte selbst unter „Unterlagen“ herunter: Druckdatei 85 × 55 mm mit
+            erscheint nur, wenn er ausgefüllt ist. Nach „Erstellen und freigeben“ sieht der Partner seine Karte
+            unter Unterlagen → Marketing und lädt die Druckdatei selbst herunter: Druckdatei 85 × 55 mm mit
             3 mm Beschnitt, Vorder- und Rückseite, mit QR-Code zum Speichern des Kontakts.
           </p>
           {mitarbeiter.filter((m) => VISITENKARTE_ROLLEN.includes(m.rolle) && m.status !== "gesperrt" && !/^t-/.test(m.id))
@@ -10395,10 +10432,12 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
               <div key={m.id} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <span className="text-sm">{m.name} <span className="text-xs" style={{ color: C.muted }}>{m.rolle}</span></span>
-                  <button className="text-xs" style={{ color: C.strom }} onClick={async () => {
-                    try { dateiLaden(await visitenkartePdf(m)); }
-                    catch (e) { alert("Die Visitenkarte konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
-                  }}>Visitenkarte (PDF)</button>
+                  <span className="flex items-center gap-3">
+                    <button className="text-xs" style={{ color: C.strom }} onClick={async () => {
+                      try { dateiLaden(await visitenkartePdf(m)); }
+                      catch (e) { alert("Die Visitenkarte konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+                    }}>Vorschau (PDF)</button>
+                  </span>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-3">
                   <Feld label="Berufsbezeichnung" value={v.titel || ""} placeholder={d.titel} onChange={(w) => setV("titel", w)} />
@@ -10408,6 +10447,19 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
                   <Feld label="Mobil" value={v.mobil || ""} placeholder={d.mobil || "fehlt noch"} onChange={(w) => setV("mobil", w)}
                     fehler={!d.mobil ? "Mobilnummer fehlt" : null} />
                   <Feld label="Telefon (Festnetz)" value={v.telefon || ""} placeholder={d.telefon} onChange={(w) => setV("telefon", w)} />
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  {v.freigegeben ? (
+                    <>
+                      <span className="text-xs" style={{ color: C.ok }}>✓ freigegeben, {m.name} sieht sie unter Unterlagen → Marketing</span>
+                      <button className="text-xs" style={{ color: C.muted }} onClick={() => setV("freigegeben", false)}>Freigabe zurücknehmen</button>
+                    </>
+                  ) : (
+                    <Btn icon={Check} disabled={!d.mobil} onClick={() => {
+                      setV("freigegeben", true);
+                      if (notieren) notieren("Visitenkarte", "Visitenkarte für " + m.name + " erstellt und freigegeben");
+                    }}>Visitenkarte erstellen und freigeben</Btn>
+                  )}
                 </div>
               </div>
             );
