@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.13.3 · 05.11.2026 · Erfolgshonorar einstellbar";
+const VERSION = "v5.14 · 05.11.2026 · Visitenkarten";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1672,6 +1672,131 @@ async function ndaPdf(kunde = null, unterschrift = null, gegenseitig = false) {
   const name = blanko ? "Verschwiegenheitserklaerung" + art + "_Blanko.pdf"
     : "Verschwiegenheitserklaerung" + art + "_" + String(k.firma || "Kunde").replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf";
   return { name, typ: "application/pdf", groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Visitenkarte im EGC-Design, 85 × 55 mm mit 3 mm Beschnitt          */
+/*  Die Geschäftsführung pflegt Berufsbezeichnung, Telefon, Mobil und  */
+/*  E-Mail; jeder lädt seine Karte selbst herunter.                    */
+/* ------------------------------------------------------------------ */
+let qrLaden = null;
+const ladeQr = () => {
+  if (window.QRCode) return Promise.resolve(window.QRCode);
+  if (!qrLaden)
+    qrLaden = new Promise((fertig, fehler) => {
+      const s = document.createElement("script");
+      s.src = "/assets/qrcode-1.5.4.min.js";
+      s.onload = () => fertig(window.QRCode);
+      s.onerror = () => { qrLaden = null; fehler(new Error("QR-Baustein konnte nicht geladen werden.")); };
+      document.head.appendChild(s);
+    });
+  return qrLaden;
+};
+const bildAlsDataUrl = async (pfad) => {
+  const r = await fetch(pfad);
+  if (!r.ok) throw new Error("Bild nicht gefunden: " + pfad);
+  const b = await r.blob();
+  return await new Promise((ok, f) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = f; fr.readAsDataURL(b); });
+};
+const BERUF_VORGABE = {
+  Vertriebspartner: "Energieberater", Teamleiter: "Teamleiter Vertrieb", "Leitung Vertrieb": "Leitung Vertrieb",
+  Kalkulation: "Kalkulation", Vertragsmanagement: "Vertragsmanagement", Finanzbuchhaltung: "Finanzbuchhaltung",
+  Leadmanagement: "Leadmanagement", "Geschäftsführung": "Geschäftsführer",
+};
+/* was auf der Karte steht: Eintrag der Geschäftsführung, sonst die Angaben aus dem Profil */
+const visitenkartenDaten = (m) => {
+  const v = (m && m.visitenkarte) || {};
+  return {
+    name: m.name || "",
+    titel: v.titel || BERUF_VORGABE[m.rolle] || m.rolle || "",
+    telefon: v.telefon || m.telefon || FIRMENDATEN.telefon || "",
+    mobil: v.mobil || "",
+    email: v.email || m.email || "",
+  };
+};
+
+async function visitenkartePdf(m) {
+  const p = visitenkartenDaten(m);
+  const F = FIRMENDATEN;
+  const [jsPDF, QR, logoT] = await Promise.all([ladeJsPdf(), ladeQr(), bildAlsDataUrl("/assets/logo-weiss.png")]);
+  const teile = p.name.trim().split(/\s+/);
+  const nach = teile.length > 1 ? teile[teile.length - 1] : p.name, vor = teile.length > 1 ? teile.slice(0, -1).join(" ") : "";
+  const plzOrt = /^(\d{5})\s+(.*)$/.exec(F.ort || "") || [null, "", F.ort || ""];
+  const vcard = ["BEGIN:VCARD", "VERSION:3.0", "N:" + nach + ";" + vor + ";;;", "FN:" + p.name, "ORG:EGC Energie",
+    p.titel ? "TITLE:" + p.titel : "", p.telefon ? "TEL;TYPE=WORK:" + p.telefon.replace(/\s/g, "") : "",
+    p.mobil ? "TEL;TYPE=CELL:" + p.mobil.replace(/\s/g, "") : "", p.email ? "EMAIL:" + p.email : "",
+    F.website ? "URL:https://" + F.website.replace(/^https?:\/\//, "") : "",
+    "ADR;TYPE=WORK:;;" + (F.strasse || "") + ";" + plzOrt[2] + ";;" + plzOrt[1] + ";Deutschland", "END:VCARD"]
+    .filter(Boolean).join("\n");
+  const qr = await QR.toDataURL(vcard, { margin: 0, width: 600, errorCorrectionLevel: "M", color: { dark: "#0A1626", light: "#FFFFFF" } });
+
+  const B = 3, CW = 85, CH = 55, W = CW + 2 * B, H = CH + 2 * B;
+  const doc = new jsPDF({ unit: "mm", format: [W, H], orientation: "landscape", compress: true });
+  const NAVY1 = [7, 16, 29], NAVY2 = [27, 58, 96], GRUEN = [108, 180, 59], GRUEN1 = [74, 140, 38], GRUEN2 = [150, 206, 96],
+        WEISS = [255, 255, 255], TEXT = [22, 33, 44], GRAU = [107, 119, 135];
+  const fl = (c) => doc.setFillColor(c[0], c[1], c[2]);
+  const st = (c) => doc.setDrawColor(c[0], c[1], c[2]);
+  const fa = (c) => doc.setTextColor(c[0], c[1], c[2]);
+  const mische = (a, b, t) => a.map((c, i) => Math.round(c + (b[i] - c) * t));
+  const dk = (o) => doc.setGState(new doc.GState({ opacity: o, "stroke-opacity": o }));
+  const verlauf = (x, y, w, h, f1, f2, { quer = true, n = 90, r = 0 } = {}) => {
+    doc.saveGraphicsState(); if (r) doc.roundedRect(x, y, w, h, r, r, null); else doc.rect(x, y, w, h, null); doc.clip(); doc.discardPath();
+    for (let i = 0; i < n; i++) { fl(mische(f1, f2, i / (n - 1))); if (quer) doc.rect(x + (i * w) / n, y, w / n + 0.2, h, "F"); else doc.rect(x, y + (i * h) / n, w, h / n + 0.2, "F"); }
+    doc.restoreGraphicsState();
+  };
+  const kringel = (x, y, r, c, o, art = "F", lw = 0.4) => {
+    dk(o); if (art === "F") { fl(c); doc.circle(x, y, r, "F"); } else { st(c); doc.setLineWidth(lw); doc.circle(x, y, r, "S"); } dk(1);
+  };
+  const X = (v) => B + v, Y = (v) => B + v;
+  const passend = (t, breite, gr) => { let g = gr; doc.setFontSize(g); while (g > 5 && doc.getTextWidth(String(t)) > breite) doc.setFontSize(g -= 0.25); };
+
+  /* Vorderseite */
+  verlauf(0, 0, W, H, NAVY1, NAVY2, { quer: false });
+  doc.saveGraphicsState(); doc.rect(0, 0, W, H, null); doc.clip(); doc.discardPath();
+  kringel(X(80), Y(2), 26, GRUEN, 0.14); kringel(X(80), Y(2), 34, WEISS, 0.08, "S"); kringel(X(80), Y(2), 41, WEISS, 0.05, "S");
+  kringel(X(4), Y(56), 18, GRUEN, 0.1);
+  dk(0.3); st(GRUEN2); doc.setLineWidth(0.5);
+  doc.lines([[14, -9, 28, 7, 44, -3], [16, -10, 30, 4, 50, -8]], 0, Y(44), [1, 1], "S"); dk(1);
+  doc.restoreGraphicsState();
+  doc.addImage(logoT, "PNG", X(9), Y(15), (420 / 196) * 15, 15);
+  verlauf(X(9), Y(34), 18, 0.9, GRUEN1, GRUEN2, { n: 30, r: 0.45 });
+  doc.setFont("helvetica", "bold"); doc.setFontSize(6.2); fa(GRUEN2);
+  doc.text("ENERGIEBERATUNG & VERTRIEB", X(9), Y(39.5), { charSpace: 0.5 });
+  doc.setFont("helvetica", "normal"); doc.setFontSize(6.8); fa([196, 208, 222]);
+  doc.text(F.website || "", X(9), Y(47));
+
+  /* Rückseite */
+  doc.addPage([W, H], "landscape");
+  fl(WEISS); doc.rect(0, 0, W, H, "F");
+  verlauf(0, 0, X(3.2), H, GRUEN2, GRUEN1, { quer: false, n: 40 });
+  doc.saveGraphicsState(); doc.rect(0, 0, W, H, null); doc.clip(); doc.discardPath();
+  kringel(X(86), Y(56), 16, GRUEN, 0.08); kringel(X(86), Y(56), 22, GRUEN, 0.12, "S", 0.3);
+  doc.restoreGraphicsState();
+  doc.setFont("helvetica", "bold"); fa(NAVY1); passend(p.name, 48, 11); doc.text(p.name, X(9), Y(12));
+  doc.setFont("helvetica", "normal"); fa(GRUEN1); passend(p.titel, 48, 7.2); doc.text(p.titel, X(9), Y(16.6));
+  verlauf(X(9), Y(19.6), 12, 0.7, GRUEN1, GRUEN2, { n: 20, r: 0.35 });
+  const sym = (art, x, y) => {
+    fl(GRUEN); doc.circle(x, y - 0.95, 1.55, "F"); st(WEISS); doc.setLineWidth(0.22);
+    if (art === "tel") doc.roundedRect(x - 0.45, y - 1.85, 0.9, 1.8, 0.2, 0.2, "S");
+    if (art === "mail") { doc.rect(x - 0.8, y - 1.5, 1.6, 1.1, "S"); doc.line(x - 0.8, y - 1.5, x, y - 0.85); doc.line(x + 0.8, y - 1.5, x, y - 0.85); }
+    if (art === "web") { doc.circle(x, y - 0.95, 0.8, "S"); doc.line(x - 0.8, y - 0.95, x + 0.8, y - 0.95); }
+    if (art === "ort") { doc.circle(x, y - 1.2, 0.5, "S"); doc.line(x - 0.45, y - 1, x, y - 0.1); doc.line(x + 0.45, y - 1, x, y - 0.1); }
+  };
+  const zeilen = [p.telefon ? ["tel", "Tel. " + p.telefon] : null, p.mobil ? ["tel", "Mobil " + p.mobil] : null,
+    p.email ? ["mail", p.email] : null, F.website ? ["web", F.website] : null,
+    ["ort", [F.strasse, F.ort].filter(Boolean).join(", ")]].filter(Boolean);
+  const abstand = zeilen.length > 4 ? 4.6 : 5.2;
+  zeilen.forEach(([a, t], i) => {
+    const yy = Y(28 + i * abstand); sym(a, X(10.5), yy);
+    doc.setFont("helvetica", "normal"); fa(TEXT); passend(t, 44, 6.6); doc.text(t, X(14), yy);
+  });
+  fl([246, 248, 250]); doc.roundedRect(X(60), Y(23.5), 19, 22.5, 1.5, 1.5, "F");
+  doc.addImage(qr, "PNG", X(61.5), Y(25), 16, 16);
+  doc.setFontSize(4.6); fa(GRAU); doc.text("Kontakt speichern", X(69.5), Y(44), { align: "center" });
+
+  const roh = doc.output("datauristring");
+  return { name: "Visitenkarte_" + p.name.replace(/[^\wäöüÄÖÜß]+/g, "_") + "_Druckdatei.pdf", typ: "application/pdf",
+           groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
 }
 
 /* Service- & Beratungsauftrag ohne Kundendaten, zum Ausfüllen von Hand */
@@ -8444,6 +8569,10 @@ function Ablage({ ablage, setAblage, user, start }) {
             try { dateiLaden(await blankoAuftragPdf()); }
             catch (e) { alert("Die Vorlage konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
           }}>Vollmacht blanko (PDF)</Btn>
+          <Btn variante="hell" icon={CircleUser} onClick={async () => {
+            try { dateiLaden(await visitenkartePdf(user)); }
+            catch (e) { alert("Die Visitenkarte konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+          }}>Meine Visitenkarte (PDF)</Btn>
           {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && [
             ["Dienstleistungsvertrag mit Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: true, betrag: null, erfolg: null })],
             ["Dienstleistungsvertrag ohne Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: false, erfolg: null })],
@@ -10079,6 +10208,7 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
         <Reiter id="tippgeber">Tippgeber ({tippgeber.length}{wartend.length ? ", " + wartend.length + " offen" : ""})</Reiter>
         <Reiter id="partner">Vertriebsmitarbeiter ({vertrieb.length})</Reiter>
         <Reiter id="firma">Firmendaten</Reiter>
+        <Reiter id="visitenkarten">Visitenkarten</Reiter>
       </div>
 
       {reiter === "tippgeber" && !neuTG && (
@@ -10234,6 +10364,39 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
           <p className="px-4 py-3 text-xs" style={{ color: C.muted, borderTop: "1px solid " + C.line }}>
             Unterschreiben kannst du unter „Vertriebsmitarbeiter“ beim jeweiligen Partner.
           </p>
+        </div>
+      )}
+
+      {reiter === "visitenkarten" && (
+        <div className="space-y-3">
+          <p className="text-xs" style={{ color: C.muted, maxWidth: "62ch" }}>
+            Was du hier einträgst, steht auf der Visitenkarte. Leere Felder nehmen die Angaben aus dem
+            Profil. Jeder lädt seine Karte selbst unter „Unterlagen“ herunter: Druckdatei 85 × 55 mm mit
+            3 mm Beschnitt, Vorder- und Rückseite, mit QR-Code zum Speichern des Kontakts.
+          </p>
+          {mitarbeiter.filter((m) => m.status !== "gesperrt" && !/^t-/.test(m.id))
+            .sort((x, y) => (x.name || "").localeCompare(y.name || "")).map((m) => {
+            const v = m.visitenkarte || {}, d = visitenkartenDaten(m);
+            const setV = (k, w) => setMitarbeiter(mitarbeiter.map((x) => (x.id === m.id
+              ? { ...x, visitenkarte: { ...(x.visitenkarte || {}), [k]: w } } : x)));
+            return (
+              <div key={m.id} className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                  <span className="text-sm">{m.name} <span className="text-xs" style={{ color: C.muted }}>{m.rolle}</span></span>
+                  <button className="text-xs" style={{ color: C.strom }} onClick={async () => {
+                    try { dateiLaden(await visitenkartePdf(m)); }
+                    catch (e) { alert("Die Visitenkarte konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+                  }}>Visitenkarte (PDF)</button>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <Feld label="Berufsbezeichnung" value={v.titel || ""} placeholder={d.titel} onChange={(w) => setV("titel", w)} />
+                  <Feld label="E-Mail auf der Karte" value={v.email || ""} placeholder={d.email} onChange={(w) => setV("email", w)} />
+                  <Feld label="Telefon" value={v.telefon || ""} placeholder={d.telefon} onChange={(w) => setV("telefon", w)} />
+                  <Feld label="Mobil (freiwillig)" value={v.mobil || ""} onChange={(w) => setV("mobil", w)} />
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
