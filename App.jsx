@@ -1524,7 +1524,7 @@ const ndaZiffern = (gegenseitig = false) => {
 async function ndaPdf(kunde = null, unterschrift = null, gegenseitig = false) {
   const jsPDF = await ladeJsPdf();
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
-  const W = 210, H = 297, RA = 18, BR = W - 2 * RA, UNTEN = H - 24;
+  const W = 210, H = 297, RA = 16, BR = W - 2 * RA, UNTEN = H - 22;
   const NAVY = [10, 22, 38], NAVY1 = [7, 16, 29], NAVY2 = [27, 58, 96], GRUEN = [108, 180, 59],
         GRUEN1 = [74, 140, 38], GRUEN2 = [150, 206, 96], TEXT = [22, 33, 44], GRAU = [107, 119, 135],
         LINIE = [216, 221, 228], HELL = [246, 248, 250], WEISS = [255, 255, 255];
@@ -1563,62 +1563,62 @@ async function ndaPdf(kunde = null, unterschrift = null, gegenseitig = false) {
   let y = kopf();
   const platz = (h) => { if (y + h > UNTEN) { doc.addPage(); y = kopf(); } };
   const absatz = (t, x = RA, breite = BR) => {
-    const z = (schrift(8.8), doc.splitTextToSize(String(t), breite));
-    z.forEach((zt) => { platz(4.1); schrift(8.8); fa(TEXT); doc.text(zt, x, y); y += 4.1; });
+    const z = (schrift(8.6), doc.splitTextToSize(String(t), breite));
+    z.forEach((zt) => { platz(3.85); schrift(8.6); fa(TEXT); doc.text(zt, x, y); y += 3.85; });
   };
   const ueberschrift = (t) => {
-    platz(14);
+    platz(12);
     verlauf(RA, y - 3.6, 1.6, 4.8, GRUEN2, GRUEN1, { r: 0.8, quer: false, n: 20 });
-    schrift(10.5, true); fa(NAVY); doc.text(t, RA + 4, y); y += 6.5;
+    schrift(9.6, true); fa(NAVY); doc.text(t, RA + 4, y); y += 5;
   };
 
-  schrift(20, true); fa(NAVY); doc.text("Verschwiegenheitserklärung", RA, y + 6);
-  schrift(10.5); fa(GRAU); doc.text(gegenseitig ? "Gegenseitige Vertraulichkeit (NDA)" : "Vertraulicher Umgang mit Kundendaten (NDA)", RA, y + 13);
-  verlauf(RA, y + 17, 30, 1.3, GRUEN1, GRUEN2, { r: 0.65, n: 30 });
-  y += 26;
+  schrift(18, true); fa(NAVY); doc.text("Verschwiegenheitserklärung", RA, y + 3);
+  schrift(10.5); fa(GRAU); doc.text(gegenseitig ? "Gegenseitige Vertraulichkeit (NDA)" : "Vertraulicher Umgang mit Kundendaten (NDA)", RA, y + 9.5);
+  verlauf(RA, y + 12.5, 30, 1.2, GRUEN1, GRUEN2, { r: 0.65, n: 30 });
+  y += 18;
 
   const partei = (rolle, zeilen, leer, h = 30) => {
     fl(HELL); doc.roundedRect(RA, y, BR, h, 2.5, 2.5, "F");
     doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, h, 2.5, 2.5, null); doc.clip(); doc.discardPath();
     verlauf(RA, y, 2.2, h, GRUEN2, GRUEN1, { quer: false, n: 30 });
     doc.restoreGraphicsState();
-    schrift(8, true); fa(GRAU); doc.text(rolle, RA + 7, y + 7, { charSpace: 0.5 });
+    schrift(8, true); fa(GRAU); doc.text(rolle, RA + 7, y + 6.5, { charSpace: 0.5 });
     const x = RA + 52;
     zeilen.forEach(([wert, platzhalter], i) => {
-      const yy = y + 8 + i * 6.6;
+      const yy = y + 6.5 + i * 5.2;
       if (leer) { schrift(7); fa(GRAU); doc.text(platzhalter, x, yy + 3.6); st(LINIE); doc.setLineWidth(0.3); doc.line(x, yy + 0.8, W - RA - 6, yy + 0.8); }
       else { schrift(i === 0 ? 10.5 : 9.2, i === 0); fa(TEXT); doc.text(wert || "", x, yy); }
     });
-    y += h + 4;
+    y += h + 3;
   };
-  partei("KUNDE", [[k.firma, "Firma"], [k.strasse, "Straße, Hausnummer"], [[k.plz, k.ort].filter(Boolean).join(" "), "PLZ, Ort"]], blanko, 26);
-  partei("EGC", [["EGC Energie"], [F.vertreter ? "vertreten durch " + F.vertreter + " (Geschäftsführung)" : ""], [[F.strasse, F.ort].filter(Boolean).join(", ")]], false, 26);
+  partei("KUNDE", [[k.firma, "Firma"], [k.strasse, "Straße, Hausnummer"], [[k.plz, k.ort].filter(Boolean).join(" "), "PLZ, Ort"]], blanko, blanko ? 21 : 19);
+  partei("EGC", [["EGC Energie"], [F.vertreter ? "vertreten durch " + F.vertreter + " (Geschäftsführung)" : ""], [[F.strasse, F.ort].filter(Boolean).join(", ")]], false, 19);
   y += 2;
   absatz(gegenseitig ? "Der oben genannte Kunde und EGC Energie (gemeinsam „die Parteien“) vereinbaren Folgendes:"
     : "EGC Energie verpflichtet sich gegenüber dem oben genannten Kunden wie folgt:");
-  y += 3;
+  y += 1.5;
 
   ndaZiffern(gegenseitig).forEach(([titel, teile]) => {
     ueberschrift(titel);
     teile.forEach((t) => {
       if (t && t.punkte) {
         t.punkte.forEach((p) => {
-          schrift(8.8); const z = doc.splitTextToSize(p, BR - 7);
-          platz(z.length * 4.1);
+          schrift(8.6); const z = doc.splitTextToSize(p, BR - 7);
+          platz(z.length * 3.85);
           fl(GRUEN); doc.circle(RA + 2, y - 1.2, 0.8, "F");
-          schrift(8.8); fa(TEXT); z.forEach((zt) => { doc.text(zt, RA + 6, y); y += 4.1; });
+          schrift(8.6); fa(TEXT); z.forEach((zt) => { doc.text(zt, RA + 6, y); y += 3.85; });
         });
-        y += 1.5; return;
+        y += 1; return;
       }
-      absatz(t); y += 2.2;
+      absatz(t); y += 1.8;
     });
     y += 1.5;
   });
 
   /* Unterschriften: Geschäftsführung immer, Kunde zur Kenntnis */
-  platz(62);
+  platz(44);
   y += 4;
-  schrift(10.5, true); fa(NAVY); doc.text("Unterschriften", RA, y); y += 8;
+  schrift(10.5, true); fa(NAVY); doc.text("Unterschriften", RA, y); y += 6;
   const halb = (BR - 14) / 2, x2 = RA + halb + 14;
   const ort = (F.ort || "").replace(/^\d+\s*/, "");
   schrift(8); fa(GRAU);
@@ -1629,19 +1629,19 @@ async function ndaPdf(kunde = null, unterschrift = null, gegenseitig = false) {
     try {
       const b = unterschrift.bild;
       const url = b.url || (await dateiInhalt(b));
-      const hh = 16, bb = Math.min(halb, (hh * (b.breite || 600)) / (b.hoehe || 200));
+      const hh = 13, bb = Math.min(halb, (hh * (b.breite || 600)) / (b.hoehe || 200));
       doc.addImage(url, /png/.test(String(url).slice(0, 30)) ? "PNG" : "JPEG", RA, y, bb, hh);
     } catch (e) { /* ohne Bild bleibt die Linie */ }
   }
-  y += 18;
+  y += 15;
   st(TEXT); doc.setLineWidth(0.3); doc.line(RA, y, RA + halb, y); doc.line(x2, y, x2 + halb, y);
   schrift(8); fa(GRAU);
   /* voller Name aus den Firmendaten, wenn der Zugang nur den Vornamen trägt (z. B. „Karsten“) */
   const gfName = unterschrift && unterschrift.name;
   doc.text(F.vertreter && (!gfName || F.vertreter.startsWith(gfName)) ? F.vertreter + " (Geschäftsführung)" : gfName || "", RA, y + 4.5);
   doc.text("Unterschrift, Name in Druckbuchstaben", x2, y + 4.5);
-  y += 12;
-  schrift(8.5); fa(TEXT);
+  y += 9;
+  schrift(8.6); fa(TEXT);
   doc.text(ort + ", " + (unterschrift && unterschrift.datum ? datum(unterschrift.datum) : "____________"), RA, y);
   doc.text("Ort, Datum: ______________________", x2, y);
 
