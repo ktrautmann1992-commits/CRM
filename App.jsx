@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.15.2 · 05.11.2026 · Portfolio-Flyer: Partnernetzwerk und Fördermittel";
+const VERSION = "v5.15.3 · 05.11.2026 · Portfolio-Flyer: externe Energieeinkaufsabteilung";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1812,7 +1812,8 @@ async function visitenkartePdf(m) {
 /* ------------------------------------------------------------------ */
 const FLYER = {
   intro: "EGC Energie mit Sitz in Waldmohr ist ein versorgerunabhängiger Energiedienstleister für Gewerbe, Industrie und Mittelstand in ganz Deutschland. Wir beschaffen Strom und Erdgas, begleiten Ihre Energieverträge über die gesamte Laufzeit und senken Ihre Energienebenkosten.",
-  ziel: "Unser Ziel: Energiekosten dauerhaft senken, Ihren Aufwand verringern und eine verlässliche, zukunftsfähige Energieversorgung für Ihr Unternehmen schaffen.",
+  ziel: "Ihre externe Energieeinkaufsabteilung: Wir übernehmen den Energieeinkauf für Ihr Unternehmen und sind Ihr zentraler Ansprechpartner für Strom, Gas, Verträge und Energiekosten.",
+  ziel2: "Unser Ziel: Energiekosten dauerhaft senken, Ihren Aufwand verringern und eine verlässliche, zukunftsfähige Energieversorgung schaffen.",
   beschaffung: [
     ["Beschaffungsmodelle", [
       ["Festpreis", "Planungssicherheit über die gesamte Laufzeit"],
@@ -1855,7 +1856,7 @@ const FLYER = {
       ["Keine versteckten Kosten", "transparente und faire Vertragsbedingungen"],
       ["Entlastung Ihres Teams", "Sie kümmern sich um Ihr Kerngeschäft, wir um Ihre Energie"]]],
     ["PERSÖNLICH", "& BUNDESWEIT", [
-      ["Ein fester Ansprechpartner", "der Ihr Unternehmen und Ihre Verträge kennt"],
+      ["Ein zentraler Ansprechpartner", "für alle Energiethemen, der Ihr Unternehmen und Ihre Verträge kennt"],
       ["Bundesweit für Sie da", "persönliche Betreuung in ganz Deutschland, vor Ort und digital"],
       ["Branchengerechte Lösungen", "für Produktion, Handel, Handwerk, Hotellerie und mehr"]]],
     ["UNABHÄNGIG", "& FLEXIBEL", [
@@ -1932,7 +1933,7 @@ async function portfolioFlyerPdf(m) {
   let y = kopf("UNSER LEISTUNGSPORTFOLIO IM ÜBERBLICK", "Leistungsportfolio", "der EGC Energie");
   y += 9;
   schrift(8.6); fa(TEXT);
-  const li = doc.splitTextToSize(FLYER.intro, 108); doc.text(li, RA, y, { lineHeightFactor: 1.4 });
+  const li = doc.splitTextToSize(FLYER.intro + " " + FLYER.ziel2, 108); doc.text(li, RA, y, { lineHeightFactor: 1.4 });
   fl(HELL); doc.roundedRect(RA + 115, y - 4.5, BR - 115, 28, 2.5, 2.5, "F");
   verlauf(RA + 115, y - 4.5, 1.6, 28, GRUEN2, GRUEN1, { quer: false, n: 20 });
   schrift(8.3, true); fa(NAVY); doc.text(doc.splitTextToSize(FLYER.ziel, BR - 123), RA + 120, y + 0.5, { lineHeightFactor: 1.4 });
