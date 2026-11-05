@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.15.4 · 05.11.2026 · Portfolio-Flyer: Bewirtschaftung und Nebenkosten";
+const VERSION = "v5.15.5 · 05.11.2026 · Portfolio-Flyer: individuelle Kundenbetreuung";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1823,7 +1823,7 @@ const FLYER = {
       ["Mehrere Standorte gebündelt", "ein Konzept für Filialen und Unternehmensgruppen"]]],
     ["Beratung & Betreuung", [
       ["Marktvergleich bei vielen Versorgern", "unabhängig und transparent"],
-      ["Persönlicher Ansprechpartner", "feste Betreuung statt Warteschleife"],
+      ["Individuelle Kundenbetreuung", "ein persönlicher Ansprechpartner, zugeschnitten auf Ihr Unternehmen"],
       ["Versorgerwechsel komplett übernommen", "Kündigung, Anmeldung, Fristen"],
       ["Laufende Portfolioanpassung", "Ihr Vertrag folgt der Marktentwicklung"],
       ["Rechtzeitige Erinnerung vor Vertragsende", "keine verpassten Fristen"]]],
