@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.15 · 05.11.2026 · Portfolio-Flyer je Vertriebsmitarbeiter";
+const VERSION = "v5.15.1 · 05.11.2026 · Portfolio-Flyer: bundesweit";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1811,7 +1811,7 @@ async function visitenkartePdf(m) {
 /*  Kontaktblock aus den Visitenkartendaten und dem Profilfoto.         */
 /* ------------------------------------------------------------------ */
 const FLYER = {
-  intro: "EGC Energie mit Sitz in Waldmohr ist ein versorgerunabhängiger Energiedienstleister für Gewerbe, Industrie und Mittelstand im Saarland und in Rheinland-Pfalz. Wir beschaffen Strom und Erdgas, begleiten Ihre Energieverträge über die gesamte Laufzeit und senken Ihre Energienebenkosten.",
+  intro: "EGC Energie mit Sitz in Waldmohr ist ein versorgerunabhängiger Energiedienstleister für Gewerbe, Industrie und Mittelstand in ganz Deutschland. Wir beschaffen Strom und Erdgas, begleiten Ihre Energieverträge über die gesamte Laufzeit und senken Ihre Energienebenkosten.",
   ziel: "Unser Ziel: Energiekosten dauerhaft senken, Ihren Aufwand verringern und eine verlässliche, zukunftsfähige Energieversorgung für Ihr Unternehmen schaffen.",
   beschaffung: [
     ["Beschaffungsmodelle", [
@@ -1853,9 +1853,9 @@ const FLYER = {
       ["Planungssicherheit", "durch Festpreise und strukturierte Tranchenmodelle"],
       ["Keine versteckten Kosten", "transparente und faire Vertragsbedingungen"],
       ["Entlastung Ihres Teams", "Sie kümmern sich um Ihr Kerngeschäft, wir um Ihre Energie"]]],
-    ["PERSÖNLICH", "& REGIONAL", [
+    ["PERSÖNLICH", "& BUNDESWEIT", [
       ["Ein fester Ansprechpartner", "der Ihr Unternehmen und Ihre Verträge kennt"],
-      ["Vor Ort im Saarland und in Rheinland-Pfalz", "kurze Wege, persönliche Termine"],
+      ["Bundesweit für Sie da", "persönliche Betreuung in ganz Deutschland, vor Ort und digital"],
       ["Branchengerechte Lösungen", "für Produktion, Handel, Handwerk, Hotellerie und mehr"]]],
     ["UNABHÄNGIG", "& FLEXIBEL", [
       ["Versorgerunabhängige Beratung", "wir empfehlen, was zu Ihnen passt"],
