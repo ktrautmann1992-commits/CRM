@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.15.6 · 05.11.2026 · Portfolio-Flyer: strategische Beschaffung für den Mittelstand";
+const VERSION = "v5.15.7 · 05.11.2026 · Portfolio-Flyer: strategische Beschaffung für den Mittelstand";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1823,7 +1823,7 @@ const FLYER = {
       ["Portfolio für Unternehmensgruppen", "mehrere Standorte, ein Beschaffungskonzept"]]],
     ["Bewirtschaftung & Marktbeobachtung", [
       ["Individueller Beschaffungsplan", "Mengen, Zeitpunkte und Preisziele je Modell"],
-      ["Laufende Marktüberwachung", "Strom- und Gasmärkte täglich im Blick"],
+      ["Laufende Marktüberwachung", "Strom- und Gasmärkte laufend im Blick"],
       ["Kaufempfehlungen bei Marktchancen", "günstige Marktphasen gezielt nutzen"],
       ["Zielpreise und Limits", "vereinbart, überwacht und umgesetzt"],
       ["Individuelle Kundenbetreuung", "ein persönlicher Ansprechpartner, zugeschnitten auf Ihr Unternehmen"]]],
