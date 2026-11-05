@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.15.5 · 05.11.2026 · Portfolio-Flyer: individuelle Kundenbetreuung";
+const VERSION = "v5.15.6 · 05.11.2026 · Portfolio-Flyer: strategische Beschaffung für den Mittelstand";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1811,28 +1811,28 @@ async function visitenkartePdf(m) {
 /*  Kontaktblock aus den Visitenkartendaten und dem Profilfoto.         */
 /* ------------------------------------------------------------------ */
 const FLYER = {
-  intro: "EGC Energie mit Sitz in Waldmohr ist ein versorgerunabhängiger Energiedienstleister für Gewerbe, Industrie und Mittelstand in ganz Deutschland. Wir beschaffen Strom und Erdgas, begleiten Ihre Energieverträge über die gesamte Laufzeit und senken Ihre Energienebenkosten.",
+  intro: "EGC Energie ist Ihr unabhängiger Partner für die strategische Beschaffung von Strom und Erdgas. Wir entwickeln für Ihr Unternehmen eine passende Beschaffungsstrategie, setzen sie am Markt um und bewirtschaften sie über die gesamte Laufzeit, bundesweit für Industrie, Gewerbe und Mittelstand.",
   ziel: "Ihre externe Energieeinkaufsabteilung: Wir übernehmen den Energieeinkauf für Ihr Unternehmen und sind Ihr zentraler Ansprechpartner für Strom, Gas, Verträge und Energiekosten.",
-  ziel2: "Unser Ziel: Energiekosten dauerhaft senken, Ihren Aufwand verringern und eine verlässliche, zukunftsfähige Energieversorgung schaffen.",
+  ziel2: "Unser Ziel: Energie zum richtigen Zeitpunkt einkaufen, Preisrisiken steuern und Ihre Energiekosten dauerhaft planbar machen.",
   beschaffung: [
-    ["Beschaffungsmodelle", [
-      ["Festpreis", "Planungssicherheit über die gesamte Laufzeit"],
-      ["Spotmarkt", "Einkauf zu aktuellen Börsenpreisen"],
-      ["Tranchenmodelle", "Einkauf in mehreren Schritten, Risiko verteilt"],
-      ["PPA-Modelle", "Strom direkt aus Erzeugungsanlagen"],
-      ["Mehrere Standorte gebündelt", "ein Konzept für Filialen und Unternehmensgruppen"]]],
-    ["Beratung & Betreuung", [
-      ["Marktvergleich bei vielen Versorgern", "unabhängig und transparent"],
-      ["Individuelle Kundenbetreuung", "ein persönlicher Ansprechpartner, zugeschnitten auf Ihr Unternehmen"],
-      ["Versorgerwechsel komplett übernommen", "Kündigung, Anmeldung, Fristen"],
-      ["Laufende Portfolioanpassung", "Ihr Vertrag folgt der Marktentwicklung"],
-      ["Rechtzeitige Erinnerung vor Vertragsende", "keine verpassten Fristen"]]],
+    ["Individuelle Beschaffungsmodelle", [
+      ["Strukturierte Tranchenbeschaffung", "Mengen in Teilschritten zu gezielten Zeitpunkten einkaufen"],
+      ["Spotmarkt mit Absicherung", "Börsennähe kombiniert mit Preisgrenzen"],
+      ["Festpreis und Terminmarkt", "Planungssicherheit für Ihr Budget"],
+      ["PPA und Direktbezug", "Strom direkt aus Erzeugungsanlagen"],
+      ["Portfolio für Unternehmensgruppen", "mehrere Standorte, ein Beschaffungskonzept"]]],
+    ["Bewirtschaftung & Marktbeobachtung", [
+      ["Individueller Beschaffungsplan", "Mengen, Zeitpunkte und Preisziele je Modell"],
+      ["Laufende Marktüberwachung", "Strom- und Gasmärkte täglich im Blick"],
+      ["Kaufempfehlungen bei Marktchancen", "günstige Marktphasen gezielt nutzen"],
+      ["Zielpreise und Limits", "vereinbart, überwacht und umgesetzt"],
+      ["Individuelle Kundenbetreuung", "ein persönlicher Ansprechpartner, zugeschnitten auf Ihr Unternehmen"]]],
   ],
   management: [
-    ["Lastganganalyse (RLM)", "Lastspitzen erkennen, Einsparpotenziale finden"],
+    ["Lastganganalyse (RLM)", "Grundlage für Beschaffungsplan und Lastspitzen"],
+    ["Reporting und Budgetplanung", "Preise, Mengen und Kosten transparent je Standort"],
     ["Energierechnungsprüfung", "Abrechnungsfehler und versteckte Kosten aufdecken"],
-    ["Netzentgelte & Blindarbeit prüfen", "netzbezogene Auffälligkeiten klären"],
-    ["Übersicht je Lieferstelle", "Verbrauch, Kosten und Laufzeiten im Blick"]],
+    ["Netzentgelte und Blindarbeit", "netzbezogene Auffälligkeiten klären"]],
   technik: [
     ["Photovoltaik", "Dach- und Freiflächenanlagen über Partnerunternehmen oder Ausschreibung"],
     ["Batteriespeicher", "eigenen Strom speichern, Lastspitzen kappen"],
@@ -1840,28 +1840,28 @@ const FLYER = {
     ["E-Ladesäulen", "Ladeinfrastruktur für Fuhrpark und Kunden"],
     ["Fördermittelberatung", "Zugang zu erfahrenen Fördermittelberatern"]],
   schritte: [
-    ["Analyse", "Wir prüfen Ihre Verträge, Rechnungen und Verbräuche."],
-    ["Angebot", "Sie erhalten Ihr individuelles Angebot mit klarem Vergleich."],
-    ["Wechsel", "Wir übernehmen Kündigung, Anmeldung und alle Fristen."],
-    ["Bewirtschaftung", "Wir bewirtschaften Ihr Beschaffungsmodell und passen es laufend an den Markt an."],
-    ["Nebenkosten", "Wir senken Ihre Energienebenkosten, z. B. durch Steuererstattungen."]],
+    ["Analyse", "Lastgang, Verträge und Ihr Risikoprofil auswerten."],
+    ["Strategie", "Beschaffungsmodell und Beschaffungsplan festlegen."],
+    ["Umsetzung", "Ausschreibung bei den Versorgern und Vertragsabschluss."],
+    ["Bewirtschaftung", "Markt überwachen, Tranchen kaufen, laufend anpassen."],
+    ["Nebenkosten", "Energienebenkosten senken, Erstattungen sichern."]],
   nebenkosten: [
     ["Strom- & Energiesteuer", "Rückerstattung und Entlastung"],
     ["Konzessionsabgabe", "prüfen und korrigieren lassen"],
     ["Netzentgelte", "atypische und individuelle Netzentgelte"],
     ["CO2-Kompensation", "Entlastungswege nutzen, wo möglich"]],
   vorteile: [
-    ["WIRTSCHAFTLICHKEIT", "& EFFIZIENZ", [
-      ["Spürbar niedrigere Energiekosten", "durch gezielte Beschaffung und genaue Analyse Ihres Verbrauchs"],
-      ["Planungssicherheit", "durch Festpreise und strukturierte Tranchenmodelle"],
-      ["Keine versteckten Kosten", "transparente und faire Vertragsbedingungen"],
-      ["Entlastung Ihres Teams", "Sie kümmern sich um Ihr Kerngeschäft, wir um Ihre Energie"]]],
-    ["PERSÖNLICH", "& BUNDESWEIT", [
+    ["WIRTSCHAFTLICHKEIT", "& PLANBARKEIT", [
+      ["Bessere Einkaufspreise", "durch Einkauf zum richtigen Zeitpunkt statt zum Stichtag"],
+      ["Planbare Budgets", "Preisrisiken gezielt steuern und absichern"],
+      ["Volle Transparenz", "Reporting zu Mengen, Preisen und Kosten"],
+      ["Entlastung Ihres Einkaufs", "wir übernehmen Beschaffung und Vertragsmanagement"]]],
+    ["INDIVIDUELL", "& PERSÖNLICH", [
       ["Ein zentraler Ansprechpartner", "für alle Energiethemen, der Ihr Unternehmen und Ihre Verträge kennt"],
       ["Bundesweit für Sie da", "persönliche Betreuung in ganz Deutschland, vor Ort und digital"],
-      ["Branchengerechte Lösungen", "für Produktion, Handel, Handwerk, Hotellerie und mehr"]]],
+      ["Konzepte für Ihre Branche", "für Industrie, Produktion, Logistik, Handel und Gewerbe"]]],
     ["UNABHÄNGIG", "& FLEXIBEL", [
-      ["Versorgerunabhängige Beratung", "wir empfehlen, was zu Ihnen passt"],
+      ["Versorgerunabhängige Beratung", "wir empfehlen, was zu Ihrem Unternehmen passt"],
       ["Schnelle Reaktion auf den Markt", "wir passen Ihre Strategie an Preise und Regeln an"]]],
     ["NACHHALTIG", "& ZUKUNFTSSICHER", [
       ["Ökostrom mit Herkunftsnachweis", "auf Wunsch für Ihren gesamten Bedarf"],
@@ -1931,7 +1931,7 @@ async function portfolioFlyerPdf(m) {
   };
 
   /* ---------- Seite 1: Leistungsportfolio ---------- */
-  let y = kopf("UNSER LEISTUNGSPORTFOLIO IM ÜBERBLICK", "Leistungsportfolio", "der EGC Energie");
+  let y = kopf("UNSER LEISTUNGSPORTFOLIO IM ÜBERBLICK", "Strategische Energiebeschaffung", "für den Mittelstand");
   y += 9;
   schrift(8.6); fa(TEXT);
   const li = doc.splitTextToSize(FLYER.intro + " " + FLYER.ziel2, 108); doc.text(li, RA, y, { lineHeightFactor: 1.4 });
@@ -1940,7 +1940,7 @@ async function portfolioFlyerPdf(m) {
   schrift(8.3, true); fa(NAVY); doc.text(doc.splitTextToSize(FLYER.ziel, BR - 123), RA + 120, y + 0.5, { lineHeightFactor: 1.4 });
   y += Math.max(li.length * 4.2, 24) + 7;
 
-  kopfzeile("STROM- &", "GASBESCHAFFUNG", RA, y, 10.5); y += 6;
+  kopfzeile("BESCHAFFUNGSSTRATEGIE", "& BEWIRTSCHAFTUNG", RA, y, 10.5); y += 6;
   const spB = (BR - 6) / 2;
   const y0 = y;
   let yEnde = y;
