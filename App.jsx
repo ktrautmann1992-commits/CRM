@@ -1305,6 +1305,9 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
 async function dienstleistungsvertragPdf(kunde = null, honorar = { mit: true, betrag: 300 }) {
   const DLV_TEXT = dlvText(honorar);
   const jsPDF = await ladeJsPdf();
+  /* GR/ZL: Schriftgröße und Zeilenabstand des Fließtexts; es wird so lange
+     probiert, bis die Seitenzahl gerade ist (Druck auf Vorder- und Rückseite) */
+  const bauen = (GR, ZL) => {
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const W = 210, H = 297, RA = 18, BR = W - 2 * RA, UNTEN = H - 24;
   const NAVY = [10, 22, 38], NAVY1 = [7, 16, 29], NAVY2 = [27, 58, 96], GRUEN = [108, 180, 59],
@@ -1347,10 +1350,11 @@ async function dienstleistungsvertragPdf(kunde = null, honorar = { mit: true, be
   const neueSeite = () => { doc.addPage(); return kopf("DIENSTLEISTUNGSVERTRAG"); };
   let y;
   const platz = (h) => { if (y + h > UNTEN) y = neueSeite(); };
-  const absatz = (t, x, breite, gr = 8.8, zeile = 4.1) => {
+  const absatz = (t, x, breite, gr = GR, zeile = ZL) => {
     schrift(gr); fa(TEXT);
     const z = doc.splitTextToSize(String(t), breite);
-    z.forEach((zeileText) => { platz(zeile); doc.text(zeileText, x, y); y += zeile; });
+    /* nach einem Seitenwechsel stellt die Fußzeile eine kleine graue Schrift ein: je Zeile neu setzen */
+    z.forEach((zeileText) => { platz(zeile); schrift(gr); fa(TEXT); doc.text(zeileText, x, y); y += zeile; });
   };
   const ueberschrift = (t) => {
     platz(14);
@@ -1402,33 +1406,34 @@ async function dienstleistungsvertragPdf(kunde = null, honorar = { mit: true, be
   y += 8;
   schrift(8); fa(GRAU); doc.text("Stand: " + datum(heute()) + " | Version 1.0", RA, y);
 
-  /* ---------- Vertragstext ---------- */
-  y = neueSeite();
+  /* ---------- Vertragstext: direkt unter den Kernkonditionen ---------- */
+  y += 12;
   absatz(DLV_TEXT.einleitung, RA, BR); y += 4;
   DLV_TEXT.ziffern.forEach(([titel, teile]) => {
     ueberschrift(titel);
     teile.forEach((t) => {
       if (t && t.punkte) {
         t.punkte.forEach((p) => {
-          schrift(8.8); const z = doc.splitTextToSize(p, BR - 7);
-          platz(z.length * 4.1);
+          schrift(GR); const z = doc.splitTextToSize(p, BR - 7);
+          platz(z.length * ZL);
           fl(GRUEN); doc.circle(RA + 2, y - 1.2, 0.8, "F");
-          fa(TEXT); z.forEach((zt) => { doc.text(zt, RA + 6, y); y += 4.1; });
+          schrift(GR); fa(TEXT); z.forEach((zt) => { doc.text(zt, RA + 6, y); y += ZL; });
         });
         y += 1.5;
         return;
       }
       /* „2.1 Titel. Text“: Nummer und Titel fett */
-      const m = /^(\d+\.\d+ [^.]+\.)\s(.*)$/.exec(t);
-      if (m) { platz(10); schrift(8.8, true); fa(NAVY); doc.text(m[1], RA, y); y += 4.3; absatz(m[2], RA, BR); }
+      const m = /^(\d+\.\d+ [^.,]{3,70}\.)\s(.*)$/.exec(t);
+      if (m) { platz(10); schrift(GR, true); fa(NAVY); doc.text(m[1], RA, y); y += 4.3; absatz(m[2], RA, BR); }
       else absatz(t, RA, BR);
       y += 2.2;
     });
     y += 2;
   });
 
-  /* ---------- Referenzfreigabe und Unterschriften ---------- */
-  y = neueSeite();
+  /* ---------- Referenzfreigabe und Unterschriften: neue Seite nur, wenn der Platz nicht reicht ---------- */
+  platz(DLV_TEXT.mit ? 132 : 78);
+  y += 6;
   schrift(16, true); fa(NAVY); doc.text(DLV_TEXT.mit ? "Referenzfreigabe" : "Unterschriften", RA, y + 2);
   if (DLV_TEXT.mit) { schrift(8.5, true); fa(GRUEN1); doc.text(DLV_TEXT.freigabeUnter, RA, y + 9, { charSpace: 0.3 }); }
   y += DLV_TEXT.mit ? 20 : 12;
@@ -1462,9 +1467,16 @@ async function dienstleistungsvertragPdf(kunde = null, honorar = { mit: true, be
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++) { doc.setPage(i); schrift(7); fa(GRAU); doc.text("Seite " + i + " von " + n, W - RA, H - 6.4, { align: "right" }); }
 
+  return doc;
+  };
+  let doc = null;
+  for (const [gr, zl] of [[8.8, 4.1], [8.5, 3.95], [9.1, 4.25], [8.2, 3.8], [9.4, 4.4], [7.9, 3.65]]) {
+    doc = bauen(gr, zl);
+    if (doc.getNumberOfPages() % 2 === 0) break;
+  }
   const roh = doc.output("datauristring");
-  const name = blanko ? "Dienstleistungsvertrag_Blanko_" + (DLV_TEXT.mit ? "mit" : "ohne") + "_Honorar.pdf"
-    : "Dienstleistungsvertrag_" + String(k.firma || "Kunde").replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf";
+  const name = !kunde ? "Dienstleistungsvertrag_Blanko_" + (DLV_TEXT.mit ? "mit" : "ohne") + "_Honorar.pdf"
+    : "Dienstleistungsvertrag_" + String(kunde.firma || "Kunde").replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf";
   return { name, typ: "application/pdf", groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
 }
 
