@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.15.3 · 05.11.2026 · Portfolio-Flyer: externe Energieeinkaufsabteilung";
+const VERSION = "v5.15.4 · 05.11.2026 · Portfolio-Flyer: Bewirtschaftung und Nebenkosten";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1843,7 +1843,8 @@ const FLYER = {
     ["Analyse", "Wir prüfen Ihre Verträge, Rechnungen und Verbräuche."],
     ["Angebot", "Sie erhalten Ihr individuelles Angebot mit klarem Vergleich."],
     ["Wechsel", "Wir übernehmen Kündigung, Anmeldung und alle Fristen."],
-    ["Betreuung", "Wir begleiten Ihren Vertrag dauerhaft und passen ihn an."]],
+    ["Bewirtschaftung", "Wir bewirtschaften Ihr Beschaffungsmodell und passen es laufend an den Markt an."],
+    ["Nebenkosten", "Wir senken Ihre Energienebenkosten, z. B. durch Steuererstattungen."]],
   nebenkosten: [
     ["Strom- & Energiesteuer", "Rückerstattung und Entlastung"],
     ["Konzessionsabgabe", "prüfen und korrigieren lassen"],
@@ -2004,17 +2005,17 @@ async function portfolioFlyerPdf(m) {
   /* So einfach geht's: vier Schritte zwischen Vorteilen und Kontakt */
   const kh = 62, ky = H - kh - 12;
   /* Schritte mittig zwischen Vorteilen und Kontaktblock */
-  const sy = yMax + Math.max(2, (ky - yMax - 46) / 2);
+  const sy = yMax + Math.max(1, (ky - yMax - 49) / 2);
   kopfzeile("SO EINFACH", "GEHT'S", RA, sy, 10.5);
-  const sb = (BR - 9) / 4;
+  const ns = FLYER.schritte.length, sb = (BR - 3 * (ns - 1)) / ns;
   FLYER.schritte.forEach(([t, u], i) => {
     const x = RA + i * (sb + 3), yy = sy + 6;
-    fl(HELL); doc.roundedRect(x, yy, sb, 34, 2.5, 2.5, "F");
+    fl(HELL); doc.roundedRect(x, yy, sb, 37, 2.5, 2.5, "F");
     verlauf(x + 4, yy + 4, 8, 8, GRUEN2, GRUEN1, { kreis: true, quer: false, n: 24 });
     schrift(10, true); fa(WEISS); doc.text(String(i + 1), x + 8, yy + 9.6, { align: "center" });
-    if (i < 3) { st(GRUEN2); doc.setLineWidth(0.5); doc.setLineDashPattern([0.8, 0.9], 0); doc.line(x + 13, yy + 8, x + sb + 1, yy + 8); doc.setLineDashPattern([], 0); }
-    schrift(9.4, true); fa(NAVY); doc.text(t, x + 4, yy + 18);
-    schrift(7.8); fa(GRAU); doc.text(doc.splitTextToSize(u, sb - 8), x + 4, yy + 22.5);
+    if (i < ns - 1) { st(GRUEN2); doc.setLineWidth(0.5); doc.setLineDashPattern([0.8, 0.9], 0); doc.line(x + 13, yy + 8, x + sb + 1, yy + 8); doc.setLineDashPattern([], 0); }
+    schrift(8.8, true); fa(NAVY); doc.text(t, x + 4, yy + 18);
+    schrift(7.4); fa(GRAU); doc.text(doc.splitTextToSize(u, sb - 7), x + 4, yy + 22.5);
   });
 
   /* Kontaktblock */
