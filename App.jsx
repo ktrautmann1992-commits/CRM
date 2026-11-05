@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.15.1 · 05.11.2026 · Portfolio-Flyer: bundesweit";
+const VERSION = "v5.15.2 · 05.11.2026 · Portfolio-Flyer: Partnernetzwerk und Fördermittel";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1833,10 +1833,11 @@ const FLYER = {
     ["Netzentgelte & Blindarbeit prüfen", "netzbezogene Auffälligkeiten klären"],
     ["Übersicht je Lieferstelle", "Verbrauch, Kosten und Laufzeiten im Blick"]],
   technik: [
-    ["Smartmeter", "digitale Messung, genaue Verbrauchsdaten"],
-    ["Photovoltaik", "Planung von Dach- und Freiflächenanlagen"],
-    ["Batteriespeicher", "eigenen Strom speichern, Spitzen kappen"],
-    ["E-Ladesäulen", "Ladeinfrastruktur für Fuhrpark und Kunden"]],
+    ["Photovoltaik", "Dach- und Freiflächenanlagen über Partnerunternehmen oder Ausschreibung"],
+    ["Batteriespeicher", "eigenen Strom speichern, Lastspitzen kappen"],
+    ["Smartmeter", "digitale Messung über unsere Partner"],
+    ["E-Ladesäulen", "Ladeinfrastruktur für Fuhrpark und Kunden"],
+    ["Fördermittelberatung", "Zugang zu erfahrenen Fördermittelberatern"]],
   schritte: [
     ["Analyse", "Wir prüfen Ihre Verträge, Rechnungen und Verbräuche."],
     ["Angebot", "Sie erhalten Ihr individuelles Angebot mit klarem Vergleich."],
@@ -1862,8 +1863,9 @@ const FLYER = {
       ["Schnelle Reaktion auf den Markt", "wir passen Ihre Strategie an Preise und Regeln an"]]],
     ["NACHHALTIG", "& ZUKUNFTSSICHER", [
       ["Ökostrom mit Herkunftsnachweis", "auf Wunsch für Ihren gesamten Bedarf"],
-      ["Eigene Erzeugung und Speicher", "PV, Batteriespeicher und Ladesäulen aus einer Hand"],
-      ["Digitale Messung", "mit Smartmetern zu genauen Verbrauchsdaten"]]],
+      ["Eigene Erzeugung und Speicher", "PV, Batteriespeicher und Ladesäulen über geprüfte Partner, Ausschreibungen und unser Netzwerk"],
+      ["Fördermittel nutzen", "über unseren Zugang zu Fördermittelberatern"],
+      ["Digitale Messung", "Smartmeter über unsere Partner"]]],
   ],
 };
 
@@ -1952,8 +1954,11 @@ async function portfolioFlyerPdf(m) {
 
   const sp2 = (BR - 8) / 2;
   kopfzeile("ENERGIEMANAGEMENT", "& ANALYSEN", RA, y, 10.5);
-  kopfzeile("TECHNISCHE LÖSUNGEN", "", RA + sp2 + 8, y, 10.5);
-  y += 6.5;
+  kopfzeile("TECHNISCHE LÖSUNGEN", "& PARTNER", RA + sp2 + 8, y, 10.5);
+  y += 4.8;
+  schrift(7.4); fa(GRAU);
+  doc.text("Umsetzung über Partnerunternehmen, Ausschreibungen und unser Netzwerk", RA + sp2 + 8, y);
+  y += 5.2;
   let ya = y, yb = y;
   FLYER.management.forEach(([t, u]) => { ya = punkt(t, u, RA, ya, sp2); });
   FLYER.technik.forEach(([t, u]) => { yb = punkt(t, u, RA + sp2 + 8, yb, sp2); });
