@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.14.3 · 05.11.2026 · Visitenkarte: Vorderseite schlichter";
+const VERSION = "v5.15 · 05.11.2026 · Portfolio-Flyer je Vertriebsmitarbeiter";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1803,6 +1803,249 @@ async function visitenkartePdf(m) {
 
   const roh = doc.output("datauristring");
   return { name: "Visitenkarte_" + p.name.replace(/[^\wäöüÄÖÜß]+/g, "_") + "_Druckdatei.pdf", typ: "application/pdf",
+           groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Portfolio-Flyer (2 Seiten A4) im EGC-Design, je Vertriebsmitarbeiter */
+/*  Kontaktblock aus den Visitenkartendaten und dem Profilfoto.         */
+/* ------------------------------------------------------------------ */
+const FLYER = {
+  intro: "EGC Energie mit Sitz in Waldmohr ist ein versorgerunabhängiger Energiedienstleister für Gewerbe, Industrie und Mittelstand im Saarland und in Rheinland-Pfalz. Wir beschaffen Strom und Erdgas, begleiten Ihre Energieverträge über die gesamte Laufzeit und senken Ihre Energienebenkosten.",
+  ziel: "Unser Ziel: Energiekosten dauerhaft senken, Ihren Aufwand verringern und eine verlässliche, zukunftsfähige Energieversorgung für Ihr Unternehmen schaffen.",
+  beschaffung: [
+    ["Beschaffungsmodelle", [
+      ["Festpreis", "Planungssicherheit über die gesamte Laufzeit"],
+      ["Spotmarkt", "Einkauf zu aktuellen Börsenpreisen"],
+      ["Tranchenmodelle", "Einkauf in mehreren Schritten, Risiko verteilt"],
+      ["PPA-Modelle", "Strom direkt aus Erzeugungsanlagen"],
+      ["Mehrere Standorte gebündelt", "ein Konzept für Filialen und Unternehmensgruppen"]]],
+    ["Beratung & Betreuung", [
+      ["Marktvergleich bei vielen Versorgern", "unabhängig und transparent"],
+      ["Persönlicher Ansprechpartner", "feste Betreuung statt Warteschleife"],
+      ["Versorgerwechsel komplett übernommen", "Kündigung, Anmeldung, Fristen"],
+      ["Laufende Portfolioanpassung", "Ihr Vertrag folgt der Marktentwicklung"],
+      ["Rechtzeitige Erinnerung vor Vertragsende", "keine verpassten Fristen"]]],
+  ],
+  management: [
+    ["Lastganganalyse (RLM)", "Lastspitzen erkennen, Einsparpotenziale finden"],
+    ["Energierechnungsprüfung", "Abrechnungsfehler und versteckte Kosten aufdecken"],
+    ["Netzentgelte & Blindarbeit prüfen", "netzbezogene Auffälligkeiten klären"],
+    ["Übersicht je Lieferstelle", "Verbrauch, Kosten und Laufzeiten im Blick"]],
+  technik: [
+    ["Smartmeter", "digitale Messung, genaue Verbrauchsdaten"],
+    ["Photovoltaik", "Planung von Dach- und Freiflächenanlagen"],
+    ["Batteriespeicher", "eigenen Strom speichern, Spitzen kappen"],
+    ["E-Ladesäulen", "Ladeinfrastruktur für Fuhrpark und Kunden"]],
+  schritte: [
+    ["Analyse", "Wir prüfen Ihre Verträge, Rechnungen und Verbräuche."],
+    ["Angebot", "Sie erhalten Ihr individuelles Angebot mit klarem Vergleich."],
+    ["Wechsel", "Wir übernehmen Kündigung, Anmeldung und alle Fristen."],
+    ["Betreuung", "Wir begleiten Ihren Vertrag dauerhaft und passen ihn an."]],
+  nebenkosten: [
+    ["Strom- & Energiesteuer", "Rückerstattung und Entlastung"],
+    ["Konzessionsabgabe", "prüfen und korrigieren lassen"],
+    ["Netzentgelte", "atypische und individuelle Netzentgelte"],
+    ["CO2-Kompensation", "Entlastungswege nutzen, wo möglich"]],
+  vorteile: [
+    ["WIRTSCHAFTLICHKEIT", "& EFFIZIENZ", [
+      ["Spürbar niedrigere Energiekosten", "durch gezielte Beschaffung und genaue Analyse Ihres Verbrauchs"],
+      ["Planungssicherheit", "durch Festpreise und strukturierte Tranchenmodelle"],
+      ["Keine versteckten Kosten", "transparente und faire Vertragsbedingungen"],
+      ["Entlastung Ihres Teams", "Sie kümmern sich um Ihr Kerngeschäft, wir um Ihre Energie"]]],
+    ["PERSÖNLICH", "& REGIONAL", [
+      ["Ein fester Ansprechpartner", "der Ihr Unternehmen und Ihre Verträge kennt"],
+      ["Vor Ort im Saarland und in Rheinland-Pfalz", "kurze Wege, persönliche Termine"],
+      ["Branchengerechte Lösungen", "für Produktion, Handel, Handwerk, Hotellerie und mehr"]]],
+    ["UNABHÄNGIG", "& FLEXIBEL", [
+      ["Versorgerunabhängige Beratung", "wir empfehlen, was zu Ihnen passt"],
+      ["Schnelle Reaktion auf den Markt", "wir passen Ihre Strategie an Preise und Regeln an"]]],
+    ["NACHHALTIG", "& ZUKUNFTSSICHER", [
+      ["Ökostrom mit Herkunftsnachweis", "auf Wunsch für Ihren gesamten Bedarf"],
+      ["Eigene Erzeugung und Speicher", "PV, Batteriespeicher und Ladesäulen aus einer Hand"],
+      ["Digitale Messung", "mit Smartmetern zu genauen Verbrauchsdaten"]]],
+  ],
+};
+
+async function portfolioFlyerPdf(m) {
+  const p = visitenkartenDaten(m);
+  const F = FIRMENDATEN;
+  const [jsPDF, logoT] = await Promise.all([ladeJsPdf(), bildAlsDataUrl("/assets/logo-weiss.png")]);
+  const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
+  const W = 210, H = 297, RA = 15, BR = W - 2 * RA;
+  const NAVY = [10, 22, 38], NAVY1 = [7, 16, 29], NAVY2 = [27, 58, 96], GRUEN = [108, 180, 59], GRUEN1 = [74, 140, 38],
+        GRUEN2 = [150, 206, 96], WEISS = [255, 255, 255], TEXT = [22, 33, 44], GRAU = [107, 119, 135],
+        HELL = [246, 248, 250], HELLBLAU = [196, 208, 222], LINIE = [216, 221, 228];
+  const fl = (c) => doc.setFillColor(c[0], c[1], c[2]);
+  const st = (c) => doc.setDrawColor(c[0], c[1], c[2]);
+  const fa = (c) => doc.setTextColor(c[0], c[1], c[2]);
+  const schrift = (g, fett) => { doc.setFont("helvetica", fett ? "bold" : "normal"); doc.setFontSize(g); };
+  const mische = (a, b, t) => a.map((c, i) => Math.round(c + (b[i] - c) * t));
+  const dk = (o) => doc.setGState(new doc.GState({ opacity: o, "stroke-opacity": o }));
+  const verlauf = (x, y, w, h, f1, f2, { quer = true, n = 90, r = 0, kreis = false } = {}) => {
+    doc.saveGraphicsState();
+    if (kreis) doc.circle(x + w / 2, y + h / 2, w / 2, null); else if (r) doc.roundedRect(x, y, w, h, r, r, null); else doc.rect(x, y, w, h, null);
+    doc.clip(); doc.discardPath();
+    for (let i = 0; i < n; i++) { fl(mische(f1, f2, i / (n - 1))); if (quer) doc.rect(x + (i * w) / n, y, w / n + 0.2, h, "F"); else doc.rect(x, y + (i * h) / n, w, h / n + 0.2, "F"); }
+    doc.restoreGraphicsState();
+  };
+  const ring = (x, y, r, o) => { dk(o); st(WEISS); doc.setLineWidth(0.5); doc.circle(x, y, r, "S"); dk(1); };
+  const haken = (x, y, f = GRUEN) => {
+    fl(f); doc.circle(x, y - 1.1, 1.7, "F"); st(WEISS); doc.setLineWidth(0.4);
+    doc.line(x - 0.75, y - 1.1, x - 0.2, y - 0.5); doc.line(x - 0.2, y - 0.5, x + 0.85, y - 1.75);
+  };
+  /* Überschrift in zwei Farben: erster Teil navy, zweiter grün */
+  const kopfzeile = (a, b, x, y, gr = 10, hell = false) => {
+    schrift(gr, true); fa(hell ? WEISS : NAVY); doc.text(a, x, y);
+    if (b) { const w = doc.getTextWidth(a + " "); fa(hell ? GRUEN2 : GRUEN1); doc.text(b, x + w, y); }
+  };
+  /* Punkt mit fettem Titel und grauer Zeile darunter; gibt die neue y-Position zurück */
+  const punkt = (titel, unter, x, y, breite, gr = 8.8, hell = false) => {
+    haken(x + 1.7, y);
+    schrift(gr, true); fa(hell ? WEISS : TEXT);
+    const t = doc.splitTextToSize(titel, breite - 6); doc.text(t, x + 5.4, y); y += t.length * gr * 0.42;
+    if (unter) { schrift(gr - 0.9); fa(hell ? HELLBLAU : GRAU); const u = doc.splitTextToSize(unter, breite - 6); doc.text(u, x + 5.4, y); y += u.length * (gr - 0.9) * 0.42; }
+    return y + gr * 0.3;
+  };
+  const kopf = (kicker, a, b) => {
+    const hk = 52;
+    verlauf(0, 0, W, hk, NAVY1, NAVY2, { quer: false });
+    doc.saveGraphicsState(); doc.rect(0, 0, W, hk, null); doc.clip(); doc.discardPath();
+    ring(W - 20, 6, 30, 0.09); ring(W - 20, 6, 40, 0.06); ring(W - 20, 6, 50, 0.04);
+    doc.restoreGraphicsState();
+    doc.addImage(logoT, "PNG", W - RA - (420 / 196) * 11, 9, (420 / 196) * 11, 11);
+    schrift(7, true); fa(GRUEN2); doc.text(kicker, RA, 15, { charSpace: 0.9 });
+    schrift(21, true); fa(WEISS); doc.text(a, RA, 29);
+    schrift(21, true); fa(GRUEN2); doc.text(b, RA, 38.5);
+    verlauf(0, hk, W, 1.3, GRUEN1, GRUEN2);
+    return hk;
+  };
+  const fuss = () => {
+    schrift(6.6); fa(GRAU);
+    doc.text(["EGC Energie", [F.strasse, F.ort].filter(Boolean).join(", "), F.telefon ? "Tel. " + F.telefon : "", F.website].filter(Boolean).join("  ·  "),
+      W / 2, H - 6, { align: "center" });
+  };
+
+  /* ---------- Seite 1: Leistungsportfolio ---------- */
+  let y = kopf("UNSER LEISTUNGSPORTFOLIO IM ÜBERBLICK", "Leistungsportfolio", "der EGC Energie");
+  y += 9;
+  schrift(8.6); fa(TEXT);
+  const li = doc.splitTextToSize(FLYER.intro, 108); doc.text(li, RA, y, { lineHeightFactor: 1.4 });
+  fl(HELL); doc.roundedRect(RA + 115, y - 4.5, BR - 115, 28, 2.5, 2.5, "F");
+  verlauf(RA + 115, y - 4.5, 1.6, 28, GRUEN2, GRUEN1, { quer: false, n: 20 });
+  schrift(8.3, true); fa(NAVY); doc.text(doc.splitTextToSize(FLYER.ziel, BR - 123), RA + 120, y + 0.5, { lineHeightFactor: 1.4 });
+  y += Math.max(li.length * 4.2, 24) + 7;
+
+  kopfzeile("STROM- &", "GASBESCHAFFUNG", RA, y, 10.5); y += 6;
+  const spB = (BR - 6) / 2;
+  const y0 = y;
+  let yEnde = y;
+  FLYER.beschaffung.forEach(([titel, punkte], i) => {
+    const x = RA + i * (spB + 6);
+    fl(HELL); doc.roundedRect(x, y0, spB, 70, 2.5, 2.5, "F");
+    schrift(8.6, true); fa(GRUEN1); doc.text(titel, x + 4, y0 + 7);
+    let yy = y0 + 13;
+    punkte.forEach(([t, u]) => { yy = punkt(t, u, x + 3, yy, spB - 5); });
+    yEnde = Math.max(yEnde, yy);
+  });
+  y = y0 + 70 + 9;
+
+  const sp2 = (BR - 8) / 2;
+  kopfzeile("ENERGIEMANAGEMENT", "& ANALYSEN", RA, y, 10.5);
+  kopfzeile("TECHNISCHE LÖSUNGEN", "", RA + sp2 + 8, y, 10.5);
+  y += 6.5;
+  let ya = y, yb = y;
+  FLYER.management.forEach(([t, u]) => { ya = punkt(t, u, RA, ya, sp2); });
+  FLYER.technik.forEach(([t, u]) => { yb = punkt(t, u, RA + sp2 + 8, yb, sp2); });
+  y = Math.max(ya, yb) + 4;
+
+  /* Nebenkosten als dunkles Band, fest am unteren Rand */
+  const bh = 44;
+  y = H - 12 - bh;
+  verlauf(0, y, W, bh, NAVY1, NAVY2, { quer: false });
+  doc.saveGraphicsState(); doc.rect(0, y, W, bh, null); doc.clip(); doc.discardPath();
+  ring(18, y + bh + 6, 22, 0.07); ring(18, y + bh + 6, 30, 0.05);
+  doc.restoreGraphicsState();
+  kopfzeile("NEBENKOSTENOPTIMIERUNG", "& ERSTATTUNGEN", RA, y + 9, 10.5, true);
+  const kb = (BR - 9) / 4;
+  FLYER.nebenkosten.forEach(([t, u], i) => {
+    const x = RA + i * (kb + 3), yy = y + 15;
+    dk(0.08); fl(WEISS); doc.roundedRect(x, yy, kb, bh - 20, 2.2, 2.2, "F"); dk(1);
+    verlauf(x, yy, kb, 1.2, GRUEN1, GRUEN2, { n: 20 });
+    schrift(8.6, true); fa(WEISS); const tt = doc.splitTextToSize(t, kb - 6); doc.text(tt, x + 3, yy + 7);
+    schrift(7.6); fa(HELLBLAU); doc.text(doc.splitTextToSize(u, kb - 6), x + 3, yy + 7 + tt.length * 3.7 + 0.8);
+  });
+  fuss();
+
+  /* ---------- Seite 2: Vorteile und Kontakt ---------- */
+  doc.addPage();
+  y = kopf("KUNDENVORTEILE IM ÜBERBLICK", "Ihre Vorteile mit EGC Energie", "auf einen Blick");
+  y += 11;
+  const sp = (BR - 10) / 2;
+  const spalten = [[FLYER.vorteile[0], FLYER.vorteile[2]], [FLYER.vorteile[1], FLYER.vorteile[3]]];
+  let yMax = y;
+  spalten.forEach((bloecke, i) => {
+    const x = RA + i * (sp + 10);
+    let yy = y;
+    bloecke.forEach(([a, b, punkte]) => {
+      kopfzeile(a, b, x, yy, 10.5); yy += 7;
+      punkte.forEach(([t, u]) => { yy = punkt(t, u, x, yy, sp, 9.2); });
+      yy += 6;
+    });
+    yMax = Math.max(yMax, yy);
+  });
+
+  /* So einfach geht's: vier Schritte zwischen Vorteilen und Kontakt */
+  const kh = 62, ky = H - kh - 12;
+  /* Schritte mittig zwischen Vorteilen und Kontaktblock */
+  const sy = yMax + Math.max(2, (ky - yMax - 46) / 2);
+  kopfzeile("SO EINFACH", "GEHT'S", RA, sy, 10.5);
+  const sb = (BR - 9) / 4;
+  FLYER.schritte.forEach(([t, u], i) => {
+    const x = RA + i * (sb + 3), yy = sy + 6;
+    fl(HELL); doc.roundedRect(x, yy, sb, 34, 2.5, 2.5, "F");
+    verlauf(x + 4, yy + 4, 8, 8, GRUEN2, GRUEN1, { kreis: true, quer: false, n: 24 });
+    schrift(10, true); fa(WEISS); doc.text(String(i + 1), x + 8, yy + 9.6, { align: "center" });
+    if (i < 3) { st(GRUEN2); doc.setLineWidth(0.5); doc.setLineDashPattern([0.8, 0.9], 0); doc.line(x + 13, yy + 8, x + sb + 1, yy + 8); doc.setLineDashPattern([], 0); }
+    schrift(9.4, true); fa(NAVY); doc.text(t, x + 4, yy + 18);
+    schrift(7.8); fa(GRAU); doc.text(doc.splitTextToSize(u, sb - 8), x + 4, yy + 22.5);
+  });
+
+  /* Kontaktblock */
+  verlauf(RA, ky, BR, kh, NAVY1, NAVY2, { r: 4, n: 60 });
+  doc.saveGraphicsState(); doc.roundedRect(RA, ky, BR, kh, 4, 4, null); doc.clip(); doc.discardPath();
+  ring(W - RA - 30, ky + 4, 34, 0.08); ring(W - RA - 30, ky + 4, 44, 0.05);
+  verlauf(RA, ky, BR, 1.4, GRUEN1, GRUEN2, { n: 40 });
+  doc.restoreGraphicsState();
+  schrift(17, true); fa(WEISS); doc.text("So erreichen Sie", RA + 9, ky + 14);
+  const w1 = doc.getTextWidth("So erreichen Sie ");
+  fa(GRUEN2); doc.text("uns!", RA + 9 + w1, ky + 14);
+  schrift(11.5, true); fa(GRUEN2); doc.text(p.name, RA + 9, ky + 25);
+  schrift(8.4); fa(HELLBLAU); doc.text(p.titel, RA + 9, ky + 30);
+  if (p.zusatz) { schrift(7); doc.text(doc.splitTextToSize(p.zusatz, 110)[0], RA + 9, ky + 34); }
+  const zeilen = [p.mobil ? "Mobil " + p.mobil : null, p.telefon ? "Tel. " + p.telefon : null, p.email, F.website].filter(Boolean);
+  zeilen.forEach((t, i) => {
+    const yy = ky + 41 + i * 5;
+    fl(GRUEN); doc.circle(RA + 10.6, yy - 1.1, 1.5, "F");
+    schrift(8.6); fa(WEISS); doc.text(t, RA + 14.5, yy);
+  });
+  /* Foto rund, sonst Initialen */
+  const cx = W - RA - 30, cy = ky + kh / 2 + 2, r = 17;
+  const bild = typeof m.bild === "string" && /^data:image\/(jpeg|png)/.test(m.bild) ? m.bild : null;
+  if (bild) {
+    doc.saveGraphicsState(); doc.circle(cx, cy, r, null); doc.clip(); doc.discardPath();
+    doc.addImage(bild, /png/.test(bild.slice(0, 20)) ? "PNG" : "JPEG", cx - r, cy - r, 2 * r, 2 * r);
+    doc.restoreGraphicsState();
+  } else {
+    verlauf(cx - r, cy - r, 2 * r, 2 * r, NAVY2, [48, 88, 134], { kreis: true, quer: false, n: 40 });
+    const ini = String(p.name || "EGC").split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+    schrift(20, true); fa(WEISS); doc.text(ini, cx, cy + 3.5, { align: "center" });
+  }
+  st(GRUEN); doc.setLineWidth(1.1); doc.circle(cx, cy, r + 0.8, "S");
+  fuss();
+
+  const roh = doc.output("datauristring");
+  return { name: "Portfolio-Flyer_EGC_" + p.name.replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf", typ: "application/pdf",
            groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
 }
 
@@ -8595,6 +8838,22 @@ function Ablage({ ablage, setAblage, user, start }) {
 
       <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "60ch" }}>{aktuell.text}</p>
 
+      {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && (
+        <div className="rounded p-4 mb-4 flex flex-wrap items-center gap-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <span className="rounded p-2" style={{ background: "#F6F8FA" }}><FileText size={18} style={{ color: C.gruen }} /></span>
+          <div className="flex-1 min-w-48">
+            <div className="text-sm">Dein Portfolio-Flyer</div>
+            <div className="text-xs" style={{ color: C.muted }}>
+              Zwei Seiten A4: Leistungsportfolio und Kundenvorteile, unten mit deinem Namen, Foto und deinen Kontaktdaten.
+            </div>
+          </div>
+          <Btn icon={FileText} onClick={async () => {
+            try { dateiLaden(await portfolioFlyerPdf(user)); }
+            catch (e) { alert("Der Flyer konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+          }}>Flyer herunterladen (PDF)</Btn>
+        </div>
+      )}
+
       {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && (() => {
         const d = visitenkartenDaten(user);
         const frei = !!(user.visitenkarte && user.visitenkarte.freigegeben);
@@ -10434,6 +10693,10 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
                       try { dateiLaden(await visitenkartePdf(m)); }
                       catch (e) { alert("Die Visitenkarte konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
                     }}>Vorschau (PDF)</button>
+                    <button className="text-xs" style={{ color: C.strom }} onClick={async () => {
+                      try { dateiLaden(await portfolioFlyerPdf(m)); }
+                      catch (e) { alert("Der Flyer konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+                    }}>Flyer (PDF)</button>
                   </span>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-3">
