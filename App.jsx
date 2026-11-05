@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.13.1 · 04.11.2026 · Referenzfreigabe: erlassen, erstes Jahr oder vergünstigt";
+const VERSION = "v5.13.2 · 05.11.2026 · NDA einseitig oder gegenseitig, Ergänzungen nach Vergleich";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1262,7 +1262,7 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
         "Nachweise, Fristen, Compliance-Hinweise sowie die Strukturierung und Koordination der nächsten Schritte."] },
       "Eine erste Potenzialanzeige oder Schätzung stellt noch keinen garantierten Anspruch dar. Ob und in welcher Höhe ein wirtschaftlicher Vorteil realisiert werden kann, hängt von der individuellen Prüfung und den jeweils geltenden gesetzlichen, vertraglichen und tatsächlichen Voraussetzungen ab."]],
     ["3. Mitwirkungspflichten des Auftraggebers", [
-      "Der Auftraggeber stellt dem Auftragnehmer alle für die Prüfung und Bearbeitung erforderlichen Informationen, Rechnungen, Verträge, Verbrauchs- und Messdaten, Vollmachten sowie sonstigen Unterlagen vollständig und rechtzeitig zur Verfügung. Änderungen der Unternehmens-, Verbrauchs- oder Lieferstellendaten sind unverzüglich mitzuteilen.",
+      "Der Auftraggeber stellt dem Auftragnehmer alle für die Prüfung und Bearbeitung erforderlichen Informationen, Rechnungen, Verträge, Verbrauchs- und Messdaten, Vollmachten sowie sonstigen Unterlagen vollständig und rechtzeitig zur Verfügung. Eine fristgerechte Anmeldung der Lieferstellen beim Energieversorger kann nur gewährleistet werden, wenn die vollständigen Unterlagen und der Auftrag spätestens 60 Werktage vor dem gewünschten Lieferbeginn beim Auftragnehmer vorliegen. Änderungen der Unternehmens-, Verbrauchs- oder Lieferstellendaten sind unverzüglich mitzuteilen.",
       "Der Auftraggeber bestätigt, dass die übermittelten Angaben nach bestem Wissen vollständig und richtig sind. Verzögerungen oder Nachteile, die aus fehlenden, verspäteten oder unrichtigen Angaben entstehen, fallen nicht in den Verantwortungsbereich des Auftragnehmers."]],
     ["4. Vergütung", [
       mit
@@ -1278,7 +1278,9 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
     [LZ + ". Laufzeit und Kündigung", [
       mit
         ? "Der Vertrag beginnt mit Unterzeichnung und wird zunächst für 12 Monate geschlossen. Er verlängert sich jeweils um weitere 12 Monate, wenn er nicht mit einer Frist von 3 Monaten zum Ende der jeweiligen Vertragslaufzeit in Textform gekündigt wird. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt."
-        : "Der Vertrag beginnt mit Unterzeichnung und läuft für die Dauer der über EGC Energie vermittelten Energielieferverträge des Auftraggebers, einschließlich Verlängerungen und Folgeverträgen. Er endet, ohne dass es einer Kündigung bedarf, wenn kein über EGC Energie vermittelter Energieliefervertrag des Auftraggebers mehr besteht. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt.",
+        : "Der Vertrag beginnt mit Unterzeichnung und läuft für die Dauer der über EGC Energie vermittelten Energielieferverträge des Auftraggebers, einschließlich Verlängerungen und Folgeverträgen. Ein Wechsel des Tarifs oder des Beschaffungsmodells sowie ein neuer, über EGC Energie vermittelter Energieversorger beenden den Vertrag nicht; die Leistungen bleiben ohne Servicepauschale.",
+      ...(mit ? [] : [
+        "Wechselt der Auftraggeber den Energieversorger ohne Vermittlung durch EGC Energie, entfällt die Grundlage für die Betreuung ohne Servicepauschale. Die Leistungen gemäß Ziffer 2.1 stehen dann nur gegen ein gesondert zu vereinbarendes Honorar zur Verfügung. Kommt keine solche Vereinbarung zustande, endet der Vertrag mit dem Ende des letzten über EGC Energie vermittelten Energieliefervertrags, ohne dass es einer Kündigung bedarf. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt."]),
       "Ein während der Vertragslaufzeit begründeter Anspruch auf das Erfolgshonorar gemäß Ziffer 4.2 bleibt auch nach Vertragsende bestehen, wenn der wirtschaftliche Vorteil auf einer während der Vertragslaufzeit über den Auftragnehmer vorgenommenen Prüfung, Antragstellung oder Bearbeitung gemäß Ziffer 2.2 beruht. Für Leistungen der Energiebeschaffung gemäß Ziffer 2.1 entsteht daraus kein Erfolgshonorar."]],
     [(mit ? "7" : "6") + ". Zusammenarbeit mit Partnern", [
       "Der Auftragnehmer ist berechtigt, zur technischen, fachlichen oder rechtlichen Bearbeitung geeignete Kooperationspartner und Dienstleister einzubeziehen, soweit dies zur Vertragserfüllung erforderlich ist. Personenbezogene Daten und vertrauliche Unternehmensdaten werden dabei nur im erforderlichen Umfang und unter Beachtung der geltenden Datenschutzbestimmungen weitergegeben. Externe kostenpflichtige Leistungen, die nicht von der vereinbarten Vergütung umfasst sind, bedürfen vor Beauftragung der Freigabe des Auftraggebers."]],
@@ -1473,36 +1475,53 @@ async function dienstleistungsvertragPdf(kunde = null, honorar = { mit: true, be
 /*  Unterschreibt immer die Geschäftsführung. Nur Kalkulation und      */
 /*  Geschäftsführung haben Zugriff.                                    */
 /* ------------------------------------------------------------------ */
-const NDA_ZIFFERN = [
-  ["1. Gegenstand und Zweck", [
-    "Der Kunde stellt EGC Energie (nachfolgend „EGC“) Informationen und Unterlagen zur Verfügung, damit EGC seinen Energiebedarf auswerten, ihn zur Energiebeschaffung beraten und Angebote von Energieversorgern einholen kann (nachfolgend „Zweck“). Diese Erklärung regelt den vertraulichen Umgang mit diesen Informationen."]],
-  ["2. Vertrauliche Informationen", [
-    "Vertraulich sind alle Informationen, die EGC im Zusammenhang mit dem Zweck vom Kunden erhält, gleich in welcher Form, insbesondere Verbrauchs-, Mess- und Lastgangdaten, Zähler- und Marktlokationsdaten, Rechnungen, Energielieferverträge, Preise und Konditionen, Angaben zu Standorten und Betriebsabläufen sowie sonstige Unternehmens- und Geschäftsdaten des Kunden."]],
-  ["3. Pflichten von EGC", [
-    "EGC behandelt die vertraulichen Informationen streng vertraulich und verwendet sie ausschließlich für den Zweck. EGC schützt sie mit mindestens der Sorgfalt, die EGC auf eigene vertrauliche Informationen anwendet, und trifft angemessene technische und organisatorische Schutzmaßnahmen.",
-    "EGC darf die Informationen auswerten, aufbereiten und daraus Analysen, Kalkulationen und Angebotsvergleiche für den Kunden erstellen."]],
-  ["4. Zulässige Weitergabe", [
-    "EGC darf vertrauliche Informationen nur weitergeben",
-    { punkte: [
-      "an Energieversorger, soweit dies zur Einholung von Angeboten und zum Abschluss von Energielieferverträgen für den Kunden erforderlich ist, und nur im dafür nötigen Umfang,",
-      "an eigene Mitarbeiter und Vertriebsbeauftragte von EGC, die die Informationen für den Zweck benötigen und zur Verschwiegenheit verpflichtet sind,",
-      "an technische Dienstleister, die EGC zur Datenverarbeitung einsetzt und vertraglich zur Vertraulichkeit verpflichtet hat (z. B. Auftragsverarbeitung nach Art. 28 DSGVO),",
-      "soweit EGC gesetzlich, behördlich oder gerichtlich zur Offenlegung verpflichtet ist; EGC informiert den Kunden darüber, soweit zulässig."] },
-    "Eine Weitergabe an sonstige Dritte ist ausgeschlossen. Insbesondere verkauft EGC keine Daten des Kunden und gibt sie nicht für Werbezwecke Dritter weiter. Eine Weitergabe darüber hinaus bedarf der vorherigen Zustimmung des Kunden in Textform."]],
-  ["5. Ausnahmen", [
-    "Die Pflichten gelten nicht für Informationen, die nachweislich allgemein bekannt sind oder ohne Verschulden von EGC allgemein bekannt werden, die EGC bereits vor der Übermittlung rechtmäßig bekannt waren oder die EGC von einem Dritten ohne Verletzung einer Vertraulichkeitspflicht erhalten hat."]],
-  ["6. Rückgabe und Löschung", [
-    "Auf Verlangen des Kunden gibt EGC die erhaltenen Unterlagen zurück oder löscht sie, soweit keine gesetzlichen Aufbewahrungspflichten entgegenstehen. Bereits an Energieversorger zur Angebotseinholung übermittelte Daten unterliegen den Datenschutzbestimmungen des jeweiligen Versorgers."]],
-  ["7. Laufzeit", [
-    "Diese Erklärung gilt ab Unterzeichnung für die Dauer der Zusammenarbeit und darüber hinaus für drei Jahre nach deren Ende."]],
-  ["8. Datenschutz", [
-    "Soweit personenbezogene Daten betroffen sind, verarbeitet EGC sie nach den geltenden datenschutzrechtlichen Vorschriften, insbesondere der Datenschutz-Grundverordnung (DSGVO)."]],
-  ["9. Schlussbestimmungen", [
-    "Änderungen und Ergänzungen bedürfen der Textform. Es gilt das Recht der Bundesrepublik Deutschland. Soweit gesetzlich zulässig und beide Parteien Kaufleute sind, ist Gerichtsstand der Sitz von EGC. Sollte eine Bestimmung unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt."]],
-];
+/* Ziffern der Verschwiegenheitserklärung; gegenseitig: auch der Kunde schützt Informationen von EGC */
+const ndaZiffern = (gegenseitig = false) => {
+  const g = gegenseitig;
+  const wer = g ? "Jede Partei" : "EGC";
+  const teile = [
+    ["Gegenstand und Zweck", [
+      "Der Kunde stellt EGC Energie (nachfolgend „EGC“) Informationen und Unterlagen zur Verfügung, damit EGC seinen Energiebedarf auswerten, ihn zur Energiebeschaffung beraten und Angebote von Energieversorgern einholen kann (nachfolgend „Zweck“)."
+        + (g ? " EGC stellt dem Kunden dafür Kalkulationen, Angebote und weitere Arbeitsergebnisse zur Verfügung." : "")
+        + " Diese Erklärung regelt den vertraulichen Umgang mit diesen Informationen."]],
+    ["Vertrauliche Informationen", [
+      "Vertraulich sind alle Informationen, die EGC im Zusammenhang mit dem Zweck vom Kunden erhält, gleich in welcher Form und auch wenn sie nicht als vertraulich gekennzeichnet sind, insbesondere Verbrauchs-, Mess- und Lastgangdaten, Zähler- und Marktlokationsdaten, Rechnungen, Energielieferverträge, Preise und Konditionen, Angaben zu Standorten und Betriebsabläufen sowie sonstige Unternehmens- und Geschäftsdaten des Kunden. Mündlich übermittelte Informationen sind eingeschlossen.",
+      ...(g ? ["Ebenso vertraulich sind die Informationen, die der Kunde von EGC erhält, insbesondere Kalkulationen, Angebote, Preise und Konditionen von Energieversorgern, Marktanalysen sowie Arbeitsunterlagen und Vorgehensweisen von EGC."] : [])]],
+    ["Pflichten " + (g ? "der Parteien" : "von EGC"), [
+      wer + " behandelt die vertraulichen Informationen " + (g ? "der anderen Partei " : "") + "streng vertraulich und verwendet sie ausschließlich für den Zweck. "
+        + wer + " schützt sie mit mindestens der Sorgfalt, die " + (g ? "sie" : "EGC") + " auf eigene vertrauliche Informationen anwendet, und trifft angemessene technische und organisatorische Schutzmaßnahmen.",
+      "EGC darf die Informationen des Kunden auswerten, aufbereiten und daraus Analysen, Kalkulationen und Angebotsvergleiche für den Kunden erstellen.",
+      ...(g ? ["Der Kunde verwendet die Informationen von EGC nur für die eigene Entscheidung über seine Energiebeschaffung. Er gibt sie nicht an Dritte weiter, insbesondere nicht an andere Energievermittler oder Energieversorger, um damit Vergleichsangebote einzuholen. Zulässig ist die Weitergabe an eigene Mitarbeiter und an Berater des Kunden (etwa Steuerberater oder Rechtsanwälte), die zur Verschwiegenheit verpflichtet sind."] : [])]],
+    ["Zulässige Weitergabe durch EGC", [
+      "EGC darf vertrauliche Informationen des Kunden nur weitergeben",
+      { punkte: [
+        "an Energieversorger, soweit dies zur Einholung von Angeboten und zum Abschluss von Energielieferverträgen für den Kunden erforderlich ist, und nur im dafür nötigen Umfang,",
+        "an eigene Mitarbeiter und Vertriebsbeauftragte von EGC, die die Informationen für den Zweck benötigen und zur Verschwiegenheit verpflichtet sind,",
+        "an technische Dienstleister, die EGC zur Datenverarbeitung einsetzt und vertraglich zur Vertraulichkeit verpflichtet hat (z. B. Auftragsverarbeitung nach Art. 28 DSGVO),",
+        "soweit EGC gesetzlich, behördlich oder gerichtlich zur Offenlegung verpflichtet ist; EGC informiert den Kunden, soweit zulässig, vorher und legt nur den Teil offen, der offengelegt werden muss."] },
+      "Eine Weitergabe an sonstige Dritte ist ausgeschlossen. Insbesondere verkauft EGC keine Daten des Kunden und gibt sie nicht für Werbezwecke Dritter weiter. Eine Weitergabe darüber hinaus bedarf der vorherigen Zustimmung des Kunden in Textform."]],
+    ["Haftung für Mitarbeiter und Beauftragte", [
+      wer + " steht dafür ein, dass " + (g ? "ihre" : "seine") + " Mitarbeiter, Vertriebsbeauftragten und eingesetzten Dienstleister die Pflichten aus dieser Erklärung einhalten, und verpflichtet sie entsprechend zur Verschwiegenheit."]],
+    ["Meldepflicht", [
+      (g ? "Erlangt eine Partei" : "Erlangt EGC") + " Kenntnis davon, dass vertrauliche Informationen entgegen dieser Erklärung weitergegeben oder bekannt geworden sind, informiert " + (g ? "sie die andere Partei" : "EGC den Kunden") + " unverzüglich und unterstützt bei der Begrenzung des Schadens."]],
+    ["Ausnahmen", [
+      "Die Pflichten gelten nicht für Informationen, die nachweislich allgemein bekannt sind oder ohne Verschulden " + (g ? "der empfangenden Partei" : "von EGC") + " allgemein bekannt werden, die bereits vor der Übermittlung rechtmäßig bekannt waren, die unabhängig erarbeitet wurden, die von einem Dritten ohne Verletzung einer Vertraulichkeitspflicht erhalten wurden oder die zur Weitergabe in Textform freigegeben wurden. Wer sich auf eine Ausnahme beruft, muss sie nachweisen."]],
+    ["Rückgabe und Löschung", [
+      "Auf Verlangen gibt " + (g ? "jede Partei die erhaltenen Unterlagen der anderen" : "EGC die erhaltenen Unterlagen") + " zurück oder löscht sie, soweit keine gesetzlichen Aufbewahrungspflichten entgegenstehen. Eine Kopie darf ausschließlich zu Beweiszwecken sicher aufbewahrt werden; für sie gelten die Pflichten aus dieser Erklärung fort. Bereits an Energieversorger zur Angebotseinholung übermittelte Daten unterliegen den Datenschutzbestimmungen des jeweiligen Versorgers."]],
+    ["Keine Lizenz, kein Vertragszwang", [
+      "Die übermittelten Informationen bleiben Eigentum der Partei, von der sie stammen. Nutzungs- oder Lizenzrechte entstehen über den Zweck hinaus nicht. Diese Erklärung verpflichtet keine Partei zum Abschluss weiterer Verträge; aus dem Nichtzustandekommen eines Vertrags entstehen keine Ansprüche gegen die andere Partei."]],
+    ["Laufzeit", [
+      "Diese Erklärung gilt ab Unterzeichnung für die Dauer der Zusammenarbeit und darüber hinaus für drei Jahre nach deren Ende."]],
+    ["Datenschutz", [
+      "Soweit personenbezogene Daten betroffen sind, werden sie nach den geltenden datenschutzrechtlichen Vorschriften verarbeitet, insbesondere der Datenschutz-Grundverordnung (DSGVO)."]],
+    ["Schlussbestimmungen", [
+      "Änderungen und Ergänzungen bedürfen der Textform. Es gilt das Recht der Bundesrepublik Deutschland. Soweit gesetzlich zulässig und beide Parteien Kaufleute sind, ist Gerichtsstand der Sitz von EGC. Weitergehende gesetzliche Ansprüche, etwa nach dem Gesetz zum Schutz von Geschäftsgeheimnissen (GeschGehG), bleiben unberührt. Sollte eine Bestimmung unwirksam sein, bleibt die Wirksamkeit der übrigen Bestimmungen unberührt."]],
+  ];
+  return teile.map(([t, inhalt], i) => [(i + 1) + ". " + t, inhalt]);
+};
 
 /* kunde = null: blanko. unterschrift: { bild (Datei), name, datum } der Geschäftsführung */
-async function ndaPdf(kunde = null, unterschrift = null) {
+async function ndaPdf(kunde = null, unterschrift = null, gegenseitig = false) {
   const jsPDF = await ladeJsPdf();
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const W = 210, H = 297, RA = 18, BR = W - 2 * RA, UNTEN = H - 24;
@@ -1554,7 +1573,7 @@ async function ndaPdf(kunde = null, unterschrift = null) {
   };
 
   schrift(20, true); fa(NAVY); doc.text("Verschwiegenheitserklärung", RA, y + 6);
-  schrift(10.5); fa(GRAU); doc.text("Vertraulicher Umgang mit Kundendaten (NDA)", RA, y + 13);
+  schrift(10.5); fa(GRAU); doc.text(gegenseitig ? "Gegenseitige Vertraulichkeit (NDA)" : "Vertraulicher Umgang mit Kundendaten (NDA)", RA, y + 13);
   verlauf(RA, y + 17, 30, 1.3, GRUEN1, GRUEN2, { r: 0.65, n: 30 });
   y += 26;
 
@@ -1575,10 +1594,11 @@ async function ndaPdf(kunde = null, unterschrift = null) {
   partei("KUNDE", [[k.firma, "Firma"], [k.strasse, "Straße, Hausnummer"], [[k.plz, k.ort].filter(Boolean).join(" "), "PLZ, Ort"]], blanko, 26);
   partei("EGC", [["EGC Energie"], [F.vertreter ? "vertreten durch " + F.vertreter + " (Geschäftsführung)" : ""], [[F.strasse, F.ort].filter(Boolean).join(", ")]], false, 26);
   y += 2;
-  absatz("EGC Energie verpflichtet sich gegenüber dem oben genannten Kunden wie folgt:");
+  absatz(gegenseitig ? "Der oben genannte Kunde und EGC Energie (gemeinsam „die Parteien“) vereinbaren Folgendes:"
+    : "EGC Energie verpflichtet sich gegenüber dem oben genannten Kunden wie folgt:");
   y += 3;
 
-  NDA_ZIFFERN.forEach(([titel, teile]) => {
+  ndaZiffern(gegenseitig).forEach(([titel, teile]) => {
     ueberschrift(titel);
     teile.forEach((t) => {
       if (t && t.punkte) {
@@ -1603,7 +1623,7 @@ async function ndaPdf(kunde = null, unterschrift = null) {
   const ort = (F.ort || "").replace(/^\d+\s*/, "");
   schrift(8); fa(GRAU);
   doc.text("Für EGC Energie (Geschäftsführung)", RA, y);
-  doc.text("Kunde (zur Kenntnis genommen)", x2, y);
+  doc.text(gegenseitig ? "Für den Kunden" : "Kunde (zur Kenntnis genommen)", x2, y);
   y += 4;
   if (unterschrift && unterschrift.bild) {
     try {
@@ -1628,8 +1648,9 @@ async function ndaPdf(kunde = null, unterschrift = null) {
   const n = doc.getNumberOfPages();
   for (let i = 1; i <= n; i++) { doc.setPage(i); schrift(7); fa(GRAU); doc.text("Seite " + i + " von " + n, W - RA, H - 6.4, { align: "right" }); }
   const roh = doc.output("datauristring");
-  const name = blanko ? "Verschwiegenheitserklaerung_Blanko.pdf"
-    : "Verschwiegenheitserklaerung_" + String(k.firma || "Kunde").replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf";
+  const art = gegenseitig ? "_gegenseitig" : "_einseitig";
+  const name = blanko ? "Verschwiegenheitserklaerung" + art + "_Blanko.pdf"
+    : "Verschwiegenheitserklaerung" + art + "_" + String(k.firma || "Kunde").replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf";
   return { name, typ: "application/pdf", groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
 }
 
@@ -4103,10 +4124,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   /* Verschwiegenheitserklärung: nur Kalkulation und Geschäftsführung, unterschreibt immer die Geschäftsführung */
   const ndaSicht = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
   const [ndaBild, setNdaBild] = useState(null);
+  const [ndaArt, setNdaArt] = useState((a.nda && a.nda.art) || "einseitig");
   const [ndaLaeuft, setNdaLaeuft] = useState(false);
   const ndaLaden = async () => {
     setNdaLaeuft(true);
-    try { dateiLaden(await ndaPdf(a.kunde || {}, a.nda && a.nda.gf)); }
+    try { dateiLaden(await ndaPdf(a.kunde || {}, a.nda && a.nda.gf, (a.nda && a.nda.art) === "gegenseitig")); }
     catch (e) { alert("Die Verschwiegenheitserklärung konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
     setNdaLaeuft(false);
   };
@@ -5855,7 +5877,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             <div className="rounded p-5" style={{ background: C.card,
                  border: "1px solid " + (a.nda && a.nda.status === "angefordert" ? C.gas : C.line) }}>
               <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
-                <span className="text-sm">Verschwiegenheitserklärung (NDA)</span>
+                <span className="text-sm">Verschwiegenheitserklärung (NDA){a.nda && a.nda.status === "unterschrieben" ? " · " + (a.nda.art === "gegenseitig" ? "gegenseitig" : "einseitig") : ""}</span>
                 {a.nda && <span className="text-xs" style={{ color: a.nda.status === "unterschrieben" ? C.ok : C.gas }}>
                   {a.nda.status === "unterschrieben"
                     ? "unterschrieben von " + a.nda.gf.name + " am " + datum(a.nda.gf.datum)
@@ -5867,9 +5889,19 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                 Versorger, aber nicht an Dritte. Unterschreibt immer die Geschäftsführung. Sichtbar nur für
                 Kalkulation und Geschäftsführung.
               </p>
+              {(!a.nda || a.nda.status !== "unterschrieben") && (istKalk || istGF) && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {[["einseitig", "Einseitig (nur EGC verpflichtet)"], ["gegenseitig", "Gegenseitig"]].map(([w, label]) => (
+                    <button key={w} onClick={() => { setNdaArt(w); if (a.nda) onUpdate({ ...a, nda: { ...a.nda, art: w } }); }}
+                      className="px-3 py-1.5 rounded text-sm"
+                      style={ndaArt === w ? { background: C.ink, color: "#fff" }
+                        : { background: "#fff", color: C.text, border: "1px solid " + C.line }}>{label}</button>
+                  ))}
+                </div>
+              )}
               {!a.nda && istKalk && (
                 <Btn variante="hell" icon={FileSignature}
-                  onClick={() => onUpdate({ ...a, nda: { status: "angefordert", von: user.name, datum: heute() } })}>
+                  onClick={() => onUpdate({ ...a, nda: { status: "angefordert", art: ndaArt, von: user.name, datum: heute() } })}>
                   Bei der Geschäftsführung anfordern
                 </Btn>
               )}
@@ -5878,7 +5910,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   {a.nda && <p className="text-sm">Angefordert von {a.nda.von} am {datum(a.nda.datum)}.</p>}
                   <Unterschrift label="Unterschrift Geschäftsführung" onChange={setNdaBild} />
                   <Btn icon={Check} disabled={!ndaBild} onClick={() => {
-                    onUpdate({ ...a, nda: { ...(a.nda || { von: user.name, datum: heute() }), status: "unterschrieben",
+                    onUpdate({ ...a, nda: { ...(a.nda || { von: user.name, datum: heute() }), art: ndaArt, status: "unterschrieben",
                       gf: { name: user.name, datum: heute(), bild: ndaBild } } });
                     setNdaBild(null);
                   }}>Unterschreiben</Btn>
@@ -8390,7 +8422,8 @@ function Ablage({ ablage, setAblage, user, start }) {
           {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && [
             ["Dienstleistungsvertrag mit Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: true, betrag: null })],
             ["Dienstleistungsvertrag ohne Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: false })],
-            ["Verschwiegenheitserklärung (blanko)", () => ndaPdf(null)],
+            ["Verschwiegenheitserklärung einseitig (blanko)", () => ndaPdf(null, null, false)],
+            ["Verschwiegenheitserklärung gegenseitig (blanko)", () => ndaPdf(null, null, true)],
           ].map(([label, erzeugen]) => (
             <Btn key={label} variante="hell" icon={FileSignature} onClick={async () => {
               try { dateiLaden(await erzeugen()); }
