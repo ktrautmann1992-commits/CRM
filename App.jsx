@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.14.2 · 05.11.2026 · Visitenkarte unter Marketing";
+const VERSION = "v5.14.3 · 05.11.2026 · Visitenkarte: Vorderseite schlichter";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1756,10 +1756,7 @@ async function visitenkartePdf(m) {
   /* Vorderseite */
   verlauf(0, 0, W, H, NAVY1, NAVY2, { quer: false });
   doc.saveGraphicsState(); doc.rect(0, 0, W, H, null); doc.clip(); doc.discardPath();
-  kringel(X(80), Y(2), 26, GRUEN, 0.14); kringel(X(80), Y(2), 34, WEISS, 0.08, "S"); kringel(X(80), Y(2), 41, WEISS, 0.05, "S");
-  kringel(X(4), Y(56), 18, GRUEN, 0.1);
-  dk(0.3); st(GRUEN2); doc.setLineWidth(0.5);
-  doc.lines([[14, -9, 28, 7, 44, -3], [16, -10, 30, 4, 50, -8]], 0, Y(44), [1, 1], "S"); dk(1);
+  kringel(X(80), Y(2), 34, WEISS, 0.08, "S"); kringel(X(80), Y(2), 41, WEISS, 0.05, "S");
   doc.restoreGraphicsState();
   doc.addImage(logoT, "PNG", X(9), Y(15), (420 / 196) * 15, 15);
   verlauf(X(9), Y(35), 18, 0.9, GRUEN1, GRUEN2, { n: 30, r: 0.45 });
