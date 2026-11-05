@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.13.2 · 05.11.2026 · NDA einseitig oder gegenseitig, Ergänzungen nach Vergleich";
+const VERSION = "v5.13.3 · 05.11.2026 · Erfolgshonorar einstellbar";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1202,6 +1202,11 @@ const ladeJsPdf = () => {
 const dlvText = (honorar = { mit: true, betrag: 300 }) => {
   const mit = honorar.mit !== false;
   const P = honorar.betrag == null ? "________ EUR" : num(honorar.betrag, 2) + " EUR";
+  /* Erfolgshonorar auf Erstattungen: einstellbar, Vorgabe 20 %; 0 = kein Erfolgshonorar; blanko (null) = Linie */
+  const EW = honorar.erfolg === undefined ? 20 : honorar.erfolg;
+  const EF = EW !== 0;
+  const E = EW == null ? "____ %" : num(EW, EW % 1 ? 1 : 0) + " %";
+  const ESATZ = EF ? " Das Erfolgshonorar von " + E + " für Erstattungs- und Entlastungsleistungen bleibt " : "";
   /* Referenzfreigabe: Servicepauschale komplett erlassen, nur im ersten Jahr erlassen oder vergünstigt */
   const REF = ["komplett", "jahr", "rabatt"].includes(honorar.referenz) ? honorar.referenz : "komplett";
   const R = honorar.rabattBetrag == null || honorar.rabattBetrag === "" ? "________ EUR" : num(honorar.rabattBetrag, 2) + " EUR";
@@ -1240,7 +1245,9 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
       ["Energiebeschaffung", "Ohne Servicepauschale. Die Leistungen dieses Vertrags gelten, " + LAUF + "."],
       ["Laufzeit", "Für die Dauer der über EGC Energie vermittelten Energielieferverträge des Auftraggebers"],
     ]),
-    ["Erfolgshonorar Erstattungen / Entlastungen", "20 % zzgl. gesetzlicher Umsatzsteuer ausschließlich auf tatsächlich realisierte Erstattungen bzw. bestätigte finanzielle Entlastungen aus den Leistungen gemäß Ziffer 2.2"],
+    ["Erfolgshonorar Erstattungen / Entlastungen", EF
+      ? E + " zzgl. gesetzlicher Umsatzsteuer ausschließlich auf tatsächlich realisierte Erstattungen bzw. bestätigte finanzielle Entlastungen aus den Leistungen gemäß Ziffer 2.2"
+      : "Kein Erfolgshonorar. Die Prüfung von Erstattungs- und Entlastungspotenzialen gemäß Ziffer 2.2 ist ohne zusätzliche Vergütung enthalten"],
   ],
   einleitung: "Zwischen dem oben bezeichneten Auftraggeber und EGC Energie als Auftragnehmer wird folgender Dienstleistungsvertrag geschlossen.",
   ziffern: [
@@ -1250,7 +1257,7 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
     ["2. Leistungsumfang", [
       "2.1 Energiebeschaffung und laufende Betreuung. Der Auftragnehmer unterstützt den Auftraggeber insbesondere bei der Beschaffung von Strom und Erdgas, bei Markt- und Angebotsvergleichen, der Abstimmung von Lieferverträgen sowie der laufenden energiewirtschaftlichen Betreuung. " + (mit
         ? "Für diesen Leistungsbereich gilt ausschließlich die monatliche Servicepauschale gemäß Ziffer 4.1."
-        : "Für diesen Leistungsbereich fällt keine Vergütung an, " + LAUF + " (Ziffer " + LZ + ").") + " Das Erfolgshonorar gemäß Ziffer 4.2 fällt hierfür ausdrücklich nicht an.",
+        : "Für diesen Leistungsbereich fällt keine Vergütung an, " + LAUF + " (Ziffer " + LZ + ").") + (EF ? " Das Erfolgshonorar gemäß Ziffer 4.2 fällt hierfür ausdrücklich nicht an." : ""),
       "2.2 Prüfung von Erstattungs- und Entlastungspotenzialen. Zusätzlich werden – abhängig von Branche, Verbrauch, Lieferstellen, Vertragslage und verfügbarer Datenbasis – durch den Auftragnehmer insbesondere folgende Erstattungs- und Entlastungsthemen geprüft und bearbeitet:",
       { punkte: [
         "Energiesteuer auf Erdgas und mögliche Entlastungs- bzw. Erstattungsansprüche,",
@@ -1268,11 +1275,12 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
       mit
         ? "4.1 Vergütung für Energiebeschaffung und laufende Betreuung. Ausschließlich für die Leistungen gemäß Ziffer 2.1 wird eine monatliche Servicepauschale in Höhe von " + P + " zzgl. gesetzlicher Umsatzsteuer vereinbart. " + ref41 + " Die Abrechnung erfolgt monatlich im Voraus; Rechnungen sind innerhalb von 14 Kalendertagen nach Zugang fällig."
         : "4.1 Energiebeschaffung und laufende Betreuung ohne Servicepauschale. Für die Leistungen gemäß Ziffer 2.1 wird keine Servicepauschale berechnet. Die Leistungen gelten für den Auftraggeber, " + LAUF + ".",
-      "4.2 Erfolgshonorar ausschließlich für Erstattungs- und Entlastungsleistungen. Für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 2.1 fällt kein Erfolgshonorar an. Das Erfolgshonorar in Höhe von 20 % zzgl. gesetzlicher Umsatzsteuer wird ausschließlich auf tatsächlich realisierte Erstattungen oder bestätigte finanzielle Entlastungen erhoben, die aus den unter Ziffer 2.2 beschriebenen und über den Auftragnehmer geprüften oder bearbeiteten Erstattungs- und Entlastungsthemen resultieren.",
+      ...(!EF ? ["4.2 Kein Erfolgshonorar. Für die Erstattungs- und Entlastungsleistungen gemäß Ziffer 2.2 wird kein Erfolgshonorar berechnet."] : [
+      "4.2 Erfolgshonorar ausschließlich für Erstattungs- und Entlastungsleistungen. Für die Energiebeschaffung und laufende Betreuung gemäß Ziffer 2.1 fällt kein Erfolgshonorar an. Das Erfolgshonorar in Höhe von " + E + " zzgl. gesetzlicher Umsatzsteuer wird ausschließlich auf tatsächlich realisierte Erstattungen oder bestätigte finanzielle Entlastungen erhoben, die aus den unter Ziffer 2.2 beschriebenen und über den Auftragnehmer geprüften oder bearbeiteten Erstattungs- und Entlastungsthemen resultieren.",
       "Als realisierter wirtschaftlicher Vorteil im Sinne von Ziffer 4.2 gilt ausschließlich ein dem Auftraggeber tatsächlich ausgezahlter, gutgeschriebener, verrechneter oder von der zuständigen Stelle bzw. dem Vertragspartner verbindlich bestätigter Erstattungs- oder Entlastungsbetrag aus einer Prüfung bzw. Bearbeitung gemäß Ziffer 2.2. Eine reine Potenzialberechnung, unverbindliche Schätzung oder bloße Empfehlung löst kein Erfolgshonorar aus.",
-      "Das Erfolgshonorar wird mit Realisierung bzw. verbindlicher Bestätigung des jeweiligen wirtschaftlichen Vorteils aus den Leistungen gemäß Ziffer 2.2 fällig. Der Auftraggeber informiert den Auftragnehmer unverzüglich über entsprechende Bescheide, Gutschriften, Verrechnungen oder sonstige Bestätigungen und stellt auf Anfrage geeignete Nachweise zur Verfügung."]],
+      "Das Erfolgshonorar wird mit Realisierung bzw. verbindlicher Bestätigung des jeweiligen wirtschaftlichen Vorteils aus den Leistungen gemäß Ziffer 2.2 fällig. Der Auftraggeber informiert den Auftragnehmer unverzüglich über entsprechende Bescheide, Gutschriften, Verrechnungen oder sonstige Bestätigungen und stellt auf Anfrage geeignete Nachweise zur Verfügung."])]],
     ...(!mit ? [] : [["5. Referenzkundenregelung", [
-      "5.1 Erteilt der Auftraggeber dem Auftragnehmer die nachstehende Referenzfreigabe, " + ref51 + " Das Erfolgshonorar für Erstattungs- und Entlastungsleistungen gemäß Ziffer 4.2 bleibt hiervon unberührt.",
+      "5.1 Erteilt der Auftraggeber dem Auftragnehmer die nachstehende Referenzfreigabe, " + ref51 + (EF ? " Das Erfolgshonorar für Erstattungs- und Entlastungsleistungen gemäß Ziffer 4.2 bleibt hiervon unberührt." : ""),
       "5.2 Die Referenzfreigabe berechtigt den Auftragnehmer ausschließlich, den Auftraggeber mit seinem Firmennamen als Referenzkunden zu nennen, etwa auf der Unternehmenswebseite, in Vertriebsunterlagen und Präsentationen sowie gegenüber Interessenten und Geschäftspartnern, verbunden mit dem Hinweis, dass der Auftragnehmer den Auftraggeber in Energiefragen betreut. Angaben zu Beschaffungsmodell, Energiepreisen, Konditionen, Jahresverbrauch, Einsparungen oder sonstigen Vertragsinhalten werden dabei nicht genannt. Die Nutzung eines Logos, von Marken, Zitaten oder Fallstudien bedarf einer gesonderten Freigabe in Textform.",
       "5.3 Die Referenzfreigabe kann vom Auftraggeber jederzeit mit Wirkung für die Zukunft in Textform widerrufen werden. Ab dem auf den Widerruf folgenden Kalendermonat wird für die Energiebeschaffung und laufende Betreuung die monatliche Servicepauschale von " + P + " zzgl. gesetzlicher Umsatzsteuer berechnet. Bereits veröffentlichte Druckunterlagen müssen nicht vernichtet werden; digitale Nennungen werden innerhalb einer angemessenen Frist entfernt."]]]),
     [LZ + ". Laufzeit und Kündigung", [
@@ -1281,7 +1289,7 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
         : "Der Vertrag beginnt mit Unterzeichnung und läuft für die Dauer der über EGC Energie vermittelten Energielieferverträge des Auftraggebers, einschließlich Verlängerungen und Folgeverträgen. Ein Wechsel des Tarifs oder des Beschaffungsmodells sowie ein neuer, über EGC Energie vermittelter Energieversorger beenden den Vertrag nicht; die Leistungen bleiben ohne Servicepauschale.",
       ...(mit ? [] : [
         "Wechselt der Auftraggeber den Energieversorger ohne Vermittlung durch EGC Energie, entfällt die Grundlage für die Betreuung ohne Servicepauschale. Die Leistungen gemäß Ziffer 2.1 stehen dann nur gegen ein gesondert zu vereinbarendes Honorar zur Verfügung. Kommt keine solche Vereinbarung zustande, endet der Vertrag mit dem Ende des letzten über EGC Energie vermittelten Energieliefervertrags, ohne dass es einer Kündigung bedarf. Das Recht zur außerordentlichen Kündigung aus wichtigem Grund bleibt unberührt."]),
-      "Ein während der Vertragslaufzeit begründeter Anspruch auf das Erfolgshonorar gemäß Ziffer 4.2 bleibt auch nach Vertragsende bestehen, wenn der wirtschaftliche Vorteil auf einer während der Vertragslaufzeit über den Auftragnehmer vorgenommenen Prüfung, Antragstellung oder Bearbeitung gemäß Ziffer 2.2 beruht. Für Leistungen der Energiebeschaffung gemäß Ziffer 2.1 entsteht daraus kein Erfolgshonorar."]],
+      ...(!EF ? [] : ["Ein während der Vertragslaufzeit begründeter Anspruch auf das Erfolgshonorar gemäß Ziffer 4.2 bleibt auch nach Vertragsende bestehen, wenn der wirtschaftliche Vorteil auf einer während der Vertragslaufzeit über den Auftragnehmer vorgenommenen Prüfung, Antragstellung oder Bearbeitung gemäß Ziffer 2.2 beruht. Für Leistungen der Energiebeschaffung gemäß Ziffer 2.1 entsteht daraus kein Erfolgshonorar."])]],
     [(mit ? "7" : "6") + ". Zusammenarbeit mit Partnern", [
       "Der Auftragnehmer ist berechtigt, zur technischen, fachlichen oder rechtlichen Bearbeitung geeignete Kooperationspartner und Dienstleister einzubeziehen, soweit dies zur Vertragserfüllung erforderlich ist. Personenbezogene Daten und vertrauliche Unternehmensdaten werden dabei nur im erforderlichen Umfang und unter Beachtung der geltenden Datenschutzbestimmungen weitergegeben. Externe kostenpflichtige Leistungen, die nicht von der vereinbarten Vergütung umfasst sind, bedürfen vor Beauftragung der Freigabe des Auftraggebers."]],
     [(mit ? "8" : "7") + ". Haftung und Entscheidungshoheit", [
@@ -1296,8 +1304,8 @@ const dlvText = (honorar = { mit: true, betrag: 300 }) => {
   freigabeUnter: { komplett: "OPTIONALE FREIGABE ZUR BEFREIUNG VON DER SERVICEPAUSCHALE",
     jahr: "OPTIONALE FREIGABE ZUR BEFREIUNG IM ERSTEN VERTRAGSJAHR",
     rabatt: "OPTIONALE FREIGABE ZUR ERMÄSSIGUNG DER SERVICEPAUSCHALE" }[REF],
-  freigabeJa: "Ja, wir erteilen die Referenzfreigabe gemäß Ziffer 5 (Nennung nur mit Firmennamen, ohne Preise, Verbrauch oder Beschaffungsmodell). " + refJa + " Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt bestehen.",
-  freigabeNein: "Nein, wir erteilen keine Referenzfreigabe. Für die Energiebeschaffung wird die monatliche Servicepauschale von " + P + " zzgl. USt. berechnet. Das 20-%-Erfolgshonorar für Erstattungs- und Entlastungsleistungen bleibt hiervon unberührt.",
+  freigabeJa: "Ja, wir erteilen die Referenzfreigabe gemäß Ziffer 5 (Nennung nur mit Firmennamen, ohne Preise, Verbrauch oder Beschaffungsmodell). " + refJa + (EF ? ESATZ + "bestehen." : ""),
+  freigabeNein: "Nein, wir erteilen keine Referenzfreigabe. Für die Energiebeschaffung wird die monatliche Servicepauschale von " + P + " zzgl. USt. berechnet." + (EF ? ESATZ + "hiervon unberührt." : ""),
   };
   return t;
 };
@@ -4110,15 +4118,17 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   /* Dienstleistungsvertrag: vom Vertrieb gewünscht oder von der Kalkulation festgelegt */
   const [dlvNoetig, setDlvNoetig] = useState(!!a.dienstleistungsvertrag || !!(a.kalkulation && a.kalkulation.dienstleistungsvertrag));
   const [dlvLaeuft, setDlvLaeuft] = useState(false);
-  const [dlvHonorar, setDlvHonorar] = useState((a.kalkulation && a.kalkulation.dienstleistungsHonorar) || { mit: true, betrag: "300" });
+  const [dlvHonorar, setDlvHonorar] = useState({ erfolg: "20", ...((a.kalkulation && a.kalkulation.dienstleistungsHonorar) || { mit: true, betrag: "300" }) });
   /* „mit Honorar“ und 0 € gilt als ohne Honorar */
   const dlvHonorarWert = () => {
     const b = zahlLesen(dlvHonorar.betrag);
+    const ew = zahlLesen(dlvHonorar.erfolg);
+    const erfolg = isNaN(ew) || ew < 0 ? 20 : ew;
     const ref = dlvHonorar.referenz || "komplett";
     const rb = zahlLesen(dlvHonorar.rabattBetrag);
     return dlvHonorar.mit && b > 0
-      ? { mit: true, betrag: b, referenz: ref, rabattBetrag: ref === "rabatt" && !isNaN(rb) && rb > 0 ? rb : null }
-      : { mit: false };
+      ? { mit: true, betrag: b, referenz: ref, rabattBetrag: ref === "rabatt" && !isNaN(rb) && rb > 0 ? rb : null, erfolg }
+      : { mit: false, erfolg };
   };
   const dlvErzeugen = async () => {
     setDlvLaeuft(true);
@@ -5137,8 +5147,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                    rabatt: "kostet sie " + (dlvHonorarWert().rabattBetrag ? num(dlvHonorarWert().rabattBetrag, 2) + " €" : "den eingetragenen Betrag") }[dlvHonorarWert().referenz])
                               + ". Laufzeit 12 Monate mit Verlängerung."
                             : "Ohne Honorar: Die Leistungen gelten, solange die Energiebeschaffung über einen von EGC Energie vermittelten Vertrag läuft. So lange läuft auch der Dienstleistungsvertrag."}
-                          {" "}Das Erfolgshonorar von 20 % auf Erstattungen bleibt in beiden Fällen.
                         </p>
+                        <div className="sm:max-w-xs">
+                          <Feld label="Erfolgshonorar auf Erstattungen in % (0 = keins)" value={dlvHonorar.erfolg}
+                            onChange={(v) => setDlvHonorar({ ...dlvHonorar, erfolg: v })} />
+                        </div>
                         <Btn icon={FileSignature} onClick={dlvErzeugen} disabled={dlvLaeuft}>
                           {dlvLaeuft ? "Wird erzeugt …" : dlv ? "Dienstleistungsvertrag neu erzeugen" : "Dienstleistungsvertrag erzeugen (PDF)"}
                         </Btn>
@@ -8432,8 +8445,8 @@ function Ablage({ ablage, setAblage, user, start }) {
             catch (e) { alert("Die Vorlage konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
           }}>Vollmacht blanko (PDF)</Btn>
           {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && [
-            ["Dienstleistungsvertrag mit Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: true, betrag: null })],
-            ["Dienstleistungsvertrag ohne Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: false })],
+            ["Dienstleistungsvertrag mit Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: true, betrag: null, erfolg: null })],
+            ["Dienstleistungsvertrag ohne Honorar (blanko)", () => dienstleistungsvertragPdf(null, { mit: false, erfolg: null })],
             ["Verschwiegenheitserklärung einseitig (blanko)", () => ndaPdf(null, null, false)],
             ["Verschwiegenheitserklärung gegenseitig (blanko)", () => ndaPdf(null, null, true)],
           ].map(([label, erzeugen]) => (
