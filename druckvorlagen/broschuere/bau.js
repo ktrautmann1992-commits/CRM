@@ -99,7 +99,7 @@ const diagramm = (werte, x, y, w, h, { max, achse = [], linien = [], farbe = NAV
 neueSeite();
 /* Titelbild über die ganze Seite einschließlich Beschnitt (Higgsfield, KI-generiert) */
 doc.addImage(bild('titel.jpg'), 'JPEG', 0, 0, PW, PH);
-doc.addImage(logoT, 'PNG', X(RA), Y(28), (420 / 196) * 20, 20);
+doc.addImage(logoT, 'PNG', X(RA), Y(26), (420 / 196) * 28, 28);
 schrift(8, true); fa(GRUEN2); doc.text('IMAGEBROSCHÜRE', X(RA), Y(118), { charSpace: 1.4 });
 schrift(34, true); fa(WEISS); doc.text('Energie', X(RA), Y(134)); doc.text('strategisch', X(RA), Y(147));
 fa(GRUEN2); doc.text('beschaffen.', X(RA), Y(160));
