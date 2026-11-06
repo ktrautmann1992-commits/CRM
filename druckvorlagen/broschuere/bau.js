@@ -306,7 +306,11 @@ fuss();
 /* ================= Seite 8: Energienebenkosten ================= */
 neueSeite(); seitenband();
 y = titel('NEBENKOSTEN', 'Energienebenkosten', 'gezielt senken');
-y = absatz('Ein großer Teil Ihrer Stromrechnung hat mit dem Energiepreis nichts zu tun: Netzentgelte, Steuern, Abgaben und Umlagen. Hier liegen oft Erstattungen und Entlastungen, die ungenutzt bleiben. Wir prüfen Ihre Rechnungen und Voraussetzungen und kümmern uns um die Anträge.', X(RA), Y(y), BR, 9.8) + 7;
+/* Bild rechts (Umspannwerk mit Leitungslinien, Higgsfield) */
+const bw8 = 76, bh8 = bw8 * 9 / 16;
+bildRund('umspannwerk.jpg', RA + BR - bw8, y - 4, bw8, bh8);
+const yt8 = absatz('Ein großer Teil Ihrer Stromrechnung hat mit dem Energiepreis nichts zu tun: Netzentgelte, Steuern, Abgaben und Umlagen. Hier liegen oft Erstattungen und Entlastungen, die ungenutzt bleiben. Wir prüfen Ihre Rechnungen und Voraussetzungen und kümmern uns um die Anträge.', X(RA), Y(y), BR - bw8 - 7, 9.8);
+y = Math.max(yt8 - B, y - 4 + bh8) + 8;
 /* Balken Preisbestandteile (schematisch) */
 schrift(10, true); fa(NAVY); doc.text('Woraus sich ein Strompreis zusammensetzt', X(RA), Y(y)); y += 6;
 const teile = [['Energie (Beschaffung)', 42, NAVY2], ['Netzentgelte & Messung', 28, GRUEN1], ['Steuern, Abgaben, Umlagen', 30, [120, 150, 180]]];
@@ -328,6 +332,7 @@ y += 109;
 karte(RA, y, BR, 20, GRUENHELL);
 schrift(10, true); fa(NAVY); doc.text('Erfolgsabhängig', X(RA + 6), Y(y + 8));
 absatz('Für Erstattungen und Entlastungen arbeiten wir auf Wunsch erfolgsabhängig: Wir verdienen nur, wenn Sie tatsächlich Geld zurückbekommen.', X(RA + 6), Y(y + 13), BR - 12, 8.8, TEXT, 1.35);
+console.log('Seite 8 Kasten bis', (y + 20).toFixed(1));
 fuss();
 
 /* ================= Seite 9: Erzeugung, Technik & Förderung ================= */
@@ -359,6 +364,9 @@ fuss();
 /* ================= Seite 10: Branchen ================= */
 neueSeite(); seitenband();
 y = titel('BRANCHEN', 'Konzepte für', 'Ihre Branche');
+/* Breites Bild (Produktionshalle, Higgsfield), auf 3:1 zugeschnitten */
+bildRund('produktion.jpg', RA, y - 4, BR, BR / 3);
+y += BR / 3 + 4;
 const branchen = [
   ['Industrie & Produktion', 'Hohe Mengen, Schichtbetrieb, Lastspitzen durch Maschinen.', ['Tranchen- und Portfoliobeschaffung', 'Lastspitzenkappung und atypische Netznutzung', 'Strom- und Energiesteuer-Entlastung']],
   ['Logistik & Kühlhäuser', 'Durchgehender Betrieb, Kühlung, wachsender Ladebedarf.', ['Planbare Budgets über mehrere Jahre', 'PV und Speicher auf großen Dachflächen', 'Ladeinfrastruktur für E-Fuhrpark']],
@@ -369,6 +377,7 @@ branchen.forEach(([t, u, p], i) => { const x = RA + (i % 2) * (hw + 6), yy = y +
   schrift(11.5, true); fa(WEISS); doc.text(t, X(x + 5), Y(yy + 10.5));
   absatz(u, X(x + 5), Y(yy + 24), hw - 10, 9.2, GRAU, 1.38);
   let yy2 = yy + 39; p.forEach((q) => { yy2 = punkt(q, '', X(x + 4), yy2, hw - 8, 9); }); });
+console.log('Seite 10 Karten bis', (y + 78 + 72).toFixed(1));
 fuss();
 
 /* ================= Seite 11: Häufige Fragen ================= */
@@ -390,10 +399,8 @@ fuss();
 
 /* ================= Seite 12: Rückseite ================= */
 neueSeite();
-verlauf(0, 0, PW, PH, NAVY1, NAVY2, { quer: false });
-doc.saveGraphicsState(); doc.rect(0, 0, PW, PH, null); doc.clip(); doc.discardPath();
-[40, 55, 70, 85].forEach((r, i) => ring(X(10), Y(H - 30), r, 0.07 - i * 0.012));
-doc.restoreGraphicsState();
+/* Hintergrundbild über die ganze Seite einschließlich Beschnitt (Higgsfield), bereits abgedunkelt */
+doc.addImage(bild('rueckseite.jpg'), 'JPEG', 0, 0, PW, PH);
 doc.addImage(logoT, 'PNG', X(RA), Y(30), (420 / 196) * 16, 16);
 schrift(26, true); fa(WEISS); doc.text('Sprechen wir über', X(RA), Y(92)); fa(GRUEN2); doc.text('Ihre Energie.', X(RA), Y(104));
 verlauf(X(RA), Y(110), 30, 1.5, GRUEN1, GRUEN2, { n: 30, r: 0.75 });
