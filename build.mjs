@@ -48,6 +48,11 @@ await cp("node_modules/jspdf/dist/jspdf.umd.min.js", "dist/assets/jspdf-4.2.1.mi
 /* QR-Baustein und Logo mit durchsichtigem Hintergrund für die Visitenkarte, ebenfalls nur bei Bedarf */
 execSync("npx esbuild qrcode-baustein.js --bundle --minify --format=iife --outfile=dist/assets/qrcode-1.5.4.min.js", { stdio: "inherit" });
 await cp("logo-weiss.png", "dist/assets/logo-weiss.png");
+/* Logo für die E-Mail-Signatur: wird von den Mailprogrammen über die volle Adresse geladen */
+await cp("signatur-logo.png", "dist/assets/signatur-logo.png");
+/* Schulungen im EGC-Design (Unterlagen → Schulungen). Bei neuen Fassungen SCHULUNGEN_STAND hier und in App.jsx erhöhen. */
+const SCHULUNGEN_STAND = "1";
+await cp("unterlagen/schulungen", "dist/assets/schulungen-" + SCHULUNGEN_STAND, { recursive: true });
 
 /* Imagebroschüre zum Versenden: Baustein, verkleinerte Bilder und Schrift, nur bei Bedarf.
    Bei Änderungen an Bildern oder Aufbau BROSCHUERE_STAND hier und in App.jsx erhöhen (Dateien werden dauerhaft zwischengespeichert). */

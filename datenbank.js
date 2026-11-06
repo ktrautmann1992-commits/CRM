@@ -347,6 +347,20 @@ export async function anmelden(email, passwort) {
   return data.session;
 }
 
+/* Eigenes Passwort ändern: zuerst mit dem bisherigen Passwort neu anmelden (prüft es und gilt bei
+   Supabase als frische Anmeldung, die für die Änderung verlangt werden kann), dann das neue setzen. */
+export async function passwortAendern(bisher, neu) {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user || !user.email) throw new Error("Du bist nicht angemeldet.");
+  const { error: falsch } = await sb.auth.signInWithPassword({ email: user.email, password: bisher });
+  if (falsch) throw new Error("Das bisherige Passwort stimmt nicht.");
+  const { error } = await sb.auth.updateUser({ password: neu });
+  if (error) {
+    if (/same|different/i.test(error.message || "")) throw new Error("Das neue Passwort muss sich vom bisherigen unterscheiden.");
+    throw new Error(error.message || "Das Passwort konnte nicht geändert werden.");
+  }
+}
+
 export async function abmelden() {
   await sb.auth.signOut();
   for (const k of Object.keys(stand)) stand[k].clear();

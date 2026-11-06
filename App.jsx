@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { zipSync, strToU8 } from "fflate";
 import {
   Zap, Flame, Plus, Send, ArrowLeft, Upload, FileText, Check, X,
@@ -9,7 +10,7 @@ import {
 } from "lucide-react";
 import {
   sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
-  schonBekannt, anmelden, abmelden, meineId, einladungPruefen, einladungEinloesen, dateiInhalt,
+  schonBekannt, anmelden, abmelden, meineId, einladungPruefen, einladungEinloesen, dateiInhalt, passwortAendern,
 } from "./datenbank.js";
 
 /* ------------------------------------------------------------------ */
@@ -298,7 +299,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.16 · 06.11.2026 · Imagebroschüre zum Versenden unter Marketing";
+const VERSION = "v5.17 · 06.11.2026 · Passwort ändern, E-Mail-Signatur, Schulungen";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -7943,6 +7944,74 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
   );
 }
 
+/* Eigenes Passwort ändern, für jede Rolle (Seitenleiste unten) */
+function PasswortDialog({ onSchliessen }) {
+  const [alt, setAlt] = useState("");
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [fehler, setFehler] = useState("");
+  const [laeuft, setLaeuft] = useState(false);
+  const [fertig, setFertig] = useState(false);
+  const regeln = passwortRegeln(pw);
+  const passt = alt && regeln.every((x) => x.ok) && pw === pw2;
+  const absenden = async () => {
+    setLaeuft(true); setFehler("");
+    try { await passwortAendern(alt, pw); setFertig(true); }
+    catch (e) { setFehler((e && e.message) || String(e)); }
+    setLaeuft(false);
+  };
+  return createPortal(
+    <div className="flex items-start sm:items-center justify-center px-4"
+         style={{ position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 50, overflowY: "auto",
+                  background: "rgba(10,22,38,0.55)", paddingTop: "max(2rem, env(safe-area-inset-top))", paddingBottom: "2rem" }}
+         onClick={(e) => { if (e.target === e.currentTarget && !laeuft) onSchliessen(); }}>
+      <div className="w-full max-w-md rounded p-6" style={{ background: C.card, color: C.text, fontFamily: FONT }}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg">Passwort ändern</h2>
+          <button onClick={onSchliessen} style={{ color: C.muted }} title="Schließen"><X size={18} /></button>
+        </div>
+        {fertig ? (
+          <div>
+            <p className="text-sm mt-3 flex items-center gap-2" style={{ color: C.ok }}><Check size={16} /> Dein Passwort ist geändert.</p>
+            <p className="text-sm mt-2" style={{ color: C.muted }}>Ab sofort meldest du dich mit dem neuen Passwort an, auf allen Geräten.</p>
+            <div className="mt-5"><Btn icon={Check} onClick={onSchliessen}>Fertig</Btn></div>
+          </div>
+        ) : (
+          <div>
+            <p className="text-sm mb-5" style={{ color: C.muted }}>Zur Sicherheit brauchen wir zuerst dein bisheriges Passwort.</p>
+            <div className="space-y-4">
+              <Feld label="Bisheriges Passwort" type="password" value={alt} onChange={setAlt} />
+              <Feld label="Neues Passwort" type="password" value={pw} onChange={setPw} />
+              <Feld label="Neues Passwort wiederholen" type="password" value={pw2} onChange={setPw2} />
+            </div>
+            <div className="mt-4 space-y-1">
+              {regeln.map((x) => (
+                <div key={x.text} className="flex items-center gap-2 text-xs" style={{ color: x.ok ? C.ok : C.muted }}>
+                  {x.ok ? <Check size={13} /> : <X size={13} />} {x.text}
+                </div>
+              ))}
+              {pw2 && (
+                <div className="flex items-center gap-2 text-xs" style={{ color: pw === pw2 ? C.ok : C.muted }}>
+                  {pw === pw2 ? <Check size={13} /> : <X size={13} />} Passwörter stimmen überein
+                </div>
+              )}
+            </div>
+            <div className="mt-6 flex flex-wrap gap-2">
+              <Btn icon={Check} onClick={absenden} disabled={!passt || laeuft}>{laeuft ? "Einen Moment …" : "Passwort ändern"}</Btn>
+              <Btn variante="hell" onClick={onSchliessen} disabled={laeuft}>Abbrechen</Btn>
+            </div>
+            {fehler && <p className="text-sm mt-4" style={{ color: C.warn }}>{fehler}</p>}
+            <p className="text-xs mt-5" style={{ color: C.muted }}>
+              Bisheriges Passwort vergessen? Dann melde dich bei der Geschäftsführung, du bekommst einen neuen Zugangslink.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 /* Registrierung über den Einladungslink: Passwort vergeben */
 function Registrierung({ einladung, onFertig, onAbbruch }) {
   const [pw, setPw] = useState("");
@@ -8791,6 +8860,116 @@ function Versorgerliste({ versorger, setVersorger, user, standard, setStandard }
   );
 }
 
+/* E-Mail-Signatur für den Vertrieb: Daten wie auf der Visitenkarte. Das Logo laden die Mailprogramme
+   über die volle Adresse, deshalb fest auf das veröffentlichte Portal. */
+const PORTAL_ADRESSE = "https://egc-vertriebsportal.netlify.app";
+const htmlSicher = (t) => String(t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function signaturHtml(m) {
+  const p = visitenkartenDaten(m), F = FIRMENDATEN;
+  const web = (F.website || "www.egc-energie.de").replace(/^https?:\/\//, "");
+  const tel = (t) => "tel:" + String(t).replace(/[^\d+]/g, "");
+  const a = (href, t) => '<a href="' + href + '" style="color:#16212C;text-decoration:none">' + htmlSicher(t) + "</a>";
+  const zeile = (k, v) => '<tr><td style="padding:0 8px 2px 0;color:#6B7787;font-size:11px">' + k + '</td><td style="padding:0 0 2px 0;font-size:12px;white-space:nowrap">' + v + "</td></tr>";
+  const kontakt = [
+    p.mobil ? zeile("Mobil", a(tel(p.mobil), p.mobil)) : "",
+    p.telefon ? zeile("Telefon", a(tel(p.telefon), p.telefon)) : "",
+    p.email ? zeile("E-Mail", a("mailto:" + p.email, p.email)) : "",
+    zeile("Web", a("https://" + web, web)),
+  ].join("");
+  const fuss = ["EGC Energie" + (F.vertreter ? " · vertreten durch " + F.vertreter : ""), [F.strasse, F.ort].filter(Boolean).join(", "),
+    F.ustId ? "USt-IdNr. " + F.ustId : ""].filter(Boolean).map(htmlSicher).join(" · ");
+  return '<table cellpadding="0" cellspacing="0" border="0" style="font-family:Arial,Helvetica,sans-serif;color:#16212C;font-size:12px;line-height:1.4;border-collapse:collapse">'
+    + '<tr><td style="padding:0 0 8px 0">'
+    + '<div style="font-size:15px;font-weight:bold;color:#0A1626">' + htmlSicher(p.name) + "</div>"
+    + (p.titel ? '<div style="font-size:12px;font-weight:bold;color:#4A8C26">' + htmlSicher(p.titel) + "</div>" : "")
+    + (p.zusatz ? '<div style="font-size:11px;color:#6B7787">' + htmlSicher(p.zusatz) + "</div>" : "")
+    + "</td></tr>"
+    + '<tr><td style="border-top:2px solid #6CB43B;padding:10px 0 0 0">'
+    + '<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>'
+    + '<td style="padding:0 14px 0 0;vertical-align:middle"><a href="https://' + web + '"><img src="' + PORTAL_ADRESSE + '/assets/signatur-logo.png" width="110" height="51" alt="EGC Energie" style="display:block;border:0;width:110px;height:51px"></a></td>'
+    + '<td style="border-left:1px solid #D8DDE4;padding:0 0 0 14px;vertical-align:middle"><table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">' + kontakt + "</table></td>"
+    + "</tr></table></td></tr>"
+    + '<tr><td style="padding:10px 0 0 0;font-size:10px;color:#6B7787">' + fuss + "</td></tr></table>";
+}
+function signaturText(m) {
+  const p = visitenkartenDaten(m), F = FIRMENDATEN;
+  return [p.name, p.titel, p.zusatz, "", "EGC Energie", p.mobil && "Mobil " + p.mobil, p.telefon && "Telefon " + p.telefon,
+    p.email && "E-Mail " + p.email, F.website || "www.egc-energie.de", [F.strasse, F.ort].filter(Boolean).join(", ")]
+    .filter((z) => z !== null && z !== undefined && z !== false).join("\n").replace(/\n{3,}/g, "\n\n");
+}
+async function htmlKopieren(html, text) {
+  try {
+    if (navigator.clipboard && window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([text], { type: "text/plain" }) })]);
+      return true;
+    }
+  } catch (e) { /* weiter mit dem Ersatzweg */ }
+  const div = document.createElement("div");
+  div.contentEditable = "true"; div.innerHTML = html;
+  Object.assign(div.style, { position: "fixed", left: "-9999px", top: "0" });
+  document.body.appendChild(div);
+  const bereich = document.createRange(); bereich.selectNodeContents(div);
+  const auswahl = window.getSelection(); auswahl.removeAllRanges(); auswahl.addRange(bereich);
+  let ok = false; try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  auswahl.removeAllRanges(); div.remove();
+  return ok;
+}
+function EmailSignatur({ m }) {
+  const [hinweis, setHinweis] = useState("");
+  const [anleitung, setAnleitung] = useState(false);
+  const html = signaturHtml(m);
+  const p = visitenkartenDaten(m);
+  const datei = () => {
+    const voll = '<!doctype html><html><head><meta charset="utf-8"><title>Signatur ' + htmlSicher(p.name) + "</title></head><body>" + html + "</body></html>";
+    dateiLaden({ name: "Signatur_EGC_" + p.name.replace(/[^\wäöüÄÖÜß]+/g, "_") + ".htm", typ: "text/html",
+      url: "data:text/html;base64," + btoa(unescape(encodeURIComponent(voll))) });
+  };
+  return (
+    <div className="rounded p-4 mb-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+      <div className="text-sm">Deine E-Mail-Signatur</div>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>
+        Mit deinen Daten wie auf der Visitenkarte. Einmal kopieren und in deinem Mailprogramm als Signatur einfügen.
+      </div>
+      <div className="rounded p-4 mb-3 overflow-x-auto" style={{ background: "#fff", border: "1px solid " + C.line }}
+           dangerouslySetInnerHTML={{ __html: html.split(PORTAL_ADRESSE + "/assets/").join("/assets/") }} />
+      <div className="flex flex-wrap gap-2">
+        <Btn icon={Check} onClick={async () => {
+          const ok = await htmlKopieren(html, signaturText(m));
+          setHinweis(ok ? "Kopiert. Jetzt im Mailprogramm in das Signaturfeld einfügen." : "Kopieren hat nicht geklappt. Bitte die Datei herunterladen.");
+        }}>Signatur kopieren</Btn>
+        <Btn variante="hell" icon={FileText} onClick={datei}>Als Datei (.htm)</Btn>
+        <Btn variante="hell" onClick={() => setAnleitung(!anleitung)}>{anleitung ? "Anleitung ausblenden" : "So richtest du sie ein"}</Btn>
+      </div>
+      {hinweis && <p className="text-xs mt-2" style={{ color: C.ok }}>{hinweis}</p>}
+      {anleitung && (
+        <div className="text-xs mt-3 space-y-2" style={{ color: C.text, maxWidth: "70ch" }}>
+          <p><b>Outlook am PC:</b> Datei › Optionen › E-Mail › Signaturen › Neu. Namen vergeben, in das große Feld klicken und einfügen (Strg + V), Speichern.
+             Im neuen Outlook: Zahnrad › Konten › Signaturen.</p>
+          <p><b>Strato Webmail:</b> Einstellungen (Zahnrad) › E-Mail › Signaturen › neue Signatur anlegen und einfügen.</p>
+          <p><b>iPhone (Mail-App):</b> Einstellungen › Apps › Mail › Signatur, lange in das Feld tippen › Einfügen.
+             Die Outlook-App am Handy übernimmt nur Text ohne Logo.</p>
+          <p style={{ color: C.muted }}>Am einfachsten geht es am PC: Portal dort öffnen, „Signatur kopieren“ und in Outlook einfügen.
+             Stimmen Telefonnummer oder Berufsbezeichnung nicht, sag der Geschäftsführung Bescheid, sie pflegt die Daten unter Visitenkarten.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Schulungen im EGC-Design, fest im Portal (Ordner unterlagen/schulungen, Stand wie in build.mjs) */
+const SCHULUNGEN_PFAD = "/assets/schulungen-1/";
+const SCHULUNGEN_FEST = [
+  { datei: "EGC_Schulung_1_Grundlagen_Energiemarkt.pdf", titel: "Schulung 1 · Wie der Energiemarkt funktioniert", seiten: 29,
+    text: "Marktlogik, Marktrollen, kW und kWh, Zählerarten und Messkonzepte." },
+  { datei: "EGC_Schulung_2_Energiemarkt_Preisbildung.pdf", titel: "Schulung 2 · Wie Energiepreise entstehen", seiten: 19,
+    text: "Merit Order, Spot- und Terminmarkt, Börse und OTC." },
+  { datei: "EGC_Schulung_3_Beschaffungsmodelle.pdf", titel: "Schulung 3 · Beschaffungsmodelle und Kundenpassung", seiten: 31,
+    text: "Festpreis, Spot, Index, Tranchen, Hybrid, Cap/Floor, Zielpreis, Portfolio und PPA." },
+  { datei: "EGC_Schulung_4_Energienebenkosten.pdf", titel: "Schulung 4 · Energienebenkosten verstehen und senken", seiten: 26,
+    text: "Woraus sich ein Energiepreis zusammensetzt und mit welchen Hebeln sich Nebenkosten senken lassen." },
+];
+
 /* Schulungen, Dokumente und Marketingunterlagen */
 function Ablage({ ablage, setAblage, user, start }) {
   const [bereich, setBereich] = useState(start || "dokumente");
@@ -8853,7 +9032,7 @@ function Ablage({ ablage, setAblage, user, start }) {
                 color: bereich === b.id ? "#fff" : C.muted,
                 border: "1px solid " + (bereich === b.id ? C.ink : C.line),
               }}>
-              {b.label} <span style={{ opacity: 0.6 }}>{ablage.filter((d) => d.bereich === b.id).length}</span>
+              {b.label} <span style={{ opacity: 0.6 }}>{ablage.filter((d) => d.bereich === b.id).length + (b.id === "schulung" ? SCHULUNGEN_FEST.length : 0)}</span>
             </button>
           ))}
         </div>
@@ -8914,6 +9093,35 @@ function Ablage({ ablage, setAblage, user, start }) {
         </div>
       )}
 
+      {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && <EmailSignatur m={user} />}
+
+      {bereich === "schulung" && (
+        <div className="grid sm:grid-cols-2 gap-3 mb-4">
+          {SCHULUNGEN_FEST.map((s) => (
+            <div key={s.datei} className="rounded p-4 flex flex-col" style={{ background: C.card, border: "1px solid " + C.line }}>
+              <div className="flex items-start gap-3">
+                <span className="rounded p-2" style={{ background: "#F6F8FA" }}><FileText size={18} style={{ color: C.gruen }} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm">{s.titel}</div>
+                  <div className="text-xs" style={{ color: C.muted }}>PDF · {s.seiten} Seiten</div>
+                </div>
+              </div>
+              <p className="text-sm mt-3 flex-1" style={{ color: C.muted }}>{s.text}</p>
+              <div className="flex items-center gap-2 mt-4 pt-3" style={{ borderTop: "1px solid " + C.line }}>
+                <a href={SCHULUNGEN_PFAD + s.datei} target="_blank" rel="noreferrer"
+                   className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded" style={{ background: C.ink, color: "#fff" }}>
+                  <FileText size={14} /> Öffnen
+                </a>
+                <a href={SCHULUNGEN_PFAD + s.datei} download={s.datei}
+                   className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded" style={{ border: "1px solid " + C.line, color: C.text }}>
+                  <Upload size={14} style={{ transform: "rotate(180deg)" }} /> Speichern
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && (() => {
         const d = visitenkartenDaten(user);
         const frei = !!(user.visitenkarte && user.visitenkarte.freigegeben);
@@ -8955,7 +9163,7 @@ function Ablage({ ablage, setAblage, user, start }) {
         );
       })()}
 
-      {drin.length === 0 ? (
+      {drin.length === 0 && bereich === "schulung" ? null : drin.length === 0 ? (
         <div className="rounded p-8 text-center text-sm"
              style={{ border: "1px dashed " + C.line, color: C.muted }}>
           {bereich === "schulung"
@@ -13837,6 +14045,7 @@ export default function App() {
   const [entwurf, setEntwurf] = useState(null);
   const [geladen, setGeladen] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [pwDialog, setPwDialog] = useState(false);
 
   const user = mitarbeiter.find((u) => u.id === userId) || null;
 
@@ -14808,8 +15017,13 @@ export default function App() {
             ))}
           </nav>
 
-          <button onClick={abmeldenUndLeeren}
+          <button onClick={() => { setPwDialog(true); setMenu(false); }}
             className="w-full mt-5 px-3 py-2 text-xs rounded text-left"
+            style={{ background: C.inkSoft, color: "#8B9BB0", border: "1px solid " + C.inkLine }}>
+            Passwort ändern
+          </button>
+          <button onClick={abmeldenUndLeeren}
+            className="w-full mt-2 px-3 py-2 text-xs rounded text-left"
             style={{ background: C.inkSoft, color: "#8B9BB0", border: "1px solid " + C.inkLine }}>
             Abmelden
           </button>
@@ -14825,6 +15039,7 @@ export default function App() {
 
       {/* Inhalt */}
       <main className="flex-1 px-4 sm:px-8 py-5 lg:py-6 max-w-6xl w-full">
+        {pwDialog && <PasswortDialog onSchliessen={() => setPwDialog(false)} />}
         {meldung && (
           <div className="flex items-start gap-2 p-3 mb-4 rounded text-sm"
                style={{ background: "#FCF3F0", border: "1px solid " + C.warn, color: C.warn }}>
