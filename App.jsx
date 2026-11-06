@@ -298,7 +298,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.15.7 · 05.11.2026 · Portfolio-Flyer: strategische Beschaffung für den Mittelstand";
+const VERSION = "v5.16 · 06.11.2026 · Imagebroschüre zum Versenden unter Marketing";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1870,6 +1870,42 @@ const FLYER = {
       ["Digitale Messung", "Smartmeter über unsere Partner"]]],
   ],
 };
+
+/* Imagebroschüre zum Versenden, 12 Seiten A4, hinten mit den Kontaktdaten des Vertriebspartners.
+   Aufbau gemeinsam mit der Druckdatei in druckvorlagen/broschuere/broschuere.js; Stand wie in build.mjs. */
+const BROSCHUERE_PFAD = "/assets/broschuere-1/";
+const BROSCHUERE_BILDER = ["titel.jpg", "beratung.jpg", "speicher.jpg", "umspannwerk.jpg", "carport.jpg", "produktion.jpg", "rueckseite.jpg"];
+let broschuereLaden = null;
+const ladeBroschuere = () => {
+  if (window.EGCBroschuere) return Promise.resolve(window.EGCBroschuere);
+  if (!broschuereLaden)
+    broschuereLaden = new Promise((fertig, fehler) => {
+      const s = document.createElement("script");
+      s.src = BROSCHUERE_PFAD + "broschuere.js";
+      s.onload = () => fertig(window.EGCBroschuere);
+      s.onerror = () => { broschuereLaden = null; fehler(new Error("Broschüren-Baustein konnte nicht geladen werden.")); };
+      document.head.appendChild(s);
+    });
+  return broschuereLaden;
+};
+async function imagebroschuerePdf(m) {
+  const p = visitenkartenDaten(m);
+  const base64 = async (pfad) => (await bildAlsDataUrl(pfad)).split(",")[1];
+  const [jsPDF, QR, baustein, logoT, regular, fett, ...bilder] = await Promise.all([
+    ladeJsPdf(), ladeQr(), ladeBroschuere(), bildAlsDataUrl("/assets/logo-weiss.png"),
+    base64(BROSCHUERE_PFAD + "LiberationSans-Regular.ttf"), base64(BROSCHUERE_PFAD + "LiberationSans-Bold.ttf"),
+    ...BROSCHUERE_BILDER.map((b) => bildAlsDataUrl(BROSCHUERE_PFAD + b))]);
+  const bild = (f) => {
+    const i = BROSCHUERE_BILDER.indexOf(f);
+    if (i < 0) throw new Error("Bild fehlt: " + f);
+    /* bildAlsDataUrl liefert je nach Server einen anderen Typ; jsPDF braucht image/jpeg */
+    return "data:image/jpeg;base64," + bilder[i].split(",")[1];
+  };
+  const doc = await baustein.baue({ jsPDF, QR, bild, logoT, schriften: { regular, fett }, D: baustein.D, P: p, versand: true });
+  const roh = doc.output("datauristring");
+  return { name: "Imagebroschuere_EGC_" + p.name.replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf", typ: "application/pdf",
+           groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
+}
 
 async function portfolioFlyerPdf(m) {
   const p = visitenkartenDaten(m);
@@ -8861,6 +8897,23 @@ function Ablage({ ablage, setAblage, user, start }) {
         </div>
       )}
 
+      {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && (
+        <div className="rounded p-4 mb-4 flex flex-wrap items-center gap-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <span className="rounded p-2" style={{ background: "#F6F8FA" }}><FileText size={18} style={{ color: C.gruen }} /></span>
+          <div className="flex-1 min-w-48">
+            <div className="text-sm">Deine Imagebroschüre zum Versenden</div>
+            <div className="text-xs" style={{ color: C.muted }}>
+              Zwölf Seiten A4, rund 0,7 MB, zum Verschicken per E-Mail. Auf der Rückseite stehen deine Kontaktdaten wie auf deiner
+              Visitenkarte, Telefon und E-Mail sind anklickbar. Die gedruckte Broschüre bekommst du von der Geschäftsführung.
+            </div>
+          </div>
+          <Btn icon={FileText} onClick={async () => {
+            try { dateiLaden(await imagebroschuerePdf(user)); }
+            catch (e) { alert("Die Broschüre konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+          }}>Broschüre herunterladen (PDF)</Btn>
+        </div>
+      )}
+
       {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && (() => {
         const d = visitenkartenDaten(user);
         const frei = !!(user.visitenkarte && user.visitenkarte.freigegeben);
@@ -10704,6 +10757,10 @@ function Vertraege({ tippgeber, setTippgeber, mitarbeiter, setMitarbeiter, anfra
                       try { dateiLaden(await portfolioFlyerPdf(m)); }
                       catch (e) { alert("Der Flyer konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
                     }}>Flyer (PDF)</button>
+                    <button className="text-xs" style={{ color: C.strom }} onClick={async () => {
+                      try { dateiLaden(await imagebroschuerePdf(m)); }
+                      catch (e) { alert("Die Broschüre konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
+                    }}>Broschüre (PDF)</button>
                   </span>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-3">

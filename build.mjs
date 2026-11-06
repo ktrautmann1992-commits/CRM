@@ -49,6 +49,16 @@ await cp("node_modules/jspdf/dist/jspdf.umd.min.js", "dist/assets/jspdf-4.2.1.mi
 execSync("npx esbuild qrcode-baustein.js --bundle --minify --format=iife --outfile=dist/assets/qrcode-1.5.4.min.js", { stdio: "inherit" });
 await cp("logo-weiss.png", "dist/assets/logo-weiss.png");
 
+/* Imagebroschüre zum Versenden: Baustein, verkleinerte Bilder und Schrift, nur bei Bedarf.
+   Bei Änderungen an Bildern oder Aufbau BROSCHUERE_STAND hier und in App.jsx erhöhen (Dateien werden dauerhaft zwischengespeichert). */
+const BROSCHUERE_STAND = "1";
+const bz = "dist/assets/broschuere-" + BROSCHUERE_STAND;
+await mkdir(bz, { recursive: true });
+execSync("npx esbuild broschuere-baustein.js --bundle --minify --format=iife --outfile=" + bz + "/broschuere.js", { stdio: "inherit" });
+await cp("druckvorlagen/broschuere/bilder/klein", bz, { recursive: true });
+await cp("druckvorlagen/broschuere/schrift/LiberationSans-Regular.ttf", bz + "/LiberationSans-Regular.ttf");
+await cp("druckvorlagen/broschuere/schrift/LiberationSans-Bold.ttf", bz + "/LiberationSans-Bold.ttf");
+
 await cp("manifest.json", "dist/manifest.json");
 await cp("icon-192.png", "dist/icon-192.png");
 await cp("icon-512.png", "dist/icon-512.png");
