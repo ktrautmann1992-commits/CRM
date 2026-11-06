@@ -299,7 +299,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.17 · 06.11.2026 · Passwort ändern, E-Mail-Signatur, Schulungen";
+const VERSION = "v5.18 · 06.11.2026 · Checkliste Kundenunterlagen, Passwort ändern, E-Mail-Signatur, Schulungen";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -8968,7 +8968,13 @@ const SCHULUNGEN_FEST = [
     text: "Festpreis, Spot, Index, Tranchen, Hybrid, Cap/Floor, Zielpreis, Portfolio und PPA." },
   { datei: "EGC_Schulung_4_Energienebenkosten.pdf", titel: "Schulung 4 · Energienebenkosten verstehen und senken", seiten: 26,
     text: "Woraus sich ein Energiepreis zusammensetzt und mit welchen Hebeln sich Nebenkosten senken lassen." },
-];
+].map((x) => ({ ...x, pfad: SCHULUNGEN_PFAD }));
+/* feste Unterlagen je Bereich (Schulungen und Dokumente) */
+const UNTERLAGEN_FEST = {
+  schulung: SCHULUNGEN_FEST,
+  dokumente: [{ datei: "EGC_Checkliste_Kundenunterlagen.pdf", titel: "Checkliste Kundenunterlagen (SLP und RLM)", seiten: 2,
+    pfad: "/assets/dokumente-1/", text: "Was du vom Kunden brauchst: Unternehmen, Lieferstelle, MaLo, Verbrauch, Vertrag und Kündigungsfrist, dazu die Extras für RLM-Kunden." }],
+};
 
 /* Schulungen, Dokumente und Marketingunterlagen */
 function Ablage({ ablage, setAblage, user, start }) {
@@ -9032,7 +9038,7 @@ function Ablage({ ablage, setAblage, user, start }) {
                 color: bereich === b.id ? "#fff" : C.muted,
                 border: "1px solid " + (bereich === b.id ? C.ink : C.line),
               }}>
-              {b.label} <span style={{ opacity: 0.6 }}>{ablage.filter((d) => d.bereich === b.id).length + (b.id === "schulung" ? SCHULUNGEN_FEST.length : 0)}</span>
+              {b.label} <span style={{ opacity: 0.6 }}>{ablage.filter((d) => d.bereich === b.id).length + (UNTERLAGEN_FEST[b.id] || []).length}</span>
             </button>
           ))}
         </div>
@@ -9095,9 +9101,9 @@ function Ablage({ ablage, setAblage, user, start }) {
 
       {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && <EmailSignatur m={user} />}
 
-      {bereich === "schulung" && (
+      {UNTERLAGEN_FEST[bereich] && (
         <div className="grid sm:grid-cols-2 gap-3 mb-4">
-          {SCHULUNGEN_FEST.map((s) => (
+          {UNTERLAGEN_FEST[bereich].map((s) => (
             <div key={s.datei} className="rounded p-4 flex flex-col" style={{ background: C.card, border: "1px solid " + C.line }}>
               <div className="flex items-start gap-3">
                 <span className="rounded p-2" style={{ background: "#F6F8FA" }}><FileText size={18} style={{ color: C.gruen }} /></span>
@@ -9108,11 +9114,11 @@ function Ablage({ ablage, setAblage, user, start }) {
               </div>
               <p className="text-sm mt-3 flex-1" style={{ color: C.muted }}>{s.text}</p>
               <div className="flex items-center gap-2 mt-4 pt-3" style={{ borderTop: "1px solid " + C.line }}>
-                <a href={SCHULUNGEN_PFAD + s.datei} target="_blank" rel="noreferrer"
+                <a href={s.pfad + s.datei} target="_blank" rel="noreferrer"
                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded" style={{ background: C.ink, color: "#fff" }}>
                   <FileText size={14} /> Öffnen
                 </a>
-                <a href={SCHULUNGEN_PFAD + s.datei} download={s.datei}
+                <a href={s.pfad + s.datei} download={s.datei}
                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded" style={{ border: "1px solid " + C.line, color: C.text }}>
                   <Upload size={14} style={{ transform: "rotate(180deg)" }} /> Speichern
                 </a>
@@ -9163,7 +9169,7 @@ function Ablage({ ablage, setAblage, user, start }) {
         );
       })()}
 
-      {drin.length === 0 && bereich === "schulung" ? null : drin.length === 0 ? (
+      {drin.length === 0 && UNTERLAGEN_FEST[bereich] ? null : drin.length === 0 ? (
         <div className="rounded p-8 text-center text-sm"
              style={{ border: "1px dashed " + C.line, color: C.muted }}>
           {bereich === "schulung"
