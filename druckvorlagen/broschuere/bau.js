@@ -105,7 +105,15 @@ fa(GRUEN2); doc.text('beschaffen.', X(RA), Y(160));
 verlauf(X(RA), Y(167), 34, 1.6, GRUEN1, GRUEN2, { n: 30, r: 0.8 });
 schrift(13); fa(HELLBLAU);
 doc.text(['Ihre externe Energieeinkaufsabteilung', 'für Industrie, Gewerbe und Mittelstand'], X(RA), Y(180), { lineHeightFactor: 1.4 });
-schrift(9); fa(HELLBLAU); doc.text('Strom  ·  Erdgas  ·  Beschaffungsstrategie  ·  Energienebenkosten  ·  Erzeugung & Speicher', X(RA), Y(196));
+/* Leistungen als schmale Zeile in Grün, Großbuchstaben, mittig */
+(() => {
+  const t = 'STROM  ·  ERDGAS  ·  BESCHAFFUNGSSTRATEGIE  ·  ENERGIENEBENKOSTEN  ·  ERZEUGUNG & SPEICHER';
+  let g = 7.6, cs = 0.35; schrift(g);
+  const breite = () => doc.getTextWidth(t) + cs * (t.length - 1);
+  while (breite() > BR - 20 && g > 6) { g -= 0.2; schrift(g); }
+  /* selbst zentrieren: jsPDF rechnet den Buchstabenabstand beim Zentrieren nicht mit */
+  fa(GRUEN2); doc.text(t, X(W / 2) - breite() / 2, Y(196), { charSpace: cs });
+})();
 
 /* ================= Seite 2: Wer wir sind ================= */
 neueSeite(); seitenband();
