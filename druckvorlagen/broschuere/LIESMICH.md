@@ -16,3 +16,4 @@ python3 druckvorlagen/broschuere/aufraeumen.py druckvorlagen/broschuere/roh.pdf 
 - `daten.json`: Beispiel-Lastgang (anonymisiert) für die Grafiken auf Seite 4 und 7
 - `schrift/`: Liberation Sans, eingebettet (SIL Open Font License 1.1)
 - Logo: `logo-weiss.png` im Wurzelverzeichnis
+- `bilder/`: KI-generierte Bilder (Higgsfield, GPT Image 2.6, 4K): `titel.jpg` (Titelseite, mit dunklem Verlauf oben), `speicher.jpg` (Seite 7)

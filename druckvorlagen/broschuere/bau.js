@@ -9,6 +9,7 @@ const HIER = __dirname, WURZEL = path.join(__dirname, '..', '..');
 const QR = require(path.join(WURZEL, 'node_modules', 'qrcode'));
 const D = JSON.parse(fs.readFileSync(path.join(HIER, 'daten.json'), 'utf8'));
 (async () => {
+const bild = (f) => 'data:image/jpeg;base64,' + fs.readFileSync(path.join(HIER, 'bilder', f)).toString('base64');
 const logoT = 'data:image/png;base64,' + fs.readFileSync(path.join(WURZEL, 'logo-weiss.png')).toString('base64');
 const qr = await QR.toDataURL('https://www.egc-energie.de', { margin: 0, width: 500, color: { dark: '#0A1626', light: '#FFFFFF' } });
 const B = 3, W = 210, H = 297, PW = W + 2 * B, PH = H + 2 * B, RA = 18, BR = W - 2 * RA;
@@ -95,14 +96,8 @@ const diagramm = (werte, x, y, w, h, { max, achse = [], linien = [], farbe = NAV
 
 /* ================= Seite 1: Titel ================= */
 neueSeite();
-verlauf(0, 0, PW, PH, NAVY1, NAVY2, { quer: false });
-doc.saveGraphicsState(); doc.rect(0, 0, PW, PH, null); doc.clip(); doc.discardPath();
-[40, 55, 70, 85, 100].forEach((r, i) => ring(X(W - 10), Y(60), r, 0.08 - i * 0.012));
-dk(0.25); st(GRUEN2); doc.setLineWidth(0.7);
-/* stilisierter Lastgang als Linie */
-(() => { const w = D.woche; let lx = null, ly = null; for (let i = 0; i < w.length; i += 3) { const x = X(i / w.length * W), y = Y(262 - w[i] / 130 * 34); if (lx != null) doc.line(lx, ly, x, y); lx = x; ly = y; } })();
-dk(1);
-doc.restoreGraphicsState();
+/* Titelbild über die ganze Seite einschließlich Beschnitt (Higgsfield, KI-generiert) */
+doc.addImage(bild('titel.jpg'), 'JPEG', 0, 0, PW, PH);
 doc.addImage(logoT, 'PNG', X(RA), Y(28), (420 / 196) * 20, 20);
 schrift(8, true); fa(GRUEN2); doc.text('IMAGEBROSCHÜRE', X(RA), Y(118), { charSpace: 1.4 });
 schrift(34, true); fa(WEISS); doc.text('Energie', X(RA), Y(134)); doc.text('strategisch', X(RA), Y(147));
@@ -110,7 +105,7 @@ fa(GRUEN2); doc.text('beschaffen.', X(RA), Y(160));
 verlauf(X(RA), Y(167), 34, 1.6, GRUEN1, GRUEN2, { n: 30, r: 0.8 });
 schrift(13); fa(HELLBLAU);
 doc.text(['Ihre externe Energieeinkaufsabteilung', 'für Industrie, Gewerbe und Mittelstand'], X(RA), Y(180), { lineHeightFactor: 1.4 });
-schrift(9); fa(HELLBLAU); doc.text('Strom  ·  Erdgas  ·  Beschaffungsstrategie  ·  Energienebenkosten  ·  Erzeugung & Speicher', X(RA), Y(H - 22));
+schrift(9); fa(HELLBLAU); doc.text('Strom  ·  Erdgas  ·  Beschaffungsstrategie  ·  Energienebenkosten  ·  Erzeugung & Speicher', X(RA), Y(196));
 
 /* ================= Seite 2: Wer wir sind ================= */
 neueSeite(); seitenband();
@@ -264,14 +259,19 @@ fuss();
 /* ================= Seite 7: Batteriespeicher & Lastspitzenkappung ================= */
 neueSeite(); seitenband();
 y = titel('SPEICHER', 'Batteriespeicher &', 'Lastspitzenkappung');
-y = absatz('Netzbetreiber berechnen bei RLM-Kunden einen Leistungspreis für die höchste Spitze des Jahres. Schon wenige Viertelstunden bestimmen damit die Kosten für das ganze Jahr. Ein Batteriespeicher gibt in diesen Momenten Energie ab und kappt die Spitze.', X(RA), Y(y), BR, 9.8) + 7;
+/* Bild rechts, Text links daneben */
+const bw = 82, bh7 = bw * 9 / 16;
+doc.saveGraphicsState(); doc.roundedRect(X(RA + BR - bw), Y(y - 4), bw, bh7, 3, 3, null); doc.clip(); doc.discardPath();
+doc.addImage(bild('speicher.jpg'), 'JPEG', X(RA + BR - bw), Y(y - 4), bw, bh7); doc.restoreGraphicsState();
+const yt = absatz('Netzbetreiber berechnen bei RLM-Kunden einen Leistungspreis für die höchste Spitze des Jahres. Schon wenige Viertelstunden bestimmen damit die Kosten für das ganze Jahr. Ein Batteriespeicher gibt in diesen Momenten Energie ab und kappt die Spitze.', X(RA), Y(y), BR - bw - 7, 9.8);
+y = Math.max(yt - B, y - 4 + bh7) + 7;
 const cap = 160;
 schrift(10, true); fa(NAVY); doc.text('Spitzentag ' + D.tag.split('-').reverse().join('.') + ': Last mit und ohne Speicher', X(RA), Y(y)); y += 7;
-const gg = diagramm(D.profil, RA + 8, y, BR - 8, 58, { max: 220, achse: [0, 4, 8, 12, 16, 20].map((h) => [h * 4, String(h).padStart(2, '0') + ':00']),
+const gg = diagramm(D.profil, RA + 8, y, BR - 8, 46, { max: 220, achse: [0, 4, 8, 12, 16, 20].map((h) => [h * 4, String(h).padStart(2, '0') + ':00']),
   linien: [[cap, 'Kappungsgrenze ' + cap + ' kW', GRUEN1]] });
 /* gekappter Teil hervorheben */
 D.profil.forEach((v, i) => { if (v > cap && i > 0) { dk(0.55); fl([220, 120, 60]); const x0 = gg.px(i - 0.5), x1 = gg.px(i + 0.5); doc.rect(X(x0), Y(gg.py(v)), x1 - x0, gg.py(cap) - gg.py(v), 'F'); dk(1); } });
-y += 70;
+y += 58;
 schrift(6.8); fa(GRAU); doc.text('Orange: Leistung, die der Speicher übernimmt. Beispiel-Lastgang, anonymisiert.', X(RA), Y(y - 3));
 /* Rechenbeispiel */
 const rk = 56;
