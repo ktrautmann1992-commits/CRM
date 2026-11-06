@@ -17,3 +17,15 @@ python3 druckvorlagen/broschuere/aufraeumen.py druckvorlagen/broschuere/roh.pdf 
 - `schrift/`: Liberation Sans, eingebettet (SIL Open Font License 1.1)
 - Logo: `logo-weiss.png` im Wurzelverzeichnis
 - `bilder/`: KI-generierte Bilder (Higgsfield, GPT Image 2.6, 4K): `titel.jpg` (Titelseite, mit dunklem Verlauf oben), `speicher.jpg` (Seite 7)
+
+## Versandfassung (PDF zum Verschicken, je Vertriebspartner)
+
+Endformat A4 ohne Beschnitt, verkleinerte Bilder (`bilder/klein/`, rund 0,7 MB statt 6 MB),
+auf der Rückseite statt des Visitenkarten-Hinweises die Kontaktdaten des Vertriebspartners.
+Telefon, E-Mail und Website sind anklickbar.
+
+```bash
+# partner.json: {"name":"…","titel":"…","zusatz":"","mobil":"…","telefon":"…","email":"…"}
+ART=versand PARTNER=partner.json AUSGABE=/tmp/versand_roh.pdf node druckvorlagen/broschuere/bau.js
+python3 druckvorlagen/broschuere/aufraeumen.py /tmp/versand_roh.pdf EGC_Imagebroschuere_Name.pdf --ohne-beschnitt
+```

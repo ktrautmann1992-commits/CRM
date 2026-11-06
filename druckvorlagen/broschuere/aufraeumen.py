@@ -1,5 +1,6 @@
 import pikepdf, re, sys
 src, dst = sys.argv[1], sys.argv[2]
+beschnitt = '--ohne-beschnitt' not in sys.argv  # Versandfassung: kein Beschnitt
 pdf = pikepdf.open(src)
 for page in pdf.pages:
     inhalt = b"".join(c.read_bytes() for c in (page.Contents if isinstance(page.Contents, pikepdf.Array) else [page.Contents]))
@@ -11,7 +12,7 @@ for page in pdf.pages:
                 del fonts[name]
 # Rand für die Druckerei: Endformat (TrimBox) und Beschnitt (BleedBox) eintragen
 mm = 72 / 25.4
-for page in pdf.pages:
+for page in (pdf.pages if beschnitt else []):
     w, h = float(page.MediaBox[2]), float(page.MediaBox[3])
     b = 3 * mm
     page.TrimBox = pikepdf.Array([b, b, w - b, h - b])

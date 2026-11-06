@@ -8,11 +8,18 @@ const path = require('path');
 const HIER = __dirname, WURZEL = path.join(__dirname, '..', '..');
 const QR = require(path.join(WURZEL, 'node_modules', 'qrcode'));
 const D = JSON.parse(fs.readFileSync(path.join(HIER, 'daten.json'), 'utf8'));
+/* Zwei Fassungen:
+   Druck   (Vorgabe): 3 mm Beschnitt, Bilder in voller Auflösung, Hinweis auf die beiliegende Visitenkarte.
+   Versand (ART=versand PARTNER=datei.json AUSGABE=datei.pdf): Endformat A4 ohne Beschnitt, kleinere Bilder
+            zum Versenden per E-Mail, auf der Rückseite die Kontaktdaten des Vertriebspartners. */
+const VERSAND = process.env.ART === 'versand';
+const P = VERSAND ? JSON.parse(fs.readFileSync(process.env.PARTNER, 'utf8')) : null;
+const AUSGABE = process.env.AUSGABE || path.join(HIER, 'roh.pdf');
 (async () => {
-const bild = (f) => 'data:image/jpeg;base64,' + fs.readFileSync(path.join(HIER, 'bilder', f)).toString('base64');
+const bild = (f) => 'data:image/jpeg;base64,' + fs.readFileSync(path.join(HIER, 'bilder', VERSAND ? 'klein' : '', f)).toString('base64');
 const logoT = 'data:image/png;base64,' + fs.readFileSync(path.join(WURZEL, 'logo-weiss.png')).toString('base64');
 const qr = await QR.toDataURL('https://www.egc-energie.de', { margin: 0, width: 500, color: { dark: '#0A1626', light: '#FFFFFF' } });
-const B = 3, W = 210, H = 297, PW = W + 2 * B, PH = H + 2 * B, RA = 18, BR = W - 2 * RA;
+const B = VERSAND ? 0 : 3, W = 210, H = 297, PW = W + 2 * B, PH = H + 2 * B, RA = 18, BR = W - 2 * RA;
 const doc = new jsPDF({ unit: 'mm', format: [PW, PH], compress: true });
 /* Schrift fest einbetten: Druckereien verlangen eingebettete Schriften */
 const ttf = (f) => fs.readFileSync(path.join(HIER, 'schrift', f)).toString('base64');
@@ -409,17 +416,44 @@ const F = { strasse: 'In den Erlenwiesen 11', ort: '66914 Waldmohr', tel: '06373
 [['Telefon', F.tel], ['E-Mail', F.mail], ['Website', F.web], ['Anschrift', F.strasse + ', ' + F.ort]].forEach(([k, v], i) => {
   const yy = 168 + i * 13; fl(GRUEN); doc.circle(X(RA + 2.2), Y(yy - 1.4), 2.2, 'F');
   schrift(7.5); fa(HELLBLAU); doc.text(k.toUpperCase(), X(RA + 8), Y(yy - 3.5), { charSpace: 0.6 }); schrift(12, true); fa(WEISS); doc.text(v, X(RA + 8), Y(yy + 1.8)); });
-/* Hinweis auf den persönlichen Ansprechpartner: Visitenkarte und Flyer liegen bei */
+if (!P) {
+/* Druck: Hinweis auf den persönlichen Ansprechpartner, Visitenkarte und Flyer liegen bei */
 karte(RA, 228, BR, 22, NAVY2);
 dk(0.07); fl(WEISS); doc.roundedRect(X(RA), Y(228), BR, 22, 3, 3, 'F'); dk(1); st(GRUEN1); doc.setLineWidth(0.4); doc.roundedRect(X(RA), Y(228), BR, 22, 3, 3, 'S');
 fl(GRUEN); doc.circle(X(RA + 9), Y(239), 4, 'F'); st(WEISS); doc.setLineWidth(0.5); doc.roundedRect(X(RA + 6.6), Y(237.3), 4.8, 3.4, 0.4, 0.4, 'S');
 schrift(10.5, true); fa(WEISS); doc.text('Ihr persönlicher Ansprechpartner', X(RA + 17), Y(237.5));
 schrift(9); fa(HELLBLAU); doc.text('Kontaktdaten finden Sie auf der beiliegenden Visitenkarte.', X(RA + 17), Y(243));
+} else {
+/* Versand: gleiches Feld, darin die Daten des Vertriebspartners, Telefon und E-Mail anklickbar */
+const yk = 226, hk = 46;
+karte(RA, yk, BR, hk, NAVY2);
+dk(0.07); fl(WEISS); doc.roundedRect(X(RA), Y(yk), BR, hk, 3, 3, 'F'); dk(1); st(GRUEN1); doc.setLineWidth(0.4); doc.roundedRect(X(RA), Y(yk), BR, hk, 3, 3, 'S');
+schrift(7.5, true); fa(GRUEN2); doc.text('IHR PERSÖNLICHER ANSPRECHPARTNER', X(RA + 8), Y(yk + 10), { charSpace: 0.8 });
+schrift(16, true); fa(WEISS); doc.text(P.name, X(RA + 8), Y(yk + 21));
+if (P.titel) { schrift(10, true); fa(GRUEN2); doc.text(P.titel, X(RA + 8), Y(yk + 28)); }
+if (P.zusatz) { schrift(8.5); fa(HELLBLAU); doc.text(P.zusatz, X(RA + 8), Y(yk + 34)); }
+const zeilen = [['Mobil', P.mobil, 'tel:'], ['Telefon', P.telefon, 'tel:'], ['E-Mail', P.email, 'mailto:']].filter((z) => z[1]);
+const xr = RA + 98;
+zeilen.forEach(([k, v, art], i) => {
+  const yy = yk + 13 + i * 11;
+  fl(GRUEN); doc.circle(X(xr + 1.6), Y(yy - 1.2), 1.6, 'F');
+  schrift(6.8); fa(HELLBLAU); doc.text(k.toUpperCase(), X(xr + 6), Y(yy - 3), { charSpace: 0.6 });
+  schrift(10.5, true); fa(WEISS); doc.text(v, X(xr + 6), Y(yy + 1.8));
+  doc.link(X(xr + 6), Y(yy - 5), doc.getTextWidth(v), 8, { url: art + (art === 'tel:' ? v.replace(/[^\d+]/g, '') : v) });
+});
+console.log('Ansprechpartner', P.name, '·', zeilen.map((z) => z[1]).join(' · '));
+}
+if (VERSAND) {
+  /* Firmendaten anklickbar */
+  [['tel:' + F.tel.replace(/\D/g, '')], ['mailto:' + F.mail], ['https://' + F.web], [null]].forEach(([u], i) => {
+    if (u) doc.link(X(RA + 8), Y(168 + i * 13 - 5), 80, 8, { url: u }); });
+  doc.link(X(W - RA - 44), Y(166), 44, 50, { url: 'https://' + F.web });
+}
 fl(WEISS); doc.roundedRect(X(W - RA - 44), Y(166), 44, 50, 3, 3, 'F');
 doc.addImage(qr, 'PNG', X(W - RA - 39), Y(171), 34, 34);
 schrift(7); fa(GRAU); doc.text('www.egc-energie.de', X(W - RA - 22), Y(211), { align: 'center' });
 schrift(7.5); fa(HELLBLAU); doc.text('EGC Energie  ·  vertreten durch Karsten Trautmann  ·  USt-IdNr. DE365107489', X(RA), Y(H - 14));
 
-fs.writeFileSync(path.join(HIER, 'roh.pdf'), Buffer.from(doc.output('arraybuffer')));
+fs.writeFileSync(AUSGABE, Buffer.from(doc.output('arraybuffer')));
 console.log('Seiten', seite);
 })();
