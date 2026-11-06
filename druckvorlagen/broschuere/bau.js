@@ -64,6 +64,7 @@ const titel = (kicker, a, b, y = 26) => {
 };
 const seitenband = () => { verlauf(0, 0, X(5), PH, NAVY1, NAVY2, { quer: false, n: 60 }); verlauf(X(5), 0, 1.2, PH, GRUEN2, GRUEN1, { quer: false, n: 40 }); };
 const karte = (x, y, w, h, f = HELL, r = 3) => { fl(f); doc.roundedRect(X(x), Y(y), w, h, r, r, 'F'); };
+const bildRund = (f, x, y, w, h, r = 3) => { doc.saveGraphicsState(); doc.roundedRect(X(x), Y(y), w, h, r, r, null); doc.clip(); doc.discardPath(); doc.addImage(bild(f), 'JPEG', X(x), Y(y), w, h); doc.restoreGraphicsState(); };
 const kopfFarbe = (a, b, x, y, gr = 11) => { schrift(gr, true); fa(NAVY); doc.text(a, X(x), Y(y)); if (b) { const w = doc.getTextWidth(a + ' '); fa(GRUEN1); doc.text(b, X(x) + w, Y(y)); } };
 
 /* Diagramm: Fläche mit Verlauf, Achsen; werte in kW */
@@ -108,9 +109,9 @@ doc.text(['Ihre externe Energieeinkaufsabteilung', 'für Industrie, Gewerbe und 
 /* Leistungen als schmale Zeile in Grün, Großbuchstaben, mittig */
 (() => {
   const t = 'STROM \u2009·\u2009 ERDGAS \u2009·\u2009 BESCHAFFUNGSSTRATEGIE \u2009·\u2009 ENERGIENEBENKOSTEN \u2009·\u2009 ERZEUGUNG & SPEICHER';
-  let g = 9.2, cs = 0.22; schrift(g);
+  let g = 9.2, cs = 0.22; schrift(g, true);
   const breite = () => doc.getTextWidth(t) + cs * (t.length - 1);
-  while (breite() > BR && g > 6) { g -= 0.2; schrift(g); }
+  while (breite() > BR && g > 6) { g -= 0.2; schrift(g, true); }
   /* selbst zentrieren: jsPDF rechnet den Buchstabenabstand beim Zentrieren nicht mit */
   fa(GRUEN2); doc.text(t, X(W / 2) - breite() / 2, Y(196), { charSpace: cs });
   console.log('Leistungszeile', g.toFixed(1), 'pt,', breite().toFixed(0), 'mm');
@@ -119,8 +120,13 @@ doc.text(['Ihre externe Energieeinkaufsabteilung', 'für Industrie, Gewerbe und 
 /* ================= Seite 2: Wer wir sind ================= */
 neueSeite(); seitenband();
 let y = titel('ÜBER UNS', 'Ihre externe', 'Energieeinkaufsabteilung');
-y = absatz('EGC Energie ist ein versorgerunabhängiger Energiedienstleister mit Sitz in Waldmohr. Wir übernehmen für Unternehmen in ganz Deutschland den Einkauf von Strom und Erdgas: von der Analyse Ihres Verbrauchs über die Beschaffungsstrategie bis zur laufenden Bewirtschaftung Ihrer Verträge.', X(RA), Y(y), BR, 10.5) + 3;
-y = absatz('Für Sie bedeutet das: ein zentraler Ansprechpartner für alle Energiethemen, eine Beschaffung, die zu Ihrem Unternehmen passt, und Energiekosten, die Sie planen und steuern können, statt ihnen ausgeliefert zu sein.', X(RA), Y(y), BR, 10.5) + 8;
+/* Bild rechts (Beratungsgespräch, Higgsfield), Text links daneben */
+const bw2 = 76, bh2 = bw2 / 1.6;
+bildRund('beratung.jpg', RA + BR - bw2, y - 4, bw2, bh2);
+let yt2 = absatz('EGC Energie ist ein versorgerunabhängiger Energiedienstleister mit Sitz in Waldmohr. Wir übernehmen für Unternehmen in ganz Deutschland den Einkauf von Strom und Erdgas: von der Analyse Ihres Verbrauchs über die Beschaffungsstrategie bis zur laufenden Bewirtschaftung Ihrer Verträge.', X(RA), Y(y), BR - bw2 - 7, 9.8) + 3;
+yt2 = absatz('Für Sie bedeutet das: ein zentraler Ansprechpartner für alle Energiethemen, eine Beschaffung, die zu Ihrem Unternehmen passt, und Energiekosten, die Sie planen und steuern können, statt ihnen ausgeliefert zu sein.', X(RA), Y(yt2), BR - bw2 - 7, 9.8);
+y = Math.max(yt2 - B, y - 4 + bh2) + 8;
+console.log('Seite 2 Text bis', (yt2 - B).toFixed(1), 'Bild bis', (y - 8).toFixed(1));
 const kacheln = [
   ['Versorgerunabhängig', 'Wir arbeiten mit vielen Energieversorgern und empfehlen, was zu Ihnen passt, nicht, was am meisten bringt.'],
   ['Strategisch statt Stichtag', 'Wir kaufen Energie nach einem Beschaffungsplan zu gezielten Zeitpunkten ein und nutzen Marktchancen.'],
@@ -327,7 +333,11 @@ fuss();
 /* ================= Seite 9: Erzeugung, Technik & Förderung ================= */
 neueSeite(); seitenband();
 y = titel('PARTNERNETZWERK', 'Erzeugung, Technik', '& Förderung');
-y = absatz('Eigene Erzeugung und moderne Messtechnik machen Unternehmen unabhängiger von den Märkten. Wir setzen diese Projekte nicht selbst um, sondern über geprüfte Partnerunternehmen, Ausschreibungen und unser Netzwerk, und bleiben Ihr zentraler Ansprechpartner.', X(RA), Y(y), BR, 9.8) + 8;
+/* Bild rechts (Solar-Carport mit Ladesäulen, Higgsfield) */
+const bw9 = 76, bh9 = bw9 * 9 / 16;
+bildRund('carport.jpg', RA + BR - bw9, y - 4, bw9, bh9);
+const yt9 = absatz('Eigene Erzeugung und moderne Messtechnik machen Unternehmen unabhängiger von den Märkten. Wir setzen diese Projekte nicht selbst um, sondern über geprüfte Partnerunternehmen, Ausschreibungen und unser Netzwerk, und bleiben Ihr zentraler Ansprechpartner.', X(RA), Y(y), BR - bw9 - 7, 9.8);
+y = Math.max(yt9 - B, y - 4 + bh9) + 8;
 const technik = [
   ['Photovoltaik', 'Dach- und Freiflächenanlagen, von der Planung bis zur Vermarktung, über Partner oder Ausschreibung.'],
   ['Batteriespeicher', 'Lastspitzen kappen, Eigenverbrauch erhöhen, mit Speichergröße passend zu Ihrem Lastgang.'],
@@ -343,6 +353,7 @@ y += 142;
 karte(RA, y, BR, 24, NAVY); verlauf(X(RA), Y(y), BR, 24, NAVY1, NAVY2, { r: 3, n: 50 });
 schrift(10.5, true); fa(WEISS); doc.text('Ausschreibung statt Einzelangebot', X(RA + 7), Y(y + 9));
 absatz('Für größere Projekte holen wir Angebote mehrerer Anbieter ein und vergleichen sie für Sie, technisch und wirtschaftlich.', X(RA + 7), Y(y + 15), BR - 14, 8.8, HELLBLAU, 1.35);
+console.log('Seite 9 Kasten bis', (y + 24).toFixed(1));
 fuss();
 
 /* ================= Seite 10: Branchen ================= */
