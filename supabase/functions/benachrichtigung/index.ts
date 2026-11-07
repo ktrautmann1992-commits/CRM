@@ -13,7 +13,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 import nodemailer from "npm:nodemailer@6.9.16";
 
-const PORTAL = "https://portal.egc-energie.de";
+/* Die Adresse portal.egc-energie.de ist nicht eingerichtet (kein Zertifikat): immer die Netlify-Adresse */
+const PORTAL = "https://egc-vertriebsportal.netlify.app";
 const VERTRIEB = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
 
 type Mitarbeiter = { id: string; daten: Record<string, any> };

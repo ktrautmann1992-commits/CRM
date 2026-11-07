@@ -53,7 +53,9 @@ await cp("signatur-logo.png", "dist/assets/signatur-logo.png");
 /* Schulungen im EGC-Design (Unterlagen → Schulungen). Bei neuen Fassungen SCHULUNGEN_STAND hier und in App.jsx erhöhen. */
 const SCHULUNGEN_STAND = "1";
 await cp("unterlagen/schulungen", "dist/assets/schulungen-" + SCHULUNGEN_STAND, { recursive: true });
-await cp("unterlagen/dokumente", "dist/assets/dokumente-" + SCHULUNGEN_STAND, { recursive: true });
+/* Feste Dokumente (Checkliste). Bei neuer Fassung DOKUMENTE_STAND hier und in App.jsx erhöhen. */
+const DOKUMENTE_STAND = "2";
+await cp("unterlagen/dokumente", "dist/assets/dokumente-" + DOKUMENTE_STAND, { recursive: true });
 
 /* Imagebroschüre zum Versenden: Baustein, verkleinerte Bilder und Schrift, nur bei Bedarf.
    Bei Änderungen an Bildern oder Aufbau BROSCHUERE_STAND hier und in App.jsx erhöhen (Dateien werden dauerhaft zwischengespeichert). */

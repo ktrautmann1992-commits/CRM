@@ -24,8 +24,8 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(e.request)
       .then((antwort) => {
-        const kopie = antwort.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, kopie));
+        /* nur einwandfreie Antworten ablegen, nie Fehlerseiten */
+        if (antwort.ok) { const kopie = antwort.clone(); caches.open(CACHE).then((c) => c.put(e.request, kopie)); }
         return antwort;
       })
       .catch(() => caches.match(e.request).then((t) => t || caches.match("/index.html")))

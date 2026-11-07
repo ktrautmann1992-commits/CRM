@@ -381,6 +381,20 @@ export async function einladungEinloesen(code, passwort) {
   return data;
 }
 
+/* „Passwort vergessen“: der Server schickt einen Link an die hinterlegte Adresse (Antwort immer gleich) */
+export async function passwortVergessen(email) {
+  const { error } = await sb.functions.invoke("einladung", { body: { aktion: "vergessen", email: String(email || "").trim().toLowerCase() } });
+  if (error) throw new Error(await fehlertext(error));
+}
+
+/* Portalsteuerung (nur Geschäftsführung): Zugang anlegen oder Passwort setzen.
+   `daten` nur bei neuen Mitarbeitern, falls die App den Datensatz noch nicht gespeichert hat. */
+export async function zugangSetzen({ id, passwort, status, daten }) {
+  const { data, error } = await sb.functions.invoke("einladung", { body: { aktion: "zugang_setzen", id, passwort, status, daten } });
+  if (error) throw new Error(await fehlertext(error));
+  return data;
+}
+
 async function fehlertext(error) {
   try {
     const j = await error.context.json();

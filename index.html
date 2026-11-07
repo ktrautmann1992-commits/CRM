@@ -20,6 +20,23 @@
     <div id="root"></div>
     <script type="module" src="/assets/app.js"></script>
     <script>
+      /* Notbremse: startet das Portal nach 12 Sekunden nicht, Ausweg anbieten (ersetzt das Löschen der Browserdaten) */
+      setTimeout(function () {
+        var r = document.getElementById("root");
+        if (!r || r.children.length) return;
+        r.innerHTML = '<div style="min-height:100vh;background:#0A1626;color:#C4D0DE;font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;padding:24px">'
+          + '<div style="max-width:420px;background:#fff;color:#16212C;border-radius:8px;padding:22px"><div style="font-size:18px;margin-bottom:6px">Das Portal startet nicht</div>'
+          + '<div style="font-size:14px;color:#6B7787;margin-bottom:16px">Tippe auf „Zurücksetzen“. Danach meldest du dich neu an.</div>'
+          + '<button id="egc-reset" style="padding:12px 16px;border-radius:6px;font-size:15px;width:100%;border:none;background:#0A1626;color:#fff">Zurücksetzen</button></div></div>';
+        document.getElementById("egc-reset").onclick = function () {
+          try { Object.keys(localStorage).forEach(function (k) { if (/^sb-|supabase/.test(k)) localStorage.removeItem(k); }); } catch (e) {}
+          var fertig = function () { location.replace(location.pathname); };
+          var p = [];
+          try { if (window.caches) p.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); })); } catch (e) {}
+          try { if (navigator.serviceWorker) p.push(navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (x) { return x.unregister(); })); })); } catch (e) {}
+          Promise.all(p).then(fertig, fertig);
+        };
+      }, 12000);
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", function () {
           navigator.serviceWorker.register("/sw.js").catch(function () {});

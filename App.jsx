@@ -6,11 +6,12 @@ import {
   AlertTriangle, Users, Calculator, FileSignature, BarChart3,
   Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw, Menu, Bell, Target, Calendar,
   Search, ClipboardList, Contact, Briefcase, Lightbulb, UserPlus, Network, Trophy, Ban,
-  MessageSquare, FolderOpen, CircleUser, Gauge,
+  MessageSquare, FolderOpen, CircleUser, Gauge, Settings,
 } from "lucide-react";
 import {
   sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
   schonBekannt, anmelden, abmelden, meineId, einladungPruefen, einladungEinloesen, dateiInhalt, passwortAendern,
+  passwortVergessen, zugangSetzen,
 } from "./datenbank.js";
 
 /* ------------------------------------------------------------------ */
@@ -299,7 +300,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.18 · 06.11.2026 · Checkliste Kundenunterlagen, Passwort ändern, E-Mail-Signatur, Schulungen";
+const VERSION = "v5.19 · 07.11.2026 · Passwort vergessen, Portalsteuerung, Absturzschutz, Firmenanteil der GF";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1716,8 +1717,8 @@ const visitenkartenDaten = (m) => {
     email: v.email || m.email || "",
   };
 };
-/* Visitenkarten gibt es vorerst nur für den Vertrieb */
-const VISITENKARTE_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
+/* Visitenkarten, Flyer, Broschüre und Signatur: Vertrieb und Geschäftsführung (nicht der Innendienst) */
+const VISITENKARTE_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb", "Geschäftsführung"];
 
 async function visitenkartePdf(m) {
   const p = visitenkartenDaten(m);
@@ -3102,6 +3103,11 @@ const firmenanteilVon = (versorgerName) => {
   return eigen !== undefined && eigen !== "" && !isNaN(w) ? w : FIRMENANTEIL;
 };
 
+/* Eigener Satz in Prozent der Gesamtprovision. Die Geschäftsführung erhält immer den Firmenanteil (Vorgabe 75 %),
+   nicht einen Vertriebssatz; ein Eigenakquise-Bonus kommt für sie nicht hinzu. */
+const istGFRolle = (m) => !!m && m.rolle === "Geschäftsführung";
+const eigenerSatzVon = (m) => istGFRolle(m) ? (isNaN(FIRMENANTEIL) ? 75 : FIRMENANTEIL) : (parseFloat(m && m.satz) || 0);
+
 /* Welcher Eigenakquise-Satz gilt für diese Person? */
 const eigenBonusVon = (m) =>
   m && m.eigenBonus !== undefined && m.eigenBonus !== ""
@@ -3163,7 +3169,8 @@ function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
     });
     /* Der Bonus geht an den Partner selbst, nicht an seine Struktur.
        Ist für die Person ein eigener Satz hinterlegt, gilt dieser. */
-    if (eigen) {
+    /* Die Geschäftsführung bekommt keinen Bonus an sich selbst: ihr gehört ohnehin der Firmenanteil */
+    if (eigen && !istGFRolle(mitarbeiter.find((x) => x.id === b.id))) {
       const person = mitarbeiter.find((x) => x.id === b.id) || {};
       const satz = person.eigenBonus !== undefined && person.eigenBonus !== ""
         ? parseFloat(person.eigenBonus) || 0
@@ -3724,7 +3731,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
           ? "bestätigt: " + num(bestaetigteMenge(a)) + " kWh × " + num(a.bestaetigung.aufschlag || 0, 3) + " ct/kWh"
           : sichtGesamt
           ? num(verbrauchGesamt(a)) + " kWh × " + num((variante ? variante.aufschlag : (aktiveVariante(a) ? aktiveVariante(a).aufschlag : a.aufschlag)) || 0, 3) + " ct/kWh"
-          : num(user.satz || 0, 0) + " % Provisionssatz auf " + num(verbrauchGesamt(a)) + " kWh"}
+          : num(eigenerSatzVon(user), 0) + " % Provisionssatz auf " + num(verbrauchGesamt(a)) + " kWh"}
         {jahre ? " · über " + num(jahre, 0) + " Lieferjahre " + eur(kopfGesamt) : ""}
       </div>
 
@@ -3740,7 +3747,19 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         </div>
       )}
 
-      {sichtStruktur && zeilen.map((z) => (
+      {sichtStruktur && zeilen.map((z) => istGFRolle(z) ? (
+        /* Geschäftsführung am Vorgang: ihr steht der Firmenanteil zu, nach allen Auszahlungen */
+        <div key={z.id} className="flex items-center gap-3 py-1.5 text-sm" style={{ borderTop: "1px solid " + C.line }}>
+          <span className="flex-1">{z.name}
+            <span className="block text-xs" style={{ color: C.muted }}>
+              Geschäftsführung · Firmenanteil {num(firmenanteilVon(a.bestaetigung ? a.bestaetigung.versorger : null), 0)} %{sichtFirma ? " abzüglich aller Auszahlungen" : ""}
+            </span>
+          </span>
+          <span className="text-right" style={{ fontVariantNumeric: "tabular-nums", color: z.id === user.id ? C.ok : C.text }}>
+            {sichtFirma ? eur(v.firma) : "–"}
+          </span>
+        </div>
+      ) : (
         <div key={z.id} className="flex items-center gap-3 py-1.5 text-sm"
              style={{ borderTop: "1px solid " + C.line }}>
           <span className="flex-1">
@@ -3799,7 +3818,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         </div>
       )}
 
-      {sichtFirma && (
+      {sichtFirma && !(sichtStruktur && zeilen.some(istGFRolle)) && (
         <div className="flex items-center gap-3 py-1.5 text-sm" style={{ borderTop: "1px solid " + C.line }}>
           <span className="flex-1">Verbleibt in der Firma</span>
           <span style={{ fontVariantNumeric: "tabular-nums" }}>{eur(v.firma)}</span>
@@ -4354,13 +4373,13 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                 </div>
                 <div>
                   <div className="text-xs mb-1" style={{ color: C.muted }}>
-                    Deine Provision je Lieferjahr ({num(user.satz || 0, 0)} %
-                    {(a.akquiseArt || "eigen") === "eigen" && BONUS_EIGENAKQUISE > 0
+                    {istGFRolle(user) ? "Firmenanteil je Lieferjahr" : "Deine Provision je Lieferjahr"} ({num(eigenerSatzVon(user), 0)} %
+                    {!istGFRolle(user) && (a.akquiseArt || "eigen") === "eigen" && BONUS_EIGENAKQUISE > 0
                       ? " + " + num(BONUS_EIGENAKQUISE, 0) + " % Bonus" : ""})
                   </div>
                   <div className="text-lg" style={{ fontVariantNumeric: "tabular-nums", color: C.ok }}>
                     {eur((verbrauchGesamt(a) * a.aufschlag *
-                      ((user.satz || 0) + ((a.akquiseArt || "eigen") === "eigen" ? BONUS_EIGENAKQUISE : 0)))
+                      (eigenerSatzVon(user) + (!istGFRolle(user) && (a.akquiseArt || "eigen") === "eigen" ? BONUS_EIGENAKQUISE : 0)))
                       / 10000)}
                   </div>
                 </div>
@@ -7255,7 +7274,7 @@ function Strukturanfragen({ anfragen, setAnfragen, user }) {
   const [auswahl, setAuswahl] = useState(null);
   const meine = anfragen.filter((x) => x.vonId === user.id);
   const gewaehlt = meine.find((x) => x.id === auswahl);
-  const eigenerSatz = parseFloat(user.satz) || 0;
+  const eigenerSatz = eigenerSatzVon(user);
   const satz = parseFloat(String((neu || {}).satz || "").replace(",", "."));
   const satzOk = !isNaN(satz) && satz > 0 && satz <= eigenerSatz;
   const mailOk = neu && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(neu.email.trim());
@@ -7503,6 +7522,219 @@ function StrukturFreigabe({ anfrage, mitarbeiter, setMitarbeiter, strukturanfrag
         ) : (
           <p className="text-sm" style={{ color: C.muted }}>{anfrage.ablehnung || ""}</p>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* Portalsteuerung (nur Geschäftsführung): Zugänge für alle Rollen anlegen und Passwörter setzen.
+   Den Zugang legt der Server an (Server-Funktion „einladung“, Aktion zugang_setzen). */
+const ALLE_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb", "Kalkulation", "Vertragsmanagement",
+  "Leadmanagement", "Finanzbuchhaltung", "Geschäftsführung"];
+const VERTRIEBSROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
+const passwortVorschlag = () => {
+  const z = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789", sz = "!#+?-";
+  const r = crypto.getRandomValues(new Uint32Array(12));
+  const t = Array.from(r, (x) => z[x % z.length]);
+  t[3] = sz[r[3] % sz.length]; t[8] = String(2 + (r[8] % 8));
+  return t.join("");
+};
+const zugangsText = (name, email, pw) =>
+  "Dein Zugang zum EGC-Vertriebsportal\n" + "Name: " + name + "\nAdresse: " + PORTAL_ADRESSE + "\nE-Mail: " + email + "\nPasswort: " + pw
+  + "\n\nDas Passwort kannst du nach der Anmeldung im Menü unter „Passwort ändern“ selbst ändern.";
+
+function PasswortFeld({ label, value, onChange }) {
+  const regeln = passwortRegeln(value);
+  return (
+    <div>
+      <div className="flex items-end gap-2">
+        <div className="flex-1"><Feld label={label} value={value} onChange={onChange} /></div>
+        <Btn variante="hell" onClick={() => onChange(passwortVorschlag())}>Vorschlag</Btn>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-4">
+        {regeln.map((x) => (
+          <span key={x.text} className="text-xs inline-flex items-center gap-1" style={{ color: x.ok ? C.ok : C.muted }}>
+            {x.ok ? <Check size={12} /> : <X size={12} />} {x.text}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ZugangKopieren({ titel, name, email, pw, onFertig }) {
+  const [kopiert, setKopiert] = useState(false);
+  const text = zugangsText(name, email, pw);
+  return (
+    <div className="rounded p-4" style={{ background: "#F1F7F0", border: "1px solid " + C.gruen }}>
+      <div className="text-sm flex items-center gap-2 mb-2" style={{ color: C.ok }}><Check size={16} /> {titel}</div>
+      <pre className="text-xs whitespace-pre-wrap p-3 rounded mb-3" style={{ background: "#fff", border: "1px solid " + C.line, fontFamily: "inherit" }}>{text}</pre>
+      <div className="flex flex-wrap gap-2">
+        <Btn icon={Check} onClick={async () => { try { await navigator.clipboard.writeText(text); setKopiert(true); } catch (e) { /* von Hand */ } }}>
+          {kopiert ? "Kopiert" : "Zugangsdaten kopieren"}
+        </Btn>
+        <Btn variante="hell" onClick={onFertig}>Fertig</Btn>
+      </div>
+      <p className="text-xs mt-2" style={{ color: C.muted }}>Das Passwort wird nirgends gespeichert. Gib es der Person direkt weiter.</p>
+    </div>
+  );
+}
+
+function Portalsteuerung({ mitarbeiter, setMitarbeiter, user, notieren }) {
+  const leer = { name: "", email: "", telefon: "", rolle: "Kalkulation", satz: "", upline: "", angestellt: true, frei: true, pw: passwortVorschlag() };
+  const [neu, setNeu] = useState(null);
+  const [laeuft, setLaeuft] = useState(false);
+  const [fehler, setFehler] = useState("");
+  const [ergebnis, setErgebnis] = useState(null);
+  const [pwFuer, setPwFuer] = useState(null);
+  const [pw, setPw] = useState("");
+  const [filter, setFilter] = useState("alle");
+  const [suche, setSuche] = useState("");
+
+  const vertrieb = neu && VERTRIEBSROLLEN.includes(neu.rolle);
+  const koepfe = mitarbeiter.filter((m) => ["Teamleiter", "Leitung Vertrieb"].includes(m.rolle) && m.status === "aktiv");
+  const emailFrei = neu && !mitarbeiter.some((m) => String(m.email || "").trim().toLowerCase() === neu.email.trim().toLowerCase());
+  const satzWert = neu ? parseFloat(String(neu.satz).replace(",", ".")) : NaN;
+  const neuOk = neu && neu.name.trim() && /\S+@\S+\.\S+/.test(neu.email) && emailFrei && passwortRegeln(neu.pw).every((x) => x.ok)
+    && (!vertrieb || (!isNaN(satzWert) && satzWert > 0 && satzWert <= 50));
+
+  const anlegen = async () => {
+    setLaeuft(true); setFehler("");
+    const status = neu.frei ? "aktiv" : "registriert";
+    const m = {
+      id: "vp-" + uid(), name: neu.name.trim(), rolle: neu.rolle, team: "-",
+      satz: vertrieb ? satzWert : 0, upline: vertrieb ? (neu.upline || null) : null,
+      email: neu.email.trim().toLowerCase(), telefon: neu.telefon.trim(), status, passwort: "", bild: null,
+      stammdaten: leereStammdaten(), angestellt: !vertrieb || !!neu.angestellt,
+      ...(status === "aktiv" ? { freigabe: { von: user.name, datum: heute() } } : {}),
+    };
+    try {
+      const { stammdaten, satz, passwort, ...daten } = m;
+      await zugangSetzen({ id: m.id, passwort: neu.pw, status, daten });
+      setMitarbeiter(mitarbeiter.some((x) => x.id === m.id) ? mitarbeiter.map((x) => (x.id === m.id ? { ...x, ...m } : x)) : [...mitarbeiter, m]);
+      if (notieren) notieren("Mitarbeiter", m.name + " als " + m.rolle + " mit Zugang angelegt (Portalsteuerung)");
+      setErgebnis({ titel: "Zugang angelegt", name: m.name, email: m.email, pw: neu.pw });
+      setNeu(null);
+    } catch (e) { setFehler((e && e.message) || String(e)); }
+    setLaeuft(false);
+  };
+
+  const pwSetzen = async (m) => {
+    setLaeuft(true); setFehler("");
+    try {
+      const st = VERTRIEBSROLLEN.includes(m.rolle) ? "registriert" : "aktiv";
+      const r = await zugangSetzen({ id: m.id, passwort: pw, status: st });
+      if (m.status === "eingeladen" && r && r.status) setMitarbeiter(mitarbeiter.map((x) => (x.id === m.id ? { ...x, status: r.status } : x)));
+      if (notieren) notieren("Zugang", "Passwort für " + m.name + " neu gesetzt (Portalsteuerung)");
+      setErgebnis({ titel: "Passwort gesetzt", name: m.name, email: m.email, pw });
+      setPwFuer(null); setPw("");
+    } catch (e) { setFehler((e && e.message) || String(e)); }
+    setLaeuft(false);
+  };
+
+  const liste = mitarbeiter
+    .filter((m) => !/^t-/.test(m.id))
+    .filter((m) => filter === "alle" || m.rolle === filter)
+    .filter((m) => !suche.trim() || (m.name + " " + m.email).toLowerCase().includes(suche.trim().toLowerCase()))
+    .sort((a, b) => ALLE_ROLLEN.indexOf(a.rolle) - ALLE_ROLLEN.indexOf(b.rolle) || (a.name || "").localeCompare(b.name || ""));
+  const statusText = { aktiv: "aktiv", eingeladen: "eingeladen, noch kein Zugang", registriert: "Stammdaten offen", pruefung: "in Prüfung",
+    abgelehnt: "zurückgewiesen", gesperrt: "gesperrt" };
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+        <h2 className="text-lg">Portalsteuerung</h2>
+        {!neu && !ergebnis && <Btn icon={UserPlus} onClick={() => { setNeu({ ...leer }); setFehler(""); }}>Nutzer anlegen</Btn>}
+      </div>
+      <p className="text-sm mb-5" style={{ color: C.muted, maxWidth: "65ch" }}>
+        Zugänge für alle Rollen anlegen und Passwörter setzen. Vertriebspartner kannst du weiterhin auch über eine Einladung
+        unter Vertriebsmitarbeiter anlegen, dann vergeben sie ihr Passwort selbst.
+      </p>
+
+      {ergebnis && <div className="mb-5"><ZugangKopieren {...ergebnis} onFertig={() => setErgebnis(null)} /></div>}
+
+      {neu && (
+        <div className="rounded p-5 mb-5 space-y-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="text-sm">Neuer Nutzer</div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Feld label="Name" value={neu.name} onChange={(v) => setNeu({ ...neu, name: v })} />
+            <Select label="Rolle" value={neu.rolle} options={ALLE_ROLLEN}
+              onChange={(v) => setNeu({ ...neu, rolle: v, frei: !VERTRIEBSROLLEN.includes(v), angestellt: !VERTRIEBSROLLEN.includes(v) })} />
+            <Feld label="E-Mail (Anmeldename)" value={neu.email} onChange={(v) => setNeu({ ...neu, email: v })}
+              fehler={neu.email && !emailFrei ? "Diese E-Mail gibt es schon im Portal." : null} />
+            <Feld label="Telefon (freiwillig)" value={neu.telefon} onChange={(v) => setNeu({ ...neu, telefon: v })} />
+            {vertrieb && (
+              <>
+                <Feld label="Provisionssatz in %" value={neu.satz} onChange={(v) => setNeu({ ...neu, satz: v })}
+                  fehler={neu.satz !== "" && !(satzWert > 0 && satzWert <= 50) ? "zwischen 0 und 50 %" : null} />
+                <Select label="Struktur (Teamleiter oder Leitung)" value={neu.upline}
+                  options={[{ value: "", label: "ohne Strukturkopf" }, ...koepfe.map((k) => ({ value: k.id, label: k.name + " · " + k.rolle }))]}
+                  onChange={(v) => setNeu({ ...neu, upline: v })} />
+              </>
+            )}
+          </div>
+          <PasswortFeld label="Passwort" value={neu.pw} onChange={(v) => setNeu({ ...neu, pw: v })} />
+          {vertrieb && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={!!neu.angestellt} onChange={(e) => setNeu({ ...neu, angestellt: e.target.checked })} />
+              Angestellt (Provision wird angezeigt, abgerechnet über die Lohnabrechnung)
+            </label>
+          )}
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={!!neu.frei} onChange={(e) => setNeu({ ...neu, frei: e.target.checked })} />
+            <span>Sofort freischalten
+              <span className="block text-xs" style={{ color: C.muted }}>
+                {neu.frei ? "Die Person kann direkt mit dem Portal arbeiten."
+                  : "Die Person muss zuerst ihre Stammdaten ausfüllen, du gibst sie danach unter Vertriebsmitarbeiter frei."}
+              </span></span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Btn icon={Check} onClick={anlegen} disabled={!neuOk || laeuft}>{laeuft ? "Einen Moment …" : "Nutzer mit Zugang anlegen"}</Btn>
+            <Btn variante="hell" onClick={() => setNeu(null)} disabled={laeuft}>Abbrechen</Btn>
+          </div>
+          {fehler && <p className="text-sm" style={{ color: C.warn }}>{fehler}</p>}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 mb-3">
+        <input value={suche} onChange={(e) => setSuche(e.target.value)} placeholder="Name oder E-Mail suchen"
+          className="px-3 py-2 text-sm rounded outline-none flex-1 min-w-48" style={{ border: "1px solid " + C.line, background: C.card }} />
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} className="px-3 py-2 text-sm rounded"
+          style={{ border: "1px solid " + C.line, background: C.card }}>
+          <option value="alle">Alle Rollen</option>
+          {ALLE_ROLLEN.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </div>
+      <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+        {liste.length === 0 && <div className="p-4 text-sm" style={{ color: C.muted }}>Niemand gefunden.</div>}
+        {liste.map((m, i) => (
+          <div key={m.id} className="px-4 py-3" style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex-1 min-w-48">
+                <div className="text-sm">{m.name}{m.id === user.id ? " (du)" : ""}</div>
+                <div className="text-xs" style={{ color: C.muted }}>{m.rolle} · {m.email || "keine E-Mail"} · {statusText[m.status] || m.status}</div>
+              </div>
+              {pwFuer !== m.id && (
+                <button className="text-sm underline" style={{ color: C.strom }} disabled={!m.email}
+                  onClick={() => { setPwFuer(m.id); setPw(passwortVorschlag()); setFehler(""); setErgebnis(null); }}>
+                  {m.status === "eingeladen" ? "Zugang mit Passwort anlegen" : "Passwort setzen"}
+                </button>
+              )}
+            </div>
+            {pwFuer === m.id && (
+              <div className="mt-3 p-3 rounded space-y-3" style={{ background: "#F6F8FA" }}>
+                <PasswortFeld label={"Neues Passwort für " + m.name} value={pw} onChange={setPw} />
+                <p className="text-xs" style={{ color: C.muted }}>Das bisherige Passwort gilt danach nicht mehr. Angemeldete Geräte bleiben bis zur nächsten Anmeldung angemeldet.</p>
+                <div className="flex flex-wrap gap-2">
+                  <Btn icon={Check} onClick={() => pwSetzen(m)} disabled={laeuft || !passwortRegeln(pw).every((x) => x.ok)}>
+                    {laeuft ? "Einen Moment …" : "Passwort setzen"}</Btn>
+                  <Btn variante="hell" onClick={() => setPwFuer(null)} disabled={laeuft}>Abbrechen</Btn>
+                </div>
+                {fehler && <p className="text-sm" style={{ color: C.warn }}>{fehler}</p>}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -8033,9 +8265,10 @@ function Registrierung({ einladung, onFertig, onAbbruch }) {
       <div className="w-full max-w-md">
         <img src={LOGO} alt="EGC Energie" className="w-44 mx-auto mb-8" />
         <div className="rounded p-6" style={{ background: C.card }}>
-          <h1 className="text-lg mb-1">Willkommen, {einladung.name}</h1>
+          <h1 className="text-lg mb-1">{einladung.art === "reset" ? "Neues Passwort, " + einladung.name : "Willkommen, " + einladung.name}</h1>
           <p className="text-sm mb-1" style={{ color: C.muted }}>
-            Vergib ein Passwort für deinen Zugang zum Vertriebsportal.
+            {einladung.art === "reset" ? "Vergib ein neues Passwort für deinen Zugang. Das bisherige gilt danach nicht mehr."
+              : "Vergib ein Passwort für deinen Zugang zum Vertriebsportal."}
           </p>
           <p className="text-sm mb-5" style={{ color: C.muted }}>
             Deine Anmeldung: <span style={{ color: C.text }}>{einladung.email}</span>
@@ -8062,7 +8295,7 @@ function Registrierung({ einladung, onFertig, onAbbruch }) {
 
           <div className="mt-6">
             <Btn icon={Check} onClick={absenden} disabled={!passt || laeuft}>
-              {laeuft ? "Einen Moment …" : "Passwort setzen und anmelden"}
+              {laeuft ? "Einen Moment …" : einladung.art === "reset" ? "Neues Passwort speichern und anmelden" : "Passwort setzen und anmelden"}
             </Btn>
           </div>
           {fehler && <p className="text-sm mt-4" style={{ color: C.warn }}>{fehler}</p>}
@@ -8098,6 +8331,14 @@ function Login({ onAngemeldet, onEinladung, startCode }) {
     setLaeuft(false);
   };
 
+  const [gesendet, setGesendet] = useState(false);
+  const vergessen = async () => {
+    setLaeuft(true); setFehler("");
+    try { await passwortVergessen(email); setGesendet(true); }
+    catch (e) { setFehler(/fetch|network/i.test((e && e.message) || "") ? "Keine Verbindung zum Server. Bitte Netz prüfen." : (e && e.message) || String(e)); }
+    setLaeuft(false);
+  };
+
   const einloesen = async () => {
     setLaeuft(true); setFehler("");
     try {
@@ -8119,9 +8360,9 @@ function Login({ onAngemeldet, onEinladung, startCode }) {
               <button key={id} onClick={() => { setModus(id); setFehler(""); }}
                 className="px-3 py-1.5 text-sm rounded"
                 style={{
-                  background: modus === id ? C.ink : "transparent",
-                  color: modus === id ? "#fff" : C.muted,
-                  border: "1px solid " + (modus === id ? C.ink : C.line),
+                  background: (modus === id || (id === "login" && modus === "vergessen")) ? C.ink : "transparent",
+                  color: (modus === id || (id === "login" && modus === "vergessen")) ? "#fff" : C.muted,
+                  border: "1px solid " + ((modus === id || (id === "login" && modus === "vergessen")) ? C.ink : C.line),
                 }}>{label}</button>
             ))}
           </div>
@@ -8133,7 +8374,29 @@ function Login({ onAngemeldet, onEinladung, startCode }) {
               <Btn onClick={einloggen} disabled={!email || !pw || laeuft}>
                 {laeuft ? "Einen Moment …" : "Anmelden"}
               </Btn>
+              <button className="block text-sm underline" style={{ color: C.muted }}
+                onClick={() => { setModus("vergessen"); setFehler(""); setGesendet(false); }}>Passwort vergessen?</button>
             </div>
+          ) : modus === "vergessen" ? (
+            gesendet ? (
+              <div className="space-y-3">
+                <p className="text-sm flex items-start gap-2" style={{ color: C.ok }}><Check size={16} className="shrink-0 mt-0.5" />
+                  Wenn diese Adresse im Portal hinterlegt ist, kommt gleich eine E-Mail mit einem Link.</p>
+                <p className="text-sm" style={{ color: C.muted }}>
+                  Über den Link vergibst du dein neues Passwort selbst. Er gilt zwei Stunden. Schau auch im Spam-Ordner nach.
+                </p>
+                <button className="text-sm underline" style={{ color: C.muted }} onClick={() => setModus("login")}>Zurück zur Anmeldung</button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm" style={{ color: C.muted }}>Gib deine E-Mail-Adresse ein. Wir schicken dir einen Link, mit dem du ein neues Passwort vergibst.</p>
+                <Feld label="E-Mail" value={email} onChange={setEmail} placeholder="name@egc-energie.de" />
+                <Btn onClick={vergessen} disabled={!/\S+@\S+\.\S+/.test(email) || laeuft}>
+                  {laeuft ? "Einen Moment …" : "Link zum Neusetzen anfordern"}
+                </Btn>
+                <button className="block text-sm underline" style={{ color: C.muted }} onClick={() => setModus("login")}>Zurück zur Anmeldung</button>
+              </div>
+            )
           ) : (
             <div className="space-y-4">
               <Feld label="Einladungscode aus deinem Link" value={code} onChange={setCode}
@@ -8147,10 +8410,7 @@ function Login({ onAngemeldet, onEinladung, startCode }) {
           {fehler && <p className="text-sm mt-4" style={{ color: C.warn }}>{fehler}</p>}
 
           <div className="mt-6 pt-4" style={{ borderTop: "1px solid " + C.line }}>
-            <p className="text-xs" style={{ color: C.muted }}>
-              Passwort vergessen? Die Geschäftsführung schickt dir einen neuen Einladungslink.
-            </p>
-            <p className="text-xs mt-2" style={{ color: C.muted }}>{VERSION_ANZEIGE}</p>
+            <p className="text-xs" style={{ color: C.muted }}>{VERSION_ANZEIGE}</p>
           </div>
         </div>
       </div>
@@ -8973,7 +9233,9 @@ const SCHULUNGEN_FEST = [
 const UNTERLAGEN_FEST = {
   schulung: SCHULUNGEN_FEST,
   dokumente: [{ datei: "EGC_Checkliste_Kundenunterlagen.pdf", titel: "Checkliste Kundenunterlagen (SLP und RLM)", seiten: 2,
-    pfad: "/assets/dokumente-1/", text: "Was du vom Kunden brauchst: Unternehmen, Lieferstelle, MaLo, Verbrauch, Vertrag und Kündigungsfrist, dazu die Extras für RLM-Kunden." }],
+    pfad: "/assets/dokumente-2/", text: "Was du vom Kunden brauchst: Firmenname wie bei Creditreform, Lieferstelle, MaLo, Zählertyp, Verbrauch, Vertrag und Kündigungsfrist, bei RLM die Lastgang-Datei." },
+    { titel: "Creditreform Firmeneintrag", url: "https://firmeneintrag.creditreform.de/", art: "Link",
+      text: "Firmennamen des Kunden hier prüfen. Er muss im Auftrag genau so stehen, sonst lehnen Versorger oft ab. Nicht gefunden: bei Einzelunternehmen die Gewerbeanmeldung mitgeben." }],
 };
 
 /* Schulungen, Dokumente und Marketingunterlagen */
@@ -9104,24 +9366,24 @@ function Ablage({ ablage, setAblage, user, start }) {
       {UNTERLAGEN_FEST[bereich] && (
         <div className="grid sm:grid-cols-2 gap-3 mb-4">
           {UNTERLAGEN_FEST[bereich].map((s) => (
-            <div key={s.datei} className="rounded p-4 flex flex-col" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div key={s.datei || s.url} className="rounded p-4 flex flex-col" style={{ background: C.card, border: "1px solid " + C.line }}>
               <div className="flex items-start gap-3">
                 <span className="rounded p-2" style={{ background: "#F6F8FA" }}><FileText size={18} style={{ color: C.gruen }} /></span>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm">{s.titel}</div>
-                  <div className="text-xs" style={{ color: C.muted }}>PDF · {s.seiten} Seiten</div>
+                  <div className="text-xs" style={{ color: C.muted }}>{s.url ? "Link · " + s.url.replace(/^https?:\/\//, "").replace(/\/$/, "") : "PDF · " + s.seiten + " Seiten"}</div>
                 </div>
               </div>
               <p className="text-sm mt-3 flex-1" style={{ color: C.muted }}>{s.text}</p>
               <div className="flex items-center gap-2 mt-4 pt-3" style={{ borderTop: "1px solid " + C.line }}>
-                <a href={s.pfad + s.datei} target="_blank" rel="noreferrer"
+                <a href={s.url || s.pfad + s.datei} target="_blank" rel="noreferrer"
                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded" style={{ background: C.ink, color: "#fff" }}>
-                  <FileText size={14} /> Öffnen
+                  {s.url ? <Send size={14} /> : <FileText size={14} />} Öffnen
                 </a>
-                <a href={s.pfad + s.datei} download={s.datei}
+                {!s.url && <a href={s.pfad + s.datei} download={s.datei}
                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded" style={{ border: "1px solid " + C.line, color: C.text }}>
                   <Upload size={14} style={{ transform: "rotate(180deg)" }} /> Speichern
-                </a>
+                </a>}
               </div>
             </div>
           ))}
@@ -14022,7 +14284,54 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
 /* ------------------------------------------------------------------ */
 /*  App                                                                */
 /* ------------------------------------------------------------------ */
+/* Notfall: Anmeldung, Zwischenspeicher und Hintergrunddienst entfernen. Ersetzt das Löschen der Browserdaten. */
+async function portalZuruecksetzen() {
+  try { await sb.auth.signOut({ scope: "local" }); } catch (e) { /* weiter */ }
+  try { Object.keys(localStorage).filter((k) => /^sb-|supabase/.test(k)).forEach((k) => localStorage.removeItem(k)); } catch (e) { /* weiter */ }
+  try { if (window.caches) for (const k of await caches.keys()) await caches.delete(k); } catch (e) { /* weiter */ }
+  try { if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } catch (e) { /* weiter */ }
+  window.location.replace(window.location.pathname);
+}
+
+/* Fängt Abstürze der Oberfläche ab: statt einer weißen Seite eine Meldung mit Ausweg */
+class Fehlerschutz extends React.Component {
+  constructor(props) { super(props); this.state = { fehler: null }; }
+  static getDerivedStateFromError(fehler) { return { fehler }; }
+  componentDidCatch(fehler, info) { this.setState({ stapel: (info && info.componentStack) || "" }); }
+  render() {
+    if (!this.state.fehler) return this.props.children;
+    const text = String((this.state.fehler && this.state.fehler.message) || this.state.fehler);
+    const stelle = String(this.state.stapel || "").split("\n").map((z) => z.trim()).filter(Boolean).slice(0, 3).join(" ‹ ");
+    const knopf = { padding: "12px 16px", borderRadius: 6, fontSize: 15, width: "100%", border: "none", cursor: "pointer" };
+    return (
+      <div style={{ minHeight: "100vh", background: "#0A1626", color: "#C4D0DE", fontFamily: "Inter, Arial, sans-serif",
+                    display: "flex", alignItems: "center", justifyContent: "center", padding: "max(24px, env(safe-area-inset-top)) 20px 24px" }}>
+        <div style={{ maxWidth: 420, width: "100%" }}>
+          <img src={LOGO} alt="EGC Energie" style={{ width: 150, display: "block", margin: "0 auto 28px" }} />
+          <div style={{ background: "#fff", color: "#16212C", borderRadius: 8, padding: 22 }}>
+            <div style={{ fontSize: 18, marginBottom: 6 }}>Da ist etwas schiefgelaufen</div>
+            <div style={{ fontSize: 14, color: "#6B7787", marginBottom: 18 }}>
+              Deine Daten sind sicher gespeichert. Versuche zuerst „Neu laden“. Hilft das nicht, setzt „Zurücksetzen“ die Anmeldung
+              auf diesem Gerät zurück, danach meldest du dich einfach neu an.
+            </div>
+            <button style={{ ...knopf, background: "#0A1626", color: "#fff", marginBottom: 8 }} onClick={() => window.location.reload()}>Neu laden</button>
+            <button style={{ ...knopf, background: "#F4F7FA", color: "#16212C", border: "1px solid #D8DDE4" }} onClick={portalZuruecksetzen}>Zurücksetzen und neu anmelden</button>
+            <div style={{ fontSize: 11, color: "#6B7787", marginTop: 18, wordBreak: "break-word" }}>
+              Bitte mach ein Bildschirmfoto davon für die Geschäftsführung:<br />
+              <span style={{ color: "#B4543A" }}>{text}</span>{stelle ? <><br />{stelle}</> : null}<br />{VERSION_ANZEIGE}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
 export default function App() {
+  return <Fehlerschutz><PortalApp /></Fehlerschutz>;
+}
+
+function PortalApp() {
   /* Alle Daten kommen aus der Datenbank; vor der Anmeldung ist alles leer */
   const [anfragen, setAnfragen] = useState([]);
   const [mitarbeiter, setMitarbeiter] = useState([]);
@@ -14586,6 +14895,7 @@ export default function App() {
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users, badge: offeneStrukturanfragen },
+      { id: "portal", label: "Portalsteuerung", icon: Settings },
       { id: "vertraege-gf", label: "Verträge", icon: FileSignature, badge: wartendeTippgeber },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
@@ -14908,6 +15218,8 @@ export default function App() {
                firmendaten={firmendaten} setFirmendaten={setFirmendaten}
                setBonus={(v) => { setBonusSatz(v); setzeBonus(v);
                  notieren("Provisionssatz", "Bonus für Eigenakquise auf " + v + " Prozentpunkte gesetzt"); }} />;
+  } else if (ansicht === "portal" && user.rolle === "Geschäftsführung") {
+    inhalt = <Portalsteuerung mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} user={user} notieren={notieren} />;
   } else if (ansicht === "vertraege-gf") {
     inhalt = <Vertraege tippgeber={tippgeber} setTippgeber={setTippgeber} mitarbeiter={mitarbeiter}
                setMitarbeiter={setMitarbeiter} anfragen={anfragen} user={user} notieren={notieren}
