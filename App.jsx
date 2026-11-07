@@ -300,7 +300,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.19 · 07.11.2026 · Passwort vergessen, Portalsteuerung, Absturzschutz, Firmenanteil der GF";
+const VERSION = "v5.19.1 · 07.11.2026 · Absturz durch unvollständige Tickets behoben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -9812,14 +9812,15 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
 
   (tickets || []).forEach((t) => {
     if (t.empfaenger === user.rolle && t.status !== "abgeschlossen")
-      zu("ticket", t.id, "Ticket " + t.nummer + ": " + t.betreff, { ansicht: "tickets" }, t.datum);
-    const letzter = t.beitraege[t.beitraege.length - 1];
+      zu("ticket", t.id, "Ticket " + (t.nummer || t.id) + ": " + (t.betreff || "ohne Betreff"), { ansicht: "tickets" }, t.datum);
+    const bt = Array.isArray(t.beitraege) ? t.beitraege : [];
+    const letzter = bt[bt.length - 1];
     if (t.vonId === user.id && letzter && letzter.von !== user.name)
       zu("ticketantwort", t.id + ":" + letzter.id, "Antwort auf Ticket " + t.nummer, { ansicht: "tickets" }, letzter.datum);
   });
 
   (probleme || []).forEach((p) => {
-    if (p.status !== "erledigt" && p.betroffene.some((b) => meineIds.includes(b.id)))
+    if (p.status !== "erledigt" && (p.betroffene || []).some((b) => meineIds.includes(b.id)))
       zu("problem", p.id, p.art + ": " + p.kunde, { ansicht: p.art === "Storno" ? "stornos" : "probleme" }, p.angelegt);
   });
 
@@ -14377,7 +14378,17 @@ function PortalApp() {
     termine: setTermine, akquise: setAkquise, aufgaben: setAufgaben, protokoll: setProtokoll,
     tippgeber: setTippgeber, strukturanfragen: setStrukturanfragen,
   };
-  const UMFORMEN = { anfragen: migriereAnfragen, mitarbeiter: migriereMitarbeiter, leads: migriereLeads };
+  /* Unvollständige Datensätze (z. B. aus Tests) dürfen nie die Oberfläche lahmlegen: Listenfelder ergänzen */
+  const mitListen = (felder) => (liste) => (liste || []).map((x) => {
+    const y = { ...x };
+    felder.forEach((f) => { if (!Array.isArray(y[f])) y[f] = []; });
+    return y;
+  });
+  const UMFORMEN = { anfragen: migriereAnfragen, mitarbeiter: migriereMitarbeiter, leads: migriereLeads,
+    tickets: (l) => mitListen(["beitraege"])(l).map((t) => ({ ...t,
+      status: TICKET_STATUS[t.status] ? t.status : Object.keys(TICKET_STATUS)[0],
+      nummer: t.nummer || t.id, betreff: t.betreff || "ohne Betreff", datum: t.datum || "", von: t.von || "unbekannt" })),
+    probleme: mitListen(["beitraege", "betroffene"]) };
   const NAMEN = Object.keys(SETZER);
 
   const datenRef = React.useRef({});
