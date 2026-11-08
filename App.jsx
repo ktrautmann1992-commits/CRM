@@ -4580,14 +4580,15 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
 /* Staatliche Umlagen und Abgaben (ct/kWh) je Sparte, einmal hinterlegt für alle Kalkulationen */
 function UmlagenPflege({ user }) {
   const darf = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
-  const [w, setW] = useState({ strom: UMLAGEN.strom || "", gas: UMLAGEN.gas || "" });
+  const [w, setW] = useState({ strom: UMLAGEN.strom || "", gas: UMLAGEN.gas || "", notiz: UMLAGEN.notiz || "" });
   const [hinweis, setHinweis] = useState("");
   const [laeuft, setLaeuft] = useState(false);
-  const geaendert = String(w.strom) !== String(UMLAGEN.strom || "") || String(w.gas) !== String(UMLAGEN.gas || "");
+  const geaendert = String(w.strom) !== String(UMLAGEN.strom || "") || String(w.gas) !== String(UMLAGEN.gas || "")
+    || String(w.notiz) !== String(UMLAGEN.notiz || "");
   const ok = (x) => x === "" || !isNaN(zahlLesen(x));
   const speichern = async () => {
     setLaeuft(true); setHinweis("");
-    const wert = { strom: String(w.strom).trim(), gas: String(w.gas).trim(), stand: heute(), von: user.name };
+    const wert = { strom: String(w.strom).trim(), gas: String(w.gas).trim(), notiz: String(w.notiz || "").trim(), stand: heute(), von: user.name };
     const f = await einstellungSpeichern("umlagen", wert);
     if (f) setHinweis("Nicht gespeichert: " + f);
     else { setzeUmlagen(wert); setHinweis("Gespeichert. Gilt ab jetzt für jede neue Kalkulation."); }
@@ -4612,13 +4613,21 @@ function UmlagenPflege({ user }) {
               {laeuft ? "Einen Moment …" : "Speichern"}
             </Btn>
           </div>
+          <label className="block mt-3">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>Aufschlüsselung und Hinweise (für die Kalkulation, nicht im Angebot)</span>
+            <textarea rows={3} value={w.notiz} onChange={(e) => setW({ ...w, notiz: e.target.value })}
+              className="w-full px-3 py-2 text-xs rounded outline-none" style={{ border: "1px solid " + C.line, background: "#fff" }} />
+          </label>
           {hinweis && <p className="text-xs mt-2" style={{ color: /^Nicht/.test(hinweis) ? C.warn : C.ok }}>{hinweis}</p>}
           <p className="text-xs mt-2" style={{ color: C.muted }}>
             Netzentgelte ergeben sich je Lieferstelle aus Arbeitspreis − Energiepreis − Umlagen. Fertige Angebote behalten den Stand, mit dem sie erzeugt wurden.
           </p>
         </>
       ) : (
-        <p className="text-sm">Strom {UMLAGEN.strom || "–"} ct/kWh · Erdgas {UMLAGEN.gas || "–"} ct/kWh</p>
+        <>
+          <p className="text-sm">Strom {UMLAGEN.strom || "–"} ct/kWh · Erdgas {UMLAGEN.gas || "–"} ct/kWh</p>
+          {UMLAGEN.notiz && <p className="text-xs mt-1 whitespace-pre-line" style={{ color: C.muted }}>{UMLAGEN.notiz}</p>}
+        </>
       )}
     </div>
   );
@@ -9221,6 +9230,7 @@ function Versorgerliste({ versorger, setVersorger, user, standard, setStandard }
         Diese Liste erscheint beim Kalkulationsteam im Auswahlfeld, wenn ein Auftrag bestätigt wird.
         {darfAendern ? "" : " Ändern darf sie nur die Geschäftsführung."}
       </p>
+      <div className="mb-5"><UmlagenPflege user={user} /></div>
 
       {darfAendern && (
         <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.strom }}>
@@ -13746,7 +13756,7 @@ function Rangliste({ titel, zeilen, hinweis, geld = true }) {
 /* ------------------------------------------------------------------ */
 /*  Alle bisher erstellten Kalkulationen, je Kunde mit allen Varianten */
 /* ------------------------------------------------------------------ */
-function Kalkulationen({ anfragen, onOeffnen }) {
+function Kalkulationen({ anfragen, onOeffnen, user }) {
   const [suche, setSuche] = useState("");
   const [filter, setFilter] = useState("alle");
   const GRUPPE = {
@@ -13770,6 +13780,7 @@ function Kalkulationen({ anfragen, onOeffnen }) {
 
   return (
     <div className="space-y-4">
+      {user && <UmlagenPflege user={user} />}
       <div className="rounded p-3 space-y-3" style={{ background: C.card, border: "1px solid " + C.line }}>
         <Feld label="Suchen: Kunde, Ort, Versorger, Vertriebspartner, MaLo, Zähler" value={suche} onChange={setSuche} />
         <div className="flex flex-wrap gap-2">
@@ -15303,7 +15314,7 @@ function PortalApp() {
         onGelesen={(id) => setLeads(leads.map((l) => (l.id === id ? { ...l, gelesen: true } : l)))} />
     );
   } else if (ansicht === "kalkulationen") {
-    inhalt = <Kalkulationen anfragen={anfragen} onOeffnen={setOffen} />;
+    inhalt = <Kalkulationen anfragen={anfragen} onOeffnen={setOffen} user={user} />;
   } else if (ansicht === "auftraege") {
     inhalt = (
       <Liste anfragen={anfragen.filter((a) => a.status === "uebermittelt")}
