@@ -2116,6 +2116,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const ende = blanko ? null : enddatum(v);
   const zahl = (x, d = 2) => num(x, d);
   const ct = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " ct/kWh");
+  const ct3 = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 3) + " ct/kWh");
   const eurx = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " €");
   const logo = "data:image/jpeg;base64," + LOGO_PDF;
 
@@ -2362,8 +2363,9 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
         ["Versorger", vv.versorger || l.versorger || "–", v.versorger || "–", "–"],
         ["Arbeitspreis (ct/kWh)", alt ? ct(alt.arbeit) : "–", ct(neuA), alt && !isNaN(neuA) ? ct(alt.arbeit - neuA) : "–"],
         ...(!isNaN(neuE) ? [["davon Energiepreis (ct/kWh)", "–", ct(neuE), "–"]] : []),
-        ...(!isNaN(neuE) && !isNaN(teile.umlage) ? [["davon staatl. Umlagen und Abgaben (ct/kWh)", "–", ct(teile.umlage), "–"]] : []),
-        ...(!isNaN(teile.netz) ? [["davon Netzentgelte (ct/kWh)", "–", ct(teile.netz), "–"]] : []),
+        ...(!isNaN(neuE) && !isNaN(teile.umlage) ? [["davon staatl. Umlagen und Abgaben (ct/kWh)", "–", ct3(teile.umlage), "–"],
+          ...(teile.umlagenTeile.length > 1 ? teile.umlagenTeile.map((x) => ["      " + x.name, "–", ct3(zahlLesen(x.wert)), "–"]) : [])] : []),
+        ...(!isNaN(teile.netz) ? [["davon Netzentgelte (ct/kWh)", "–", ct3(teile.netz), "–"]] : []),
         ...(teile.rlm && !isNaN(teile.leistungKosten) ? [["Leistungspreis Netz (" + num(teile.kw, 1) + " kW × " + num(teile.leistungspreis, 2) + " €/kW)", "–", eurx(teile.leistungKosten), "–"]] : []),
         ["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–", isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
           alt && !isNaN(neuA) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"],
@@ -3237,6 +3239,24 @@ const anteilVon = (a, id, mitarbeiter, variante) => {
    sie gelten für jede Kalkulation. Beim Erzeugen eines Angebots wird der Stand an der Variante festgehalten. */
 let UMLAGEN = { strom: "", gas: "" };
 const setzeUmlagen = (w) => { UMLAGEN = { strom: "", gas: "", ...(w || {}) }; };
+/* Vorgabe der Bestandteile, falls noch keine einzeln hinterlegt sind (Stand Lieferjahr 2027) */
+const UMLAGEN_VORGABE = {
+  strom: [["KWKG-Umlage", "0,451"], ["Offshore-Netzumlage", "1,143"], ["Aufschlag für besondere Netznutzung", "2,027"],
+          ["Stromsteuer", "2,05"], ["Konzessionsabgabe", "0,11"]],
+  gas: [["Energiesteuer", "0,55"], ["Konvertierungsumlage", "0,018"], ["Konzessionsabgabe", "0,03"]],
+};
+/* Bestandteile einer Sparte: einzeln hinterlegt, sonst ein Sammelwert, sonst leer */
+const umlageTeile = (quelle, sparte) => {
+  const q = quelle || {};
+  if (q.teile && Array.isArray(q.teile[sparte])) return q.teile[sparte].filter((t) => t && (t.name || t.wert !== ""));
+  if (q[sparte] !== undefined && q[sparte] !== "") return [{ name: "Staatliche Umlagen und Abgaben", wert: q[sparte] }];
+  return [];
+};
+const umlageSumme = (quelle, sparte) => {
+  const t = umlageTeile(quelle, sparte);
+  if (!t.length || t.some((x) => isNaN(zahlLesen(x.wert)))) return NaN;
+  return t.reduce((s, x) => s + zahlLesen(x.wert), 0);
+};
 
 /* Preisbestandteile einer Lieferstelle:
    Netzentgelte = Arbeitspreis − Energiepreis − staatliche Umlagen und Abgaben.
@@ -3245,13 +3265,15 @@ function preisTeile(l, pr, umlagen) {
   pr = pr || {};
   const quelle = umlagen || UMLAGEN;
   const arbeit = zahlLesen(pr.arbeit), energie = zahlLesen(pr.energie);
-  const umlage = zahlLesen((quelle || {})[l.medium === "gas" ? "gas" : "strom"]);
+  const sparte = l.medium === "gas" ? "gas" : "strom";
+  const umlage = umlageSumme(quelle, sparte);
+  const umlagenTeile = umlageTeile(quelle, sparte);
   const netz = !isNaN(arbeit) && !isNaN(energie) && !isNaN(umlage) ? arbeit - energie - umlage : NaN;
   const rlm = l.zaehlerart === "RLM";
   const kw = zahlLesen(pr.leistung !== undefined && pr.leistung !== "" ? pr.leistung : l.lastspitze);
   const leistungspreis = zahlLesen(pr.leistungspreis);
   const leistungKosten = rlm && !isNaN(kw) && !isNaN(leistungspreis) ? kw * leistungspreis : NaN;
-  return { arbeit, energie, umlage, netz, rlm, kw, leistungspreis, leistungKosten };
+  return { arbeit, energie, umlage, umlagenTeile, netz, rlm, kw, leistungspreis, leistungKosten };
 }
 
 const leereVariante = (a) => ({
@@ -4577,58 +4599,84 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
 /* ------------------------------------------------------------------ */
 /*  Anfrage-Detail                                                     */
 /* ------------------------------------------------------------------ */
-/* Staatliche Umlagen und Abgaben (ct/kWh) je Sparte, einmal hinterlegt für alle Kalkulationen */
+/* Staatliche Umlagen und Abgaben (ct/kWh) je Sparte, jeder Bestandteil einzeln, einmal hinterlegt für alle Kalkulationen */
 function UmlagenPflege({ user }) {
   const darf = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
-  const [w, setW] = useState({ strom: UMLAGEN.strom || "", gas: UMLAGEN.gas || "", notiz: UMLAGEN.notiz || "" });
+  const start = () => ({
+    strom: (umlageTeile(UMLAGEN, "strom").length && UMLAGEN.teile ? umlageTeile(UMLAGEN, "strom") : UMLAGEN_VORGABE.strom.map(([name, wert]) => ({ name, wert }))).map((t) => ({ ...t, id: uid() })),
+    gas: (umlageTeile(UMLAGEN, "gas").length && UMLAGEN.teile ? umlageTeile(UMLAGEN, "gas") : UMLAGEN_VORGABE.gas.map(([name, wert]) => ({ name, wert }))).map((t) => ({ ...t, id: uid() })),
+    notiz: UMLAGEN.notiz || "",
+  });
+  const [w, setW] = useState(start);
+  const [offen, setOffen] = useState(false);
   const [hinweis, setHinweis] = useState("");
   const [laeuft, setLaeuft] = useState(false);
-  const geaendert = String(w.strom) !== String(UMLAGEN.strom || "") || String(w.gas) !== String(UMLAGEN.gas || "")
-    || String(w.notiz) !== String(UMLAGEN.notiz || "");
-  const ok = (x) => x === "" || !isNaN(zahlLesen(x));
+  const ok = (x) => !isNaN(zahlLesen(x));
+  const alleOk = ["strom", "gas"].every((sp) => w[sp].every((t) => t.name.trim() && ok(t.wert)));
+  const summe = (sp) => w[sp].reduce((t, x) => t + (zahlLesen(x.wert) || 0), 0);
+  const setTeil = (sp, id, k, v) => setW({ ...w, [sp]: w[sp].map((t) => (t.id === id ? { ...t, [k]: v } : t)) });
   const speichern = async () => {
     setLaeuft(true); setHinweis("");
-    const wert = { strom: String(w.strom).trim(), gas: String(w.gas).trim(), notiz: String(w.notiz || "").trim(), stand: heute(), von: user.name };
+    const teile = { strom: w.strom.map(({ name, wert }) => ({ name: name.trim(), wert: String(wert).trim() })),
+                    gas: w.gas.map(({ name, wert }) => ({ name: name.trim(), wert: String(wert).trim() })) };
+    const wert = { teile, strom: num(summe("strom"), 3), gas: num(summe("gas"), 3), notiz: String(w.notiz || "").trim(),
+                   stand: heute(), von: user.name };
     const f = await einstellungSpeichern("umlagen", wert);
     if (f) setHinweis("Nicht gespeichert: " + f);
     else { setzeUmlagen(wert); setHinweis("Gespeichert. Gilt ab jetzt für jede neue Kalkulation."); }
     setLaeuft(false);
   };
+  const ct3 = (x) => (isNaN(x) ? "–" : num(x, 3) + " ct/kWh");
   return (
     <div className="p-4 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="text-sm">Staatliche Umlagen und Abgaben</span>
         <span className="text-xs" style={{ color: C.muted }}>
           gilt für jede Kalkulation{UMLAGEN.stand ? " · Stand " + datum(UMLAGEN.stand) + (UMLAGEN.von ? ", " + UMLAGEN.von : "") : ""}
         </span>
       </div>
-      {darf ? (
-        <>
-          <div className="grid sm:grid-cols-3 gap-4 items-end">
-            <Feld label="Strom (ct/kWh)" value={w.strom} onChange={(x) => setW({ ...w, strom: x })}
-              fehler={!ok(w.strom) ? "Zahl eingeben" : null} />
-            <Feld label="Erdgas (ct/kWh)" value={w.gas} onChange={(x) => setW({ ...w, gas: x })}
-              fehler={!ok(w.gas) ? "Zahl eingeben" : null} />
-            <Btn variante="hell" icon={Check} onClick={speichern} disabled={!geaendert || laeuft || !ok(w.strom) || !ok(w.gas)}>
-              {laeuft ? "Einen Moment …" : "Speichern"}
-            </Btn>
-          </div>
-          <label className="block mt-3">
-            <span className="block text-xs mb-1" style={{ color: C.muted }}>Aufschlüsselung und Hinweise (für die Kalkulation, nicht im Angebot)</span>
+      <div className="text-sm mt-1">
+        Strom {ct3(umlageSumme(UMLAGEN, "strom"))} · Erdgas {ct3(umlageSumme(UMLAGEN, "gas"))}
+        {darf && <button className="text-xs underline ml-3" style={{ color: C.strom }}
+          onClick={() => { if (!offen) setW(start()); setOffen(!offen); setHinweis(""); }}>{offen ? "Zuklappen" : "Bestandteile ansehen und ändern"}</button>}
+      </div>
+      {!darf && UMLAGEN.notiz && <p className="text-xs mt-1 whitespace-pre-line" style={{ color: C.muted }}>{UMLAGEN.notiz}</p>}
+      {darf && offen && (
+        <div className="mt-3 space-y-4">
+          {[["strom", "Strom"], ["gas", "Erdgas"]].map(([sp, titel]) => (
+            <div key={sp}>
+              <div className="text-xs mb-1" style={{ color: C.muted }}>{titel} · Summe {num(summe(sp), 3)} ct/kWh</div>
+              <div className="space-y-2">
+                {w[sp].map((t) => (
+                  <div key={t.id} className="flex items-center gap-2">
+                    <input value={t.name} onChange={(e) => setTeil(sp, t.id, "name", e.target.value)} placeholder="Bezeichnung"
+                      className="flex-1 min-w-0 px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line, background: "#fff" }} />
+                    <input value={t.wert} onChange={(e) => setTeil(sp, t.id, "wert", e.target.value)} placeholder="ct/kWh" inputMode="decimal"
+                      className="w-24 px-3 py-2 text-sm rounded outline-none text-right"
+                      style={{ border: "1px solid " + (ok(t.wert) ? C.line : C.warn), background: "#fff" }} />
+                    <button title="Bestandteil entfernen" style={{ color: C.muted }}
+                      onClick={() => setW({ ...w, [sp]: w[sp].filter((x) => x.id !== t.id) })}><X size={16} /></button>
+                  </div>
+                ))}
+              </div>
+              <button className="text-xs underline mt-2" style={{ color: C.strom }}
+                onClick={() => setW({ ...w, [sp]: [...w[sp], { id: uid(), name: "", wert: "" }] })}>+ Bestandteil hinzufügen</button>
+            </div>
+          ))}
+          <label className="block">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>Hinweise (für die Kalkulation, nicht im Angebot)</span>
             <textarea rows={3} value={w.notiz} onChange={(e) => setW({ ...w, notiz: e.target.value })}
               className="w-full px-3 py-2 text-xs rounded outline-none" style={{ border: "1px solid " + C.line, background: "#fff" }} />
           </label>
-          {hinweis && <p className="text-xs mt-2" style={{ color: /^Nicht/.test(hinweis) ? C.warn : C.ok }}>{hinweis}</p>}
-          <p className="text-xs mt-2" style={{ color: C.muted }}>
-            Netzentgelte ergeben sich je Lieferstelle aus Arbeitspreis − Energiepreis − Umlagen. Fertige Angebote behalten den Stand, mit dem sie erzeugt wurden.
-          </p>
-        </>
-      ) : (
-        <>
-          <p className="text-sm">Strom {UMLAGEN.strom || "–"} ct/kWh · Erdgas {UMLAGEN.gas || "–"} ct/kWh</p>
-          {UMLAGEN.notiz && <p className="text-xs mt-1 whitespace-pre-line" style={{ color: C.muted }}>{UMLAGEN.notiz}</p>}
-        </>
+          <Btn icon={Check} onClick={speichern} disabled={!alleOk || laeuft}>{laeuft ? "Einen Moment …" : "Speichern"}</Btn>
+          {!alleOk && <p className="text-xs" style={{ color: C.warn }}>Jeder Bestandteil braucht eine Bezeichnung und eine Zahl.</p>}
+        </div>
       )}
+      {hinweis && <p className="text-xs mt-2" style={{ color: /^Nicht/.test(hinweis) ? C.warn : C.ok }}>{hinweis}</p>}
+      <p className="text-xs mt-2" style={{ color: C.muted }}>
+        Im Angebot steht jeder Bestandteil einzeln. Netzentgelte = Arbeitspreis − Energiepreis − Summe der Umlagen.
+        Fertige Angebote behalten den Stand, mit dem sie erzeugt wurden.
+      </p>
     </div>
   );
 }
@@ -4759,7 +4807,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const angebotErzeugen = async (v) => {
     setErzeugt(v.id);
     try {
-      const vu = v.umlagen || { strom: UMLAGEN.strom, gas: UMLAGEN.gas };
+      const vu = v.umlagen || JSON.parse(JSON.stringify({ strom: UMLAGEN.strom, gas: UMLAGEN.gas, teile: UMLAGEN.teile || null }));
       if (!v.umlagen) setVar(v.id, "umlagen", vu);
       setVar(v.id, "angebot", await egcAngebotPdf(a, { ...v, umlagen: vu }, { mitarbeiter, vorversorger: vorv, vollmachtBemerkung: vmBemerkung }));
     }
@@ -5662,7 +5710,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                   return (
                                     <div className="mt-3 text-xs space-y-0.5" style={{ color: C.muted }}>
                                       <div>Staatliche Umlagen und Abgaben {ct3(t.umlage)}
-                                        {isNaN(t.umlage) ? " · bitte oben einmal für " + (l.medium === "gas" ? "Erdgas" : "Strom") + " hinterlegen" : ""}</div>
+                                        {isNaN(t.umlage) ? " · bitte oben einmal für " + (l.medium === "gas" ? "Erdgas" : "Strom") + " hinterlegen"
+                                          : t.umlagenTeile.length > 1 ? " (" + t.umlagenTeile.map((x) => x.name + " " + x.wert).join(", ") + ")" : ""}</div>
                                       <div style={{ color: !isNaN(t.netz) && t.netz < 0 ? C.warn : C.muted }}>
                                         Netzentgelte (Arbeitspreis − Energiepreis − Umlagen) {ct3(t.netz)}
                                         {!isNaN(t.netz) && t.netz < 0 ? " · negativ, bitte Preise prüfen" : ""}</div>
