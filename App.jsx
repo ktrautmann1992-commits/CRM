@@ -300,7 +300,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.20 · 08.11.2026 · Preisaufteilung im Angebot, Umlagen, Wirkarbeit Netz, Kurzinfo";
+const VERSION = "v5.20 · 08.11.2026 · Preisaufteilung im Angebot, Umlagen, Leistungspreis Netz, Kurzinfo";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2364,13 +2364,17 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
         ...(!isNaN(neuE) ? [["davon Energiepreis (ct/kWh)", "–", ct(neuE), "–"]] : []),
         ...(!isNaN(neuE) && !isNaN(teile.umlage) ? [["davon staatl. Umlagen und Abgaben (ct/kWh)", "–", ct(teile.umlage), "–"]] : []),
         ...(!isNaN(teile.netz) ? [["davon Netzentgelte (ct/kWh)", "–", ct(teile.netz), "–"]] : []),
-        ...(teile.rlm && !isNaN(teile.leistungKosten) ? [["Wirkarbeit Netz (" + num(teile.kw, 1) + " kW × " + num(teile.leistungspreis, 2) + " €/kW)", "–", eurx(teile.leistungKosten), "–"]] : []),
+        ...(teile.rlm && !isNaN(teile.leistungKosten) ? [["Leistungspreis Netz (" + num(teile.kw, 1) + " kW × " + num(teile.leistungspreis, 2) + " €/kW)", "–", eurx(teile.leistungKosten), "–"]] : []),
         ["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–", isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
           alt && !isNaN(neuA) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"],
         ["Jahresverbrauch", num(menge) + " kWh", num(menge) + " kWh", "–"],
         ["Lieferbeginn", "–", v.lieferbeginn ? datum(v.lieferbeginn) : "–", "–"],
         ["Kosten pro Jahr", alt ? eurx(kostenAlt) : "–", kostenNeu == null ? "–" : eurx(kostenNeu),
           alt && kostenNeu != null ? eurx(kostenAlt - kostenNeu) : "–"],
+        /* RLM: Leistungspreis des Netzbetreibers extra ausweisen, Ersparnis nur auf Arbeit und Grundpreis */
+        ...(teile.rlm && !isNaN(teile.leistungKosten) && kostenNeu != null ? [
+          ["zzgl. Leistungspreis Netz", "–", eurx(teile.leistungKosten), "–"],
+          ["Gesamtkosten pro Jahr", "–", eurx(kostenNeu + teile.leistungKosten), "–"]] : []),
       ];
       const hoehe = 17 + zeilen.length * 5.8;
       if (y + hoehe > H - 22) y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
@@ -5653,7 +5657,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                       <div style={{ color: !isNaN(t.netz) && t.netz < 0 ? C.warn : C.muted }}>
                                         Netzentgelte (Arbeitspreis − Energiepreis − Umlagen) {ct3(t.netz)}
                                         {!isNaN(t.netz) && t.netz < 0 ? " · negativ, bitte Preise prüfen" : ""}</div>
-                                      {t.rlm && <div>Wirkarbeit Netz {isNaN(t.leistungKosten) ? "–"
+                                      {t.rlm && <div>Leistungspreis Netz {isNaN(t.leistungKosten) ? "–"
                                         : num(t.kw, 1) + " kW × " + num(t.leistungspreis, 2) + " €/kW = " + eur(t.leistungKosten) + " pro Jahr"}</div>}
                                     </div>
                                   );
