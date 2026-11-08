@@ -300,7 +300,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.19.1 · 07.11.2026 · Absturz durch unvollständige Tickets behoben";
+const VERSION = "v5.20 · 08.11.2026 · Preisaufteilung im Angebot, Umlagen, Wirkarbeit Netz, Kurzinfo";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2357,10 +2357,14 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
         summeNeu += kostenNeu;
         if (alt) { summeAlt += kostenAlt; mitVergleich = true; } else summeAlt += kostenNeu;
       }
+      const teile = preisTeile(l, pr, v.umlagen);
       const zeilen = [
         ["Versorger", vv.versorger || l.versorger || "–", v.versorger || "–", "–"],
         ["Arbeitspreis (ct/kWh)", alt ? ct(alt.arbeit) : "–", ct(neuA), alt && !isNaN(neuA) ? ct(alt.arbeit - neuA) : "–"],
         ...(!isNaN(neuE) ? [["davon Energiepreis (ct/kWh)", "–", ct(neuE), "–"]] : []),
+        ...(!isNaN(neuE) && !isNaN(teile.umlage) ? [["davon staatl. Umlagen und Abgaben (ct/kWh)", "–", ct(teile.umlage), "–"]] : []),
+        ...(!isNaN(teile.netz) ? [["davon Netzentgelte (ct/kWh)", "–", ct(teile.netz), "–"]] : []),
+        ...(teile.rlm && !isNaN(teile.leistungKosten) ? [["Wirkarbeit Netz (" + num(teile.kw, 1) + " kW × " + num(teile.leistungspreis, 2) + " €/kW)", "–", eurx(teile.leistungKosten), "–"]] : []),
         ["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–", isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
           alt && !isNaN(neuA) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"],
         ["Jahresverbrauch", num(menge) + " kWh", num(menge) + " kWh", "–"],
@@ -3224,6 +3228,27 @@ const anteilVon = (a, id, mitarbeiter, variante) => {
   const t = v.anteile.find((x) => x.id === id);
   return t ? t.betrag : 0;
 };
+
+/* Staatliche Umlagen und Abgaben in ct/kWh je Sparte. Pflegt die Kalkulation (Einstellung „umlagen“),
+   sie gelten für jede Kalkulation. Beim Erzeugen eines Angebots wird der Stand an der Variante festgehalten. */
+let UMLAGEN = { strom: "", gas: "" };
+const setzeUmlagen = (w) => { UMLAGEN = { strom: "", gas: "", ...(w || {}) }; };
+
+/* Preisbestandteile einer Lieferstelle:
+   Netzentgelte = Arbeitspreis − Energiepreis − staatliche Umlagen und Abgaben.
+   RLM zusätzlich: Leistungsspitze (kW) × Leistungspreis (€/kW) = Betrag in € je Jahr. */
+function preisTeile(l, pr, umlagen) {
+  pr = pr || {};
+  const quelle = umlagen || UMLAGEN;
+  const arbeit = zahlLesen(pr.arbeit), energie = zahlLesen(pr.energie);
+  const umlage = zahlLesen((quelle || {})[l.medium === "gas" ? "gas" : "strom"]);
+  const netz = !isNaN(arbeit) && !isNaN(energie) && !isNaN(umlage) ? arbeit - energie - umlage : NaN;
+  const rlm = l.zaehlerart === "RLM";
+  const kw = zahlLesen(pr.leistung !== undefined && pr.leistung !== "" ? pr.leistung : l.lastspitze);
+  const leistungspreis = zahlLesen(pr.leistungspreis);
+  const leistungKosten = rlm && !isNaN(kw) && !isNaN(leistungspreis) ? kw * leistungspreis : NaN;
+  return { arbeit, energie, umlage, netz, rlm, kw, leistungspreis, leistungKosten };
+}
 
 const leereVariante = (a) => ({
   id: uid(), sparte: verbrauchMedium(a, "gas") && verbrauchMedium(a, "strom") ? "beide"
@@ -4248,6 +4273,10 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                               onSet={(f) => setL(l.id, "lastgang", f)}
                               hinweis="XLSX oder CSV hochladen"
                             />
+                            <div className="mt-3 sm:w-1/2">
+                              <Feld label="Lastspitze in kW (steht auf der Rechnung, falls bekannt)" value={l.lastspitze || ""}
+                                onChange={(v) => setL(l.id, "lastspitze", v)} placeholder="z. B. 190" />
+                            </div>
                           </div>
                         )}
                       </div>
@@ -4544,6 +4573,114 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
 /* ------------------------------------------------------------------ */
 /*  Anfrage-Detail                                                     */
 /* ------------------------------------------------------------------ */
+/* Staatliche Umlagen und Abgaben (ct/kWh) je Sparte, einmal hinterlegt für alle Kalkulationen */
+function UmlagenPflege({ user }) {
+  const darf = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
+  const [w, setW] = useState({ strom: UMLAGEN.strom || "", gas: UMLAGEN.gas || "" });
+  const [hinweis, setHinweis] = useState("");
+  const [laeuft, setLaeuft] = useState(false);
+  const geaendert = String(w.strom) !== String(UMLAGEN.strom || "") || String(w.gas) !== String(UMLAGEN.gas || "");
+  const ok = (x) => x === "" || !isNaN(zahlLesen(x));
+  const speichern = async () => {
+    setLaeuft(true); setHinweis("");
+    const wert = { strom: String(w.strom).trim(), gas: String(w.gas).trim(), stand: heute(), von: user.name };
+    const f = await einstellungSpeichern("umlagen", wert);
+    if (f) setHinweis("Nicht gespeichert: " + f);
+    else { setzeUmlagen(wert); setHinweis("Gespeichert. Gilt ab jetzt für jede neue Kalkulation."); }
+    setLaeuft(false);
+  };
+  return (
+    <div className="p-4 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+        <span className="text-sm">Staatliche Umlagen und Abgaben</span>
+        <span className="text-xs" style={{ color: C.muted }}>
+          gilt für jede Kalkulation{UMLAGEN.stand ? " · Stand " + datum(UMLAGEN.stand) + (UMLAGEN.von ? ", " + UMLAGEN.von : "") : ""}
+        </span>
+      </div>
+      {darf ? (
+        <>
+          <div className="grid sm:grid-cols-3 gap-4 items-end">
+            <Feld label="Strom (ct/kWh)" value={w.strom} onChange={(x) => setW({ ...w, strom: x })}
+              fehler={!ok(w.strom) ? "Zahl eingeben" : null} />
+            <Feld label="Erdgas (ct/kWh)" value={w.gas} onChange={(x) => setW({ ...w, gas: x })}
+              fehler={!ok(w.gas) ? "Zahl eingeben" : null} />
+            <Btn variante="hell" icon={Check} onClick={speichern} disabled={!geaendert || laeuft || !ok(w.strom) || !ok(w.gas)}>
+              {laeuft ? "Einen Moment …" : "Speichern"}
+            </Btn>
+          </div>
+          {hinweis && <p className="text-xs mt-2" style={{ color: /^Nicht/.test(hinweis) ? C.warn : C.ok }}>{hinweis}</p>}
+          <p className="text-xs mt-2" style={{ color: C.muted }}>
+            Netzentgelte ergeben sich je Lieferstelle aus Arbeitspreis − Energiepreis − Umlagen. Fertige Angebote behalten den Stand, mit dem sie erzeugt wurden.
+          </p>
+        </>
+      ) : (
+        <p className="text-sm">Strom {UMLAGEN.strom || "–"} ct/kWh · Erdgas {UMLAGEN.gas || "–"} ct/kWh</p>
+      )}
+    </div>
+  );
+}
+
+/* Kurzinfo zur Angebotsanfrage für die Kalkulation */
+function kurzinfoZeilen(a) {
+  const st = a.lieferstellen || [];
+  const summe = (m) => st.filter((l) => l.medium === m).reduce((t, l) => t + (zahlLesen(l.verbrauch) || 0), 0);
+  const hatGas = st.some((l) => l.medium === "gas"), hatStrom = st.some((l) => l.medium === "strom");
+  const k = a.kunde || {};
+  const modell = [hatStrom ? "Strom: " + (a.produkt || "–") : null, hatGas ? "Erdgas: " + (a.produktGas || a.produkt || "–") : null].filter(Boolean).join(" · ");
+  return {
+    kopf: [
+      ["Kunde", k.firma || "–"],
+      ["Anschrift", [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "–"],
+      ["Branche", k.branche || "–"],
+      ["Lieferbeginn", a.wunschLieferbeginn ? datum(a.wunschLieferbeginn) : "offen"],
+      ["Lieferende", a.laufzeitArt === "ende" ? (a.wunschLieferende ? datum(a.wunschLieferende) : "offen")
+        : (a.wunschLieferende ? datum(a.wunschLieferende) : a.laufzeit ? a.laufzeit + " Monate Laufzeit" : "offen")],
+      ["Beschaffungsmodell", modell || "–"],
+      ["Aufschlag", num(zahlLesen(a.aufschlag) || 0, 3) + " ct/kWh"],
+      ...(hatStrom ? [["Verbrauch Strom gesamt", num(summe("strom")) + " kWh"]] : []),
+      ...(hatGas ? [["Verbrauch Erdgas gesamt", num(summe("gas")) + " kWh"]] : []),
+    ],
+    stellen: st.map((l) => ({
+      titel: (l.medium === "gas" ? "Erdgas" : "Strom") + (l.bezeichnung ? " · " + l.bezeichnung : "") + " · " + (l.zaehlerart || "SLP"),
+      adresse: [l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "–",
+      verbrauch: num(zahlLesen(l.verbrauch) || 0) + " kWh",
+      spitze: l.zaehlerart === "RLM" ? (l.lastspitze ? num(zahlLesen(l.lastspitze), 1) + " kW" : "nicht angegeben") : null,
+    })),
+  };
+}
+function Kurzinfo({ a, onSchliessen }) {
+  const [kopiert, setKopiert] = useState(false);
+  const z = kurzinfoZeilen(a);
+  const text = [a.id, ...z.kopf.map(([k, v]) => k + ": " + v), "", "Lieferstellen:",
+    ...z.stellen.map((l) => "- " + l.titel + ", " + l.adresse + ", " + l.verbrauch + (l.spitze ? ", Lastspitze " + l.spitze : ""))].join("\n");
+  return (
+    <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.gruen }}>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <span className="text-sm">Kurzinfo zur Anfrage</span>
+        <span className="flex gap-3">
+          <button className="text-xs underline" style={{ color: C.strom }}
+            onClick={async () => { try { await navigator.clipboard.writeText(text); setKopiert(true); } catch (e) { /* von Hand */ } }}>
+            {kopiert ? "Kopiert" : "Kopieren"}</button>
+          <button className="text-xs underline" style={{ color: C.muted }} onClick={onSchliessen}>Schließen</button>
+        </span>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+        {z.kopf.map(([k, v]) => (
+          <div key={k} className="flex gap-2"><span className="w-40 shrink-0" style={{ color: C.muted }}>{k}</span><span>{v}</span></div>
+        ))}
+      </div>
+      <div className="mt-3 pt-3 space-y-2" style={{ borderTop: "1px solid " + C.line }}>
+        {z.stellen.map((l, i) => (
+          <div key={i} className="text-sm">
+            <div>{l.titel}</div>
+            <div className="text-xs" style={{ color: C.muted }}>{l.adresse} · {l.verbrauch}{l.spitze ? " · Lastspitze " + l.spitze : ""}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
                  onBearbeiten, onVerlaengern, onNotieren, tippgeber }) {
   const [vars, setVars] = useState(
@@ -4598,6 +4735,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const setVorvFeld = (lid, k, w) => setVorv((alt) => ({ ...alt, [lid]: { ...(alt[lid] || {}), [k]: w } }));
   const [vmBemerkung, setVmBemerkung] = useState((a.kalkulation && a.kalkulation.vollmachtBemerkung) || "");
   const [erzeugt, setErzeugt] = useState(null);
+  const [kurz, setKurz] = useState(false);
   const [paketLaeuft, setPaketLaeuft] = useState(false);
   const paketLaden = async (art) => {
     setPaketLaeuft(true);
@@ -4607,7 +4745,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   };
   const angebotErzeugen = async (v) => {
     setErzeugt(v.id);
-    try { setVar(v.id, "angebot", await egcAngebotPdf(a, v, { mitarbeiter, vorversorger: vorv, vollmachtBemerkung: vmBemerkung })); }
+    try {
+      const vu = v.umlagen || { strom: UMLAGEN.strom, gas: UMLAGEN.gas };
+      if (!v.umlagen) setVar(v.id, "umlagen", vu);
+      setVar(v.id, "angebot", await egcAngebotPdf(a, { ...v, umlagen: vu }, { mitarbeiter, vorversorger: vorv, vollmachtBemerkung: vmBemerkung }));
+    }
     catch (e) { alert("Das Angebot konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
     setErzeugt(null);
   };
@@ -4921,6 +5063,12 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           </span>
         )}
         <StatusPunkt status={a.status} />
+        {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && (
+          <button className="text-xs px-2 py-1 rounded" onClick={() => setKurz(!kurz)}
+            style={{ border: "1px solid " + C.line, background: kurz ? C.ink : C.card, color: kurz ? "#fff" : C.text }}>
+            Kurzinfo
+          </button>
+        )}
       </div>
       <p className="text-sm mb-5 ml-8" style={{ color: C.muted }}>
         {a.id} · angelegt {datum(a.angelegt)} ·{" "}
@@ -4933,6 +5081,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             }).join(" · ")
           : a.partnerName + " (Team " + a.team + ")"}
       </p>
+      {kurz && <Kurzinfo a={a} onSchliessen={() => setKurz(false)} />}
 
       <div className="grid lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5 min-w-0">
@@ -5405,6 +5554,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     </span>
                   </label>
 
+                  <UmlagenPflege user={user} />
+
                   {vars.map((v, i) => (
                     <div key={v.id} className="rounded overflow-hidden" style={{ border: "1px solid " + C.line }}>
                       <div className="flex items-center justify-between px-4 py-2"
@@ -5482,6 +5633,31 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                     value={(v.preise[l.id] || {}).grundpreis || ""}
                                     onChange={(x) => setVarPreis(v.id, l.id, "grundpreis", x)} />
                                 </div>
+                                {l.zaehlerart === "RLM" && (
+                                  <div className="grid sm:grid-cols-3 gap-4 mt-3">
+                                    <Feld label="Lastspitze (kW)"
+                                      value={(v.preise[l.id] || {}).leistung !== undefined ? (v.preise[l.id] || {}).leistung : (l.lastspitze || "")}
+                                      onChange={(x) => setVarPreis(v.id, l.id, "leistung", x)} />
+                                    <Feld label="Leistungspreis (€/kW)"
+                                      value={(v.preise[l.id] || {}).leistungspreis || ""}
+                                      onChange={(x) => setVarPreis(v.id, l.id, "leistungspreis", x)} />
+                                  </div>
+                                )}
+                                {(() => {
+                                  const t = preisTeile(l, v.preise[l.id], v.umlagen);
+                                  const ct3 = (x) => isNaN(x) ? "–" : num(x, 3) + " ct/kWh";
+                                  return (
+                                    <div className="mt-3 text-xs space-y-0.5" style={{ color: C.muted }}>
+                                      <div>Staatliche Umlagen und Abgaben {ct3(t.umlage)}
+                                        {isNaN(t.umlage) ? " · bitte oben einmal für " + (l.medium === "gas" ? "Erdgas" : "Strom") + " hinterlegen" : ""}</div>
+                                      <div style={{ color: !isNaN(t.netz) && t.netz < 0 ? C.warn : C.muted }}>
+                                        Netzentgelte (Arbeitspreis − Energiepreis − Umlagen) {ct3(t.netz)}
+                                        {!isNaN(t.netz) && t.netz < 0 ? " · negativ, bitte Preise prüfen" : ""}</div>
+                                      {t.rlm && <div>Wirkarbeit Netz {isNaN(t.leistungKosten) ? "–"
+                                        : num(t.kw, 1) + " kW × " + num(t.leistungspreis, 2) + " €/kW = " + eur(t.leistungKosten) + " pro Jahr"}</div>}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             ))}
                           </div>
@@ -14405,6 +14581,7 @@ function PortalApp() {
     if (e.bonusziele) setBonusziele({ ...BONUSZIELE_START, ...e.bonusziele });
     if (e.firmenanteil != null) setFirmenanteil(String(e.firmenanteil));
     if (e.firmendaten) setFirmendaten(firmendatenMit(e.firmendaten));
+    if (e.umlagen) setzeUmlagen(e.umlagen);
   };
 
   const sammlungLaden = async (n) => {
