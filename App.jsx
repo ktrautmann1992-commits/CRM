@@ -322,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.22 · 09.11.2026 · Provision bei bestätigter Liefermenge";
+const VERSION = "v5.23 · 09.11.2026 · Abweichende Laufzeit bei der Annahme";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2958,15 +2958,23 @@ const laufzeitMonate = (v) =>
     ? monateZwischen(v.lieferbeginn, v.lieferende) || 0
     : parseInt(v.laufzeit) || 0;
 
+/* „2 Lieferjahre“ oder „18 Monate“ */
+const jahreText = (m) => !m ? "–" : m % 12 === 0 ? (m === 12 ? "1 Lieferjahr" : m / 12 + " Lieferjahre") : m + " Monate";
+
 const enddatum = (v) =>
   v.laufzeitArt === "ende" ? v.lieferende || null : monateDazu(v.lieferbeginn, parseInt(v.laufzeit) || 0);
 
 /* Vorlaufzeiten für die Erinnerung an auslaufende Verträge, in Monaten */
 const VERLAENGERUNG_VORLAUF = [12, 6, 3];
 
+/* Abweichende Laufzeit, die der Kunde bei der Annahme gewählt hat (in Monaten), sonst 0 */
+const laufzeitAbweichend = (a) => parseInt(a && a.annahme && a.annahme.laufzeitMonate) || 0;
+
 const vertragsende = (a) => {
   const v = aktiveVariante(a);
-  return v ? enddatum(v) : null;
+  if (!v) return null;
+  const abw = laufzeitAbweichend(a);
+  return abw && v.lieferbeginn ? monateDazu(v.lieferbeginn, abw) : enddatum(v);
 };
 
 const monateBis = (iso) => {
@@ -3023,7 +3031,12 @@ function phasenDauer(a) {
   };
 }
 
+/* Laufzeit einer Variante; für die angenommene Variante gilt eine abweichende Laufzeit aus der Annahme */
+const laufzeitFuer = (a, v) =>
+  laufzeitAbweichend(a) && aktiveVariante(a) && aktiveVariante(a).id === v.id ? laufzeitAbweichend(a) : laufzeitMonate(v);
+
 const laufzeitVon = (a) => {
+  if (laufzeitAbweichend(a)) return laufzeitAbweichend(a);
   const v = aktiveVariante(a);
   return v ? laufzeitMonate(v) : a.laufzeit;
 };
@@ -3890,7 +3903,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
           : num(eigenerSatzVon(user), 0) + " % Provisionssatz auf " + (mitMenge
               ? num(bestaetigteMenge(a)) + " kWh bestätigte Liefermenge"
               : num(verbrauchGesamt(a)) + " kWh laut Anfrage")}
-        {jahre ? " · über " + num(jahre, 0) + " Lieferjahre " + eur(kopfGesamt) : ""}
+        {jahre ? " · über " + jahreText(laufzeit) + " " + eur(kopfGesamt) : ""}
       </div>
 
       {vorlaeufig && eigen && (
@@ -5213,6 +5226,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   /* Aufgabe 9: Angebot annehmen mit Unterlagen */
   const [annahme, setAnnahme] = useState({
     variante: null, angebotUnterschrieben: null, vollmacht: null, unterlagen: null, umfang: "alle",
+    /* abweichende Laufzeit in Monaten; leer = wie im Angebot */
+    laufzeitMonate: "",
     kundeInformiert: false, wieBeschrieben: false, abweichung: "", weitere: [],
     /* über einen Tippgeber gewonnen? leer = nein (Vorgabe) */
     tippgeberId: (a.tippgeber && a.tippgeber.id) || a.tippgeberId || "",
@@ -5253,7 +5268,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       verlauf: [...a.verlauf, {
         d: heute(),
         t: "Auftrag an die Kalkulation gesendet, bereit zum Einreichen"
-          + (umfang === "strom" ? " (nur Strom angenommen)" : umfang === "gas" ? " (nur Erdgas angenommen)" : ""),
+          + (umfang === "strom" ? " (nur Strom angenommen)" : umfang === "gas" ? " (nur Erdgas angenommen)" : "")
+          + (parseInt(annahme.laufzeitMonate) ? " · abweichende Laufzeit " + jahreText(parseInt(annahme.laufzeitMonate)) : ""),
         w: user.name,
       }],
     });
@@ -5892,7 +5908,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                         </div>
 
                         <Provisionsblock a={a} mitarbeiter={mitarbeiter} user={user}
-                          laufzeit={laufzeitMonate(v)}
+                          laufzeit={laufzeitFuer(a, v)}
                           variante={{ ...v, aufschlag: parseFloat(String(v.aufschlag).replace(",", ".")) || 0 }} />
 
                         <label className="block">
@@ -6228,6 +6244,13 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     a.lieferstellenNichtAngenommen.map((l) => l.bezeichnung || (l.medium === "gas" ? "Erdgas" : "Strom")).join(", ") + "."}
                 </p>
               )}
+              {laufzeitAbweichend(a) > 0 && (
+                <p className="text-sm px-3 py-2 rounded mb-3" style={{ background: "#FDF6EE" }}>
+                  Abweichende Laufzeit: {jahreText(laufzeitAbweichend(a))}
+                  {aktiveVariante(a) ? " statt " + jahreText(laufzeitMonate(aktiveVariante(a))) + " laut Angebot" : ""}
+                  {vertragsende(a) ? ", Lieferende " + datum(vertragsende(a)) : ""}. Bitte so beim Versorger einreichen.
+                </p>
+              )}
               {a.annahme && a.annahme.unterlagen && (
                 <div className="space-y-2 mb-4">
                   <DateiChip datei={a.annahme.unterlagen} label="Maklervollmacht und Angebot" />
@@ -6560,6 +6583,44 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   );
                 })()}
 
+                {(() => {
+                  /* Abweichende Laufzeit: der Kunde nimmt z. B. nur 2 statt 3 Lieferjahre */
+                  const v = annahme.variante || {};
+                  const angebot = laufzeitMonate(v) || parseInt(v.laufzeit) || 0;
+                  const abw = parseInt(annahme.laufzeitMonate) || 0;
+                  const wahl = [12, 24, 36, 48, 60].filter((m) => m !== angebot);
+                  const ende = abw && v.lieferbeginn ? monateDazu(v.lieferbeginn, abw) : null;
+                  return (
+                    <div className="p-4 rounded space-y-2" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                      <div className="text-sm mb-1">Laufzeit</div>
+                      <label className="flex items-center gap-3 text-sm">
+                        <input type="checkbox" checked={!abw} style={{ accentColor: C.ink }}
+                          onChange={() => setAnnahme({ ...annahme, laufzeitMonate: "" })} />
+                        wie im Angebot{angebot ? " (" + jahreText(angebot) + ")" : ""}
+                      </label>
+                      <label className="flex items-center gap-3 text-sm">
+                        <input type="checkbox" checked={!!abw} style={{ accentColor: C.ink }}
+                          onChange={() => setAnnahme({ ...annahme, laufzeitMonate: abw ? "" : String(wahl[0]) })} />
+                        abweichende Laufzeit
+                      </label>
+                      {!!abw && (
+                        <div className="pl-7 space-y-2">
+                          <select value={abw} onChange={(e) => setAnnahme({ ...annahme, laufzeitMonate: e.target.value })}
+                            className="w-full px-3 py-2 text-sm rounded outline-none bg-white"
+                            style={{ border: "1px solid " + C.line }}>
+                            {wahl.map((m) => <option key={m} value={m}>{jahreText(m)}</option>)}
+                          </select>
+                          <p className="text-xs" style={{ color: C.muted }}>
+                            {ende ? "Lieferende dann " + datum(ende) + ". " : ""}
+                            Die Kalkulation sieht die Änderung beim Einreichen. Provision und Fälligkeiten rechnen mit{" "}
+                            {jahreText(abw)}; endgültig bestätigen Vertragsmanagement und Geschäftsführung.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 <Datei label="Maklervollmacht (Service- und Beratungsauftrag) und unterschriebenes Angebot – erforderlich"
                   datei={annahme.unterlagen} onSet={(f) => setAnnahme({ ...annahme, unterlagen: f })}
                   hinweis="Eine PDF mit beidem hochladen" />
@@ -6697,6 +6758,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                         <span className="text-sm">
                           {varianten(a).length > 1 ? "Variante " + (i + 1) + ": " : ""}{v.produkt}
                           {" · " + (laufzeitMonate(v) || v.laufzeit) + " Monate"}
+                          {laufzeitFuer(a, v) !== laufzeitMonate(v) ? " · angenommen: " + jahreText(laufzeitFuer(a, v)) : ""}
                           {v.sparte && v.sparte !== "beide" ? " · " + (v.sparte === "gas" ? "Erdgas" : "Strom") : ""}
                         </span>
                         {gewaehlt && (
@@ -6738,7 +6800,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
                         <div className="mt-3">
                           <Provisionsblock a={a} mitarbeiter={mitarbeiter} user={user}
-                            laufzeit={laufzeitMonate(v)} variante={v} />
+                            laufzeit={laufzeitFuer(a, v)} variante={v} />
                         </div>
 
                         {v.bemerkung && (
@@ -10069,7 +10131,7 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
       a.partnerName, teile.join(" / "), a.team,
       v ? v.produkt : a.produkt, laufzeitVon(a),
       v && v.lieferbeginn ? datum(v.lieferbeginn) : "",
-      v && enddatum(v) ? datum(enddatum(v)) : "",
+      vertragsende(a) ? datum(vertragsende(a)) : "",
       verbrauchMedium(a, "strom"), verbrauchMedium(a, "gas"), verbrauchGesamt(a),
       a.bestaetigung ? Number(a.bestaetigung.aufschlag) : (v ? Number(v.aufschlag) : Number(a.aufschlag)),
       Math.round(gesamtprovision(a) * 100) / 100,
@@ -13923,7 +13985,7 @@ function Kunden({ anfragen, leads, mitarbeiter, user, onOeffnen, onLead }) {
             <tbody>
               {liste.map((a) => {
                 const va = aktiveVariante(a);
-                const ende = va ? enddatum(va) : null;
+                const ende = vertragsende(a);
                 return (
                   <tr key={a.id} onClick={() => onOeffnen(a.id)} style={{ cursor: "pointer" }}>
                     <Zelle>
