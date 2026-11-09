@@ -322,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.21 · 09.11.2026 · Statusweg Vertrieb, Lieferbestätigung, PDF-Ansicht, Zurück und Verlauf";
+const VERSION = "v5.22 · 09.11.2026 · Provision bei bestätigter Liefermenge";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -3851,6 +3851,10 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
     ? Array.from({ length: Math.max(1, Math.round(jahre)) }, (_, i) =>
         kopfVon(i ? gesamtverteilung(a, mitarbeiter, gesamt, i + 1) : v)).reduce((t, x) => t + x, 0)
     : 0;
+  /* Vor der Bestätigung des Versorgers ist die Provision nur eine Vorschau: maßgeblich ist
+     die bestätigte Liefermenge. Verbraucht der Kunde weniger, sinkt die Provision. */
+  const mitMenge = !!a.bestaetigung && !variante;
+  const vorlaeufig = !sichtStruktur && !istKalkSicht && !mitMenge;
   const tg = v.tippgeber;
   const sichtTippgeber = tg && (sichtStruktur || tg.besitzerId === user.id || tg.traegerId === user.id);
 
@@ -3860,9 +3864,10 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         <span className="text-xs" style={{ color: C.muted }}>
           {sichtGesamt ? "Gesamtprovision je Lieferjahr"
             : istKalkSicht ? "Provision des Vertriebspartners je Lieferjahr"
+            : vorlaeufig ? "Deine voraussichtliche Provision je Lieferjahr"
             : "Deine Provision je Lieferjahr"}
         </span>
-        <span className="text-2xl" style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+        <span className="text-2xl whitespace-nowrap ml-3" style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
           {eur(kopfBetrag)}
         </span>
       </div>
@@ -3882,9 +3887,18 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
           ? "bestätigt: " + num(bestaetigteMenge(a)) + " kWh × " + num(a.bestaetigung.aufschlag || 0, 3) + " ct/kWh"
           : sichtGesamt
           ? num(verbrauchGesamt(a)) + " kWh × " + num((variante ? variante.aufschlag : (aktiveVariante(a) ? aktiveVariante(a).aufschlag : a.aufschlag)) || 0, 3) + " ct/kWh"
-          : num(eigenerSatzVon(user), 0) + " % Provisionssatz auf " + num(verbrauchGesamt(a)) + " kWh"}
+          : num(eigenerSatzVon(user), 0) + " % Provisionssatz auf " + (mitMenge
+              ? num(bestaetigteMenge(a)) + " kWh bestätigte Liefermenge"
+              : num(verbrauchGesamt(a)) + " kWh laut Anfrage")}
         {jahre ? " · über " + num(jahre, 0) + " Lieferjahre " + eur(kopfGesamt) : ""}
       </div>
+
+      {vorlaeufig && eigen && (
+        <div className="text-xs mb-3 px-2 py-1.5 rounded" style={{ background: "#FFF8EC", color: C.gas }}>
+          Gilt bei bestätigter Liefermenge. Berechnet aus dem Jahresverbrauch laut Anfrage; bestätigt der Versorger
+          weniger, sinkt die Provision entsprechend. Endgültig bestätigen Vertragsmanagement und Geschäftsführung.
+        </div>
+      )}
 
       {sichtTippgeber && (
         <div className="text-xs mb-3 px-2 py-1.5 rounded" style={{ background: "#FFF8EC", color: C.gas }}>
@@ -4540,7 +4554,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                 </div>
               </div>
               <p className="text-xs mt-2" style={{ color: C.muted }}>
-                Vorschau auf Basis deines Provisionssatzes. Verbindlich ist der von der Kalkulation bestätigte Aufschlag.
+                Vorschau auf Basis deines Provisionssatzes und des eingetragenen Jahresverbrauchs. Verbindlich sind der bestätigte Aufschlag und die vom Versorger bestätigte Liefermenge; verbraucht der Kunde weniger, sinkt die Provision.
               </p>
             </div>
           </div>
