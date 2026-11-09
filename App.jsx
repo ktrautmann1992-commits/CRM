@@ -45,12 +45,34 @@ const STATUS = {
   ruecksprache: { label: "Rücksprache Geschäftsführung", color: C.gruen },
   angefragt: { label: "Angebot beim Versorger angefragt", color: "#BE6A16" },
   angebot: { label: "Angebot liegt vor", color: C.ok },
-  uebermittelt: { label: "Auftrag an Versorger übermittelt", color: "#2F5FE0" },
-  einreichung: { label: "Beim Versorger eingereicht", color: C.gold },
+  uebermittelt: { label: "Auftrag erteilt, bereit zum Einreichen", color: "#2F5FE0" },
+  einreichung: { label: "An Versorger übermittelt", color: C.gold },
   bestaetigt: { label: "Vom Versorger bestätigt, Provision offen", color: C.ok },
   abgeschlossen: { label: "Abgeschlossen", color: C.ink },
   abgelehnt: { label: "Abgelehnt", color: C.muted },
 };
+
+/* Wer gerade schaut: der Vertrieb sieht einen bestätigten Auftrag erst nach der Lieferbestätigung
+   durch das Vertragsmanagement als „Vom Versorger bestätigt“, vorher als „An Versorger übermittelt“. */
+const VERTRIEB_SICHT_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
+let SICHT_ROLLE = null;
+const imVertriebNochOffen = (a) => a.status === "bestaetigt" || (a.status === "abgeschlossen" && !a.lieferbestaetigung);
+/* Darstellung für den Vertrieb: gespeichert wird immer der echte Status (siehe speichern) */
+const vertriebsSicht = (a) => imVertriebNochOffen(a) ? { ...a, status: "einreichung", _echterStatus: a.status } : a;
+function statusVon(a, rolle) {
+  rolle = rolle || SICHT_ROLLE;
+  if (!a) return { label: "–", color: C.muted };
+  const vertrieb = VERTRIEB_SICHT_ROLLEN.includes(rolle);
+  const st = a._echterStatus || a.status;
+  if (st === "angebot")
+    return a.angebotVersendet ? { label: "Angebot beim Kunden", color: C.ok }
+      : { label: vertrieb ? "Neues Angebot" : "Angebot beim Vertriebspartner", color: C.ok };
+  if (vertrieb && imVertriebNochOffen({ ...a, status: st })) return STATUS.einreichung;
+  if (st === "abgeschlossen")
+    return a.lieferbestaetigung ? (vertrieb ? { label: "Vom Versorger bestätigt", color: C.ok } : STATUS.abgeschlossen)
+      : { label: rolle === "Vertragsmanagement" ? "Neue Lieferbestätigung" : "Abgeschlossen, Lieferbestätigung offen", color: C.gold };
+  return STATUS[st] || { label: st, color: C.muted };
+}
 
 const PRODUKTE = ["Festpreis", "Spotmarkt", "Tranchenmodell", "PPA-Modell"];
 const EMPFEHLUNG = "Empfehlung der Kalkulation";
@@ -300,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.20 · 08.11.2026 · Preisaufteilung im Angebot, Umlagen, Leistungspreis Netz, Kurzinfo";
+const VERSION = "v5.21 · 09.11.2026 · Statusweg Vertrieb, Lieferbestätigung, PDF-Ansicht, Zurück und Verlauf";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -3580,8 +3602,8 @@ const Btn = ({ children, onClick, variante = "primär", icon: Icon, disabled }) 
   );
 };
 
-const StatusPunkt = ({ status }) => {
-  const s = STATUS[status];
+const StatusPunkt = ({ status, a }) => {
+  const s = a ? statusVon(a) : (STATUS[status] || { label: status, color: C.muted });
   return (
     <span className="inline-flex items-center gap-1.5 text-xs whitespace-nowrap" style={{ color: s.color }}>
       <span className="w-2 h-2 rounded-full" style={{ background: s.color }} />
@@ -3631,7 +3653,13 @@ async function abgelegteOeffnen(datei) {
   }
 }
 
+/* PDFs öffnen im eigenen Betrachter im Portal. In der iPhone-App vom Home-Bildschirm gibt es keine
+   neuen Fenster: ein Blob-Fenster ersetzt dort das ganze Portal und es gibt keinen Weg zurück. */
+let PDF_ZEIGEN = null;
+const istPdf = (d) => !!d && (/pdf/i.test(d.typ || "") || /\.pdf$/i.test(d.name || ""));
+
 function dateiOeffnen(datei) {
+  if (istPdf(datei) && PDF_ZEIGEN) { PDF_ZEIGEN(datei); return; }
   if (!datei.url && datei.pfad) return abgelegteOeffnen(datei);
   try {
     const url = URL.createObjectURL(blobVon(datei));
@@ -3656,6 +3684,78 @@ function dateiLaden(datei) {
 }
 
 const kb = (n) => (!n ? "" : n > 1048576 ? num(n / 1048576, 1) + " MB" : num(n / 1024, 0) + " KB");
+
+let pdfjsLaden = null;
+const ladePdfjs = () => {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!pdfjsLaden)
+    pdfjsLaden = new Promise((fertig, fehler) => {
+      const s = document.createElement("script");
+      s.src = "/assets/pdfjs-3.11.174/pdf.min.js";
+      s.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "/assets/pdfjs-3.11.174/pdf.worker.min.js";
+        fertig(window.pdfjsLib);
+      };
+      s.onerror = () => { pdfjsLaden = null; fehler(new Error("PDF-Anzeige konnte nicht geladen werden.")); };
+      document.head.appendChild(s);
+    });
+  return pdfjsLaden;
+};
+
+/* PDF im Portal anzeigen: jede Seite als Bild, mit Herunterladen und Schließen */
+function PdfBetrachter({ datei, onSchliessen }) {
+  const flaeche = React.useRef(null);
+  const [stand, setStand] = useState("Wird geladen …");
+  const [seiten, setSeiten] = useState(0);
+  useEffect(() => {
+    let abbruch = false;
+    (async () => {
+      try {
+        const [pdfjs, url] = await Promise.all([ladePdfjs(), datei.url ? Promise.resolve(datei.url) : dateiInhalt(datei)]);
+        const roh = atob(String(url).split(",")[1] || "");
+        const bytes = new Uint8Array(roh.length);
+        for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
+        const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+        if (abbruch) return;
+        setSeiten(pdf.numPages); setStand("");
+        const ziel = flaeche.current;
+        const breite = Math.min(ziel.clientWidth - 16, 900);
+        const dichte = Math.min(window.devicePixelRatio || 1, 2);
+        for (let n = 1; n <= pdf.numPages && !abbruch; n++) {
+          const seite = await pdf.getPage(n);
+          const v1 = seite.getViewport({ scale: 1 });
+          const vp = seite.getViewport({ scale: (breite / v1.width) * dichte });
+          const c = document.createElement("canvas");
+          c.width = vp.width; c.height = vp.height;
+          Object.assign(c.style, { width: breite + "px", height: (vp.height / dichte) + "px", display: "block",
+            margin: "0 auto 12px", background: "#fff", boxShadow: "0 1px 4px rgba(0,0,0,.25)" });
+          ziel.appendChild(c);
+          await seite.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+        }
+      } catch (e) { if (!abbruch) setStand("Die PDF konnte nicht angezeigt werden: " + ((e && e.message) || e)); }
+    })();
+    return () => { abbruch = true; };
+  }, [datei]);
+  return createPortal(
+    <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 60, background: "#3B4654",
+                  display: "flex", flexDirection: "column", fontFamily: FONT }}>
+      <div className="flex items-center gap-2 px-3 py-2"
+           style={{ background: C.ink, color: "#fff", paddingTop: "max(8px, env(safe-area-inset-top))" }}>
+        <button onClick={onSchliessen} className="flex items-center gap-1 text-sm px-2 py-1.5 rounded" style={{ background: C.inkSoft }}>
+          <ArrowLeft size={16} /> Zurück
+        </button>
+        <span className="flex-1 min-w-0 truncate text-sm px-1">{datei.name}{seiten ? " · " + seiten + " Seiten" : ""}</span>
+        <button onClick={() => dateiLaden(datei)} className="text-sm px-2 py-1.5 rounded" style={{ background: C.inkSoft }}>
+          Herunterladen
+        </button>
+      </div>
+      <div ref={flaeche} style={{ flex: 1, overflowY: "auto", padding: "12px 8px", WebkitOverflowScrolling: "touch" }}>
+        {stand && <p className="text-sm text-center mt-10" style={{ color: "#fff" }}>{stand}</p>}
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 /* Anzeige einer Datei mit Öffnen und Herunterladen */
 function DateiChip({ datei, label, klein }) {
@@ -4520,7 +4620,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                   </div>
                   {treffer.map((t) => (
                     <div key={t.vorgang.id} className="text-sm py-1">
-                      {t.vorgang.kunde.firma} · {t.vorgang.id} · {STATUS[t.vorgang.status].label}
+                      {t.vorgang.kunde.firma} · {t.vorgang.id} · {statusVon(t.vorgang).label}
                       <span className="block text-xs" style={{ color: C.muted }}>
                         betreut von {t.inhaber} · {t.gruende.join(", ")}
                       </span>
@@ -4599,6 +4699,40 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
 /* ------------------------------------------------------------------ */
 /*  Anfrage-Detail                                                     */
 /* ------------------------------------------------------------------ */
+/* Vertragsmanagement: Lieferbestätigung des Versorgers erfassen. Erst danach sieht der Vertrieb
+   „Vom Versorger bestätigt“ und seine Provision. */
+function Lieferbestaetigung({ a, user, onUpdate }) {
+  const stellen = (a.bestaetigung && a.bestaetigung.stellen) || {};
+  const ersterBeginn = Object.values(stellen).map((x) => x && x.beginn).filter(Boolean).sort()[0] || "";
+  const [lb, setLb] = useState({ lieferbeginn: ersterBeginn, vertragsnummer: "", dokument: null, notiz: "" });
+  return (
+    <div className="rounded p-5" style={{ background: "#FDF9EC", border: "1px solid " + C.gold }}>
+      <div className="text-sm mb-1">Neue Lieferbestätigung</div>
+      <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "62ch" }}>
+        Der Versorger hat den Auftrag bestätigt{a.bestaetigung && a.bestaetigung.versorger ? " (" + a.bestaetigung.versorger + ")" : ""},
+        die Geschäftsführung hat den Provisionseingang erfasst. Erfasse jetzt die Lieferbestätigung. Erst danach sieht der
+        Vertriebspartner „Vom Versorger bestätigt“ und seine Provision.
+      </p>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Feld label="Bestätigter Lieferbeginn" type="date" value={lb.lieferbeginn} onChange={(v) => setLb({ ...lb, lieferbeginn: v })} />
+        <Feld label="Vertrags- oder Kundennummer beim Versorger" value={lb.vertragsnummer} onChange={(v) => setLb({ ...lb, vertragsnummer: v })} />
+      </div>
+      <div className="mt-4">
+        <Datei label="Lieferbestätigung des Versorgers (freiwillig)" datei={lb.dokument}
+          onSet={(f) => setLb({ ...lb, dokument: f })} hinweis="PDF hochladen" />
+      </div>
+      <div className="mt-4">
+        <Btn variante="ok" icon={Check} disabled={!lb.lieferbeginn}
+          onClick={() => onUpdate({ ...a, lieferbestaetigung: { ...lb, von: user.name, datum: heute() },
+            vertragsStatus: a.vertragsStatus || "Lieferung aktiv",
+            verlauf: [...a.verlauf, { d: heute(), t: "Lieferbestätigung erfasst, Lieferbeginn " + datum(lb.lieferbeginn), w: user.name }] })}>
+          Lieferbestätigung erfassen
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
 /* Staatliche Umlagen und Abgaben (ct/kWh) je Sparte, jeder Bestandteil einzeln, einmal hinterlegt für alle Kalkulationen */
 function UmlagenPflege({ user }) {
   const darf = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
@@ -4804,12 +4938,17 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
     catch (e) { alert("Die Individualanfrage konnte nicht erstellt werden: " + ((e && e.message) || e)); }
     setPaketLaeuft(false);
   };
-  const angebotErzeugen = async (v) => {
-    setErzeugt(v.id);
+  const angebotErzeugen = async (v, mitVergleich = true) => {
+    setErzeugt(v.id + (mitVergleich ? ":mit" : ":ohne"));
     try {
       const vu = v.umlagen || JSON.parse(JSON.stringify({ strom: UMLAGEN.strom, gas: UMLAGEN.gas, teile: UMLAGEN.teile || null }));
       if (!v.umlagen) setVar(v.id, "umlagen", vu);
-      setVar(v.id, "angebot", await egcAngebotPdf(a, { ...v, umlagen: vu }, { mitarbeiter, vorversorger: vorv, vollmachtBemerkung: vmBemerkung }));
+      const pdf = await egcAngebotPdf(a, { ...v, umlagen: vu },
+        { mitarbeiter, vorversorger: mitVergleich ? vorv : {}, vollmachtBemerkung: vmBemerkung });
+      setVar(v.id, "angebot", pdf);
+      setVar(v.id, "angebotMitVergleich", mitVergleich);
+      /* gleich anzeigen, damit die Kalkulation es prüfen kann */
+      if (PDF_ZEIGEN) PDF_ZEIGEN(pdf);
     }
     catch (e) { alert("Das Angebot konnte nicht erzeugt werden: " + ((e && e.message) || e)); }
     setErzeugt(null);
@@ -4854,7 +4993,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         w: user.name,
       }],
     });
-    onZurueck();
+    /* im Vorgang bleiben: oben erscheint der Hinweis, dass das Angebot beim Vertriebspartner liegt */
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { /* egal */ }
   };
 
   const zurueckAnVertrieb = () => {
@@ -4913,7 +5053,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const protokollLaden = () => {
     const z = [];
     z.push({ text: a.kunde.firma || "Vorgang", gross: true });
-    z.push(a.id + "  ·  angelegt " + datum(a.angelegt) + "  ·  " + STATUS[a.status].label);
+    z.push(a.id + "  ·  angelegt " + datum(a.angelegt) + "  ·  " + statusVon(a).label);
     z.push("Vertriebspartner: " + a.partnerName + " (Team " + a.team + ")");
     if (a.kunde.branche) z.push("Branche: " + a.kunde.branche);
     z.push("Anschrift: " + [a.kunde.strasse, a.kunde.plz + " " + a.kunde.ort].filter(Boolean).join(", "));
@@ -5058,7 +5198,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
   /* Aufgabe 9: Angebot annehmen mit Unterlagen */
   const [annahme, setAnnahme] = useState({
-    variante: null, angebotUnterschrieben: null, vollmacht: null,
+    variante: null, angebotUnterschrieben: null, vollmacht: null, unterlagen: null, umfang: "alle",
     kundeInformiert: false, wieBeschrieben: false, abweichung: "", weitere: [],
     /* über einen Tippgeber gewonnen? leer = nein (Vorgabe) */
     tippgeberId: (a.tippgeber && a.tippgeber.id) || a.tippgeberId || "",
@@ -5074,6 +5214,10 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
          : tippgeberMomentaufnahme(meineTippgeber.find((t) => t.id === annahme.tippgeberId), user.id))
       : null;
     const { tippgeberId, ...annahmeDaten } = annahme;
+    /* Teilannahme: nur Strom oder nur Erdgas. Nicht angenommene Lieferstellen werden beiseitegelegt,
+       damit Mengen, Lieferstellen und Provision nur noch mit der angenommenen Sparte rechnen. */
+    const umfang = annahme.umfang || "alle";
+    const nichtAngenommen = umfang === "alle" ? [] : a.lieferstellen.filter((l) => l.medium !== umfang);
     onUpdate({
       ...a,
       ...(fragtTippgeber ? {
@@ -5082,12 +5226,20 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           : a.herkunft === "Tippgeber" ? { herkunft: "Eigenes Netzwerk", herkunftDetail: "" } : {}),
       } : {}),
       status: "uebermittelt",
+      ...(nichtAngenommen.length ? {
+        lieferstellen: a.lieferstellen.filter((l) => l.medium === umfang),
+        lieferstellenNichtAngenommen: [...(a.lieferstellenNichtAngenommen || []), ...nichtAngenommen],
+      } : {}),
       kalkulation: { ...a.kalkulation, gewaehlt: annahmeGewaehlt(annahme.variante) },
-      annahme: { ...annahmeDaten, von: user.name, datum: heute(),
+      annahme: { ...annahmeDaten, vollmacht: annahmeDaten.unterlagen || annahmeDaten.vollmacht,
+                 angebotUnterschrieben: annahmeDaten.unterlagen || annahmeDaten.angebotUnterschrieben,
+                 wieBeschrieben: umfang === "alle",
+                 von: user.name, datum: heute(),
                  tippgeber: fragtTippgeber ? (tgNeu ? "ja" : "nein") : undefined },
       verlauf: [...a.verlauf, {
         d: heute(),
-        t: "Abschluss an die Kalkulation gesendet, Auftrag an Versorger übermittelt",
+        t: "Auftrag an die Kalkulation gesendet, bereit zum Einreichen"
+          + (umfang === "strom" ? " (nur Strom angenommen)" : umfang === "gas" ? " (nur Erdgas angenommen)" : ""),
         w: user.name,
       }],
     });
@@ -5123,7 +5275,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             {a.kunde.branche}
           </span>
         )}
-        <StatusPunkt status={a.status} />
+        <StatusPunkt status={a.status} a={a} />
         {["Kalkulation", "Geschäftsführung"].includes(user.rolle) && (
           <button className="text-xs px-2 py-1 rounded" onClick={() => setKurz(!kurz)}
             style={{ border: "1px solid " + C.line, background: kurz ? C.ink : C.card, color: kurz ? "#fff" : C.text }}>
@@ -5245,7 +5397,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
                 {nachfolger ? (
                   <p className="text-sm" style={{ color: C.ok }}>
-                    Verlängerung läuft bereits: {nachfolger.id} · {STATUS[nachfolger.status].label}
+                    Verlängerung läuft bereits: {nachfolger.id} · {statusVon(nachfolger).label}
                   </p>
                 ) : (
                   <>
@@ -5741,12 +5893,26 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                           onSet={(f) => setVar(v.id, "angebot", f)} hinweis="Angebot anhängen" />
                         <Datei label="Individualangebot vom Versorger (z. B. Tranchen oder PPA)" datei={v.individualangebot}
                           onSet={(f) => setVar(v.id, "individualangebot", f)} hinweis="Individualangebot anhängen" />
-                        <Btn icon={FileText} onClick={() => angebotErzeugen(v)} disabled={erzeugt === v.id}>
-                          {erzeugt === v.id ? "Angebot wird erzeugt …" : "Angebot im EGC-Design erzeugen"}
-                        </Btn>
+                        <div className="flex flex-wrap gap-2">
+                          <Btn icon={FileText} onClick={() => angebotErzeugen(v, true)} disabled={!!erzeugt}>
+                            {erzeugt === v.id + ":mit" ? "Angebot wird erzeugt …" : "Angebot mit Vorversorger-Vergleich"}
+                          </Btn>
+                          <Btn variante="hell" icon={FileText} onClick={() => angebotErzeugen(v, false)} disabled={!!erzeugt}>
+                            {erzeugt === v.id + ":ohne" ? "Angebot wird erzeugt …" : "Angebot ohne Vorversorger-Vergleich"}
+                          </Btn>
+                        </div>
+                        {v.angebot && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Btn variante="ok" icon={FileText} onClick={() => dateiOeffnen(v.angebot)}>Angebot ansehen</Btn>
+                            <span className="text-xs" style={{ color: C.muted }}>
+                              {v.angebotMitVergleich === false ? "ohne Vorversorger-Vergleich" : v.angebotMitVergleich ? "mit Vorversorger-Vergleich" : ""}
+                            </span>
+                          </div>
+                        )}
                         <p className="text-xs" style={{ color: C.muted }}>
-                          Deckblatt, Angebot mit Vergleich zum bisherigen Versorger, Lastgang-Analyse bei RLM,
-                          Service- & Beratungsauftrag und nächste Schritte. Das PDF wird an diese Variante angehängt.
+                          Deckblatt, Angebot (wahlweise mit Vergleich zum bisherigen Versorger), Lastgang-Analyse bei RLM,
+                          Service- & Beratungsauftrag und nächste Schritte. Das PDF wird an diese Variante angehängt und gleich angezeigt.
+                          Zum Nachbearbeiten Preise ändern und neu erzeugen.
                         </p>
                       </div>
                     </div>
@@ -6037,9 +6203,29 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             <div className="rounded p-5"
                  style={{ background: a.einreichung ? "#FDF9EC" : C.card,
                           border: "1px solid " + (a.einreichung ? C.gold : C.strom) }}>
-              <div className="text-sm mb-3">Versorgerbestätigung ausstehend</div>
+              <div className="text-sm mb-3">
+                {a.status === "uebermittelt" ? "Auftrag vom Vertriebspartner: bereit zum Einreichen" : "An Versorger übermittelt, Bestätigung ausstehend"}
+              </div>
 
-              {a.annahme && (
+              {a.annahme && a.annahme.umfang && a.annahme.umfang !== "alle" && (
+                <p className="text-sm px-3 py-2 rounded mb-3" style={{ background: "#FDF6EE" }}>
+                  Der Kunde nimmt nur {a.annahme.umfang === "gas" ? "Erdgas" : "Strom"} an.
+                  {(a.lieferstellenNichtAngenommen || []).length > 0 && " Nicht angenommen: " +
+                    a.lieferstellenNichtAngenommen.map((l) => l.bezeichnung || (l.medium === "gas" ? "Erdgas" : "Strom")).join(", ") + "."}
+                </p>
+              )}
+              {a.annahme && a.annahme.unterlagen && (
+                <div className="space-y-2 mb-4">
+                  <DateiChip datei={a.annahme.unterlagen} label="Maklervollmacht und Angebot" />
+                  {(a.annahme.weitere || []).map((d, i) => <DateiChip key={i} datei={d} label="weiteres Dokument" />)}
+                  {a.annahme.abweichung && (
+                    <p className="text-sm p-3 rounded" style={{ background: "#FDF6EE" }}>
+                      Abweichungswunsch: {a.annahme.abweichung}
+                    </p>
+                  )}
+                </div>
+              )}
+              {a.annahme && !a.annahme.unterlagen && (
                 <div className="space-y-2 mb-4">
                   {a.annahme.angebotUnterschrieben
                     ? <DateiChip datei={a.annahme.angebotUnterschrieben} label="Angebot unterschrieben" />
@@ -6058,19 +6244,26 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                 </div>
               )}
 
-              <label className="flex items-center gap-3 text-sm mb-5">
-                <input type="checkbox" checked={a.status === "einreichung" || !!a.einreichung}
-                  onChange={(e) => onUpdate({
-                    ...a,
-                    einreichung: e.target.checked,
-                    status: e.target.checked ? "einreichung" : "uebermittelt",
-                    verlauf: [...a.verlauf, { d: heute(),
-                      t: e.target.checked ? "Beim Versorger eingereicht"
-                         : "Einreichung zurückgenommen", w: user.name }],
-                  })}
-                  style={{ accentColor: C.gold }} />
-                Beim Versorger eingereicht
-              </label>
+              {a.status === "uebermittelt" ? (
+                <div className="mb-5">
+                  <Btn icon={Send} onClick={() => onUpdate({ ...a, einreichung: true, status: "einreichung",
+                    verlauf: [...a.verlauf, { d: heute(), t: "Auftrag an den Versorger übermittelt", w: user.name }] })}>
+                    An Versorger übermittelt
+                  </Btn>
+                  <p className="text-xs mt-2" style={{ color: C.muted }}>
+                    Erst damit sieht der Vertriebspartner „An Versorger übermittelt“. Bis dahin steht der Auftrag bei ihm unter „Bereit zum Einreichen“.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3 mb-5 text-sm">
+                  <span className="flex items-center gap-2" style={{ color: C.gold }}><Check size={15} /> An Versorger übermittelt</span>
+                  <button className="text-xs underline" style={{ color: C.muted }}
+                    onClick={() => onUpdate({ ...a, einreichung: false, status: "uebermittelt",
+                      verlauf: [...a.verlauf, { d: heute(), t: "Übermittlung an den Versorger zurückgenommen", w: user.name }] })}>
+                    Zurücknehmen
+                  </button>
+                </div>
+              )}
 
               <div className="flex flex-wrap gap-2">
                 <Btn variante={vModus === "best" ? "ok" : "hell"} icon={Check} onClick={() => setVModus("best")}>
@@ -6327,31 +6520,35 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
               </p>
 
               <div className="space-y-4">
-                <Datei label="Maklervollmacht unterschrieben – erforderlich" datei={annahme.vollmacht}
-                  onSet={(f) => setAnnahme({ ...annahme, vollmacht: f })} hinweis="Datei auswählen" />
+                {(() => {
+                  /* Teilannahme nur, wenn das Angebot Strom und Erdgas umfasst */
+                  const v = annahme.variante || {};
+                  const beide = a.lieferstellen.some((l) => l.medium === "strom") && a.lieferstellen.some((l) => l.medium === "gas")
+                    && (!v.sparte || v.sparte === "beide");
+                  if (!beide) return null;
+                  return (
+                    <div className="p-4 rounded space-y-2" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                      <div className="text-sm mb-1">Was nimmt der Kunde an?</div>
+                      {[["alle", "Angebot wie kalkuliert (Strom und Erdgas)"], ["strom", "nur Strom"], ["gas", "nur Erdgas"]].map(([id, text]) => (
+                        <label key={id} className="flex items-center gap-3 text-sm">
+                          <input type="checkbox" checked={annahme.umfang === id} style={{ accentColor: C.ink }}
+                            onChange={() => setAnnahme({ ...annahme, umfang: id })} />
+                          {text}
+                        </label>
+                      ))}
+                      {annahme.umfang !== "alle" && (
+                        <p className="text-xs pt-1" style={{ color: C.muted }}>
+                          Weiter gerechnet wird nur mit den {annahme.umfang === "gas" ? "Erdgas" : "Strom"}-Lieferstellen,
+                          ihren Mengen und der Provision dafür. Die anderen Lieferstellen bleiben im Vorgang vermerkt.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
-                <div className="p-4 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
-                  <Datei label="Unterschriebenes Angebot" datei={annahme.angebotUnterschrieben}
-                    onSet={(f) => setAnnahme({ ...annahme, angebotUnterschrieben: f })}
-                    hinweis="Datei auswählen" />
-                  <div className="text-xs my-3" style={{ color: C.muted }}>oder</div>
-                  <label className="flex items-start gap-3 text-sm">
-                    <input type="checkbox" checked={annahme.kundeInformiert} className="mt-0.5"
-                      onChange={(e) => setAnnahme({ ...annahme, kundeInformiert: e.target.checked })}
-                      style={{ accentColor: C.ink }} />
-                    <span>
-                      Der Kunde ist über die notwendigen Schritte informiert und gibt sein
-                      Einverständnis für Bearbeitung und Abschluss
-                    </span>
-                  </label>
-                </div>
-
-                <label className="flex items-start gap-3 text-sm">
-                  <input type="checkbox" checked={annahme.wieBeschrieben} className="mt-0.5"
-                    onChange={(e) => setAnnahme({ ...annahme, wieBeschrieben: e.target.checked })}
-                    style={{ accentColor: C.ink }} />
-                  Der Kunde nimmt das kalkulierte Angebot wie beschrieben an
-                </label>
+                <Datei label="Maklervollmacht (Service- und Beratungsauftrag) und unterschriebenes Angebot – erforderlich"
+                  datei={annahme.unterlagen} onSet={(f) => setAnnahme({ ...annahme, unterlagen: f })}
+                  hinweis="Eine PDF mit beidem hochladen" />
 
                 <label className="block">
                   <span className="block text-xs mb-1" style={{ color: C.muted }}>Abweichungswünsche</span>
@@ -6400,18 +6597,60 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                 )}
 
                 <div className="pt-2">
-                  <Btn variante="ok" icon={Send} onClick={abschlussSenden}
-                    disabled={!annahme.vollmacht || (!annahme.angebotUnterschrieben && !annahme.kundeInformiert)}>
-                    Abschluss an das Kalkulationsteam senden
+                  <Btn variante="ok" icon={Send} onClick={abschlussSenden} disabled={!annahme.unterlagen}>
+                    Auftrag an das Kalkulationsteam senden
                   </Btn>
-                  {(!annahme.vollmacht || (!annahme.angebotUnterschrieben && !annahme.kundeInformiert)) && (
+                  {!annahme.unterlagen && (
                     <p className="text-xs mt-2" style={{ color: C.muted }}>
-                      Die unterschriebene Maklervollmacht ist Pflicht. Zusätzlich braucht es entweder das
-                      unterschriebene Angebot oder die Bestätigung, dass der Kunde einverstanden ist.
+                      Pflicht ist eine Datei mit der unterschriebenen Maklervollmacht (Service- und Beratungsauftrag)
+                      und dem unterschriebenen Angebot. Meist ist beides eine PDF.
                     </p>
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {istKalk && a.status === "angebot" && (
+            <div className="rounded p-4 flex items-start gap-3" style={{ background: "#F1F7F0", border: "1px solid " + C.ok }}>
+              <Check size={18} style={{ color: C.ok }} className="shrink-0 mt-0.5" />
+              <div className="text-sm">
+                Angebot an den Vertriebspartner gesendet{a.kalkulation && a.kalkulation.datum ? " am " + datum(a.kalkulation.datum) : ""}.
+                <span className="block text-xs mt-1" style={{ color: C.muted }}>
+                  {a.angebotVersendet ? "Der Vertriebspartner hat es am " + datum(a.angebotVersendet.datum) + " an den Kunden versendet."
+                    : "In der Übersicht steht der Vorgang jetzt unter „Angebote beim Vertriebspartner“."}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Neues Angebot: erst an den Kunden schicken, dann hier markieren */}
+          {istPartner && a.status === "angebot" && (
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + (a.angebotVersendet ? C.line : C.ok) }}>
+              {a.angebotVersendet ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm flex items-center gap-2" style={{ color: C.ok }}>
+                    <Check size={16} /> An den Kunden versendet am {datum(a.angebotVersendet.datum)}
+                  </span>
+                  <button className="text-xs underline" style={{ color: C.muted }}
+                    onClick={() => onUpdate({ ...a, angebotVersendet: null,
+                      verlauf: [...a.verlauf, { d: heute(), t: "Versand an den Kunden zurückgenommen", w: user.name }] })}>
+                    Zurücknehmen
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="text-sm mb-1">Neues Angebot von der Kalkulation</div>
+                  <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "60ch" }}>
+                    Prüfe das Angebot unten und schicke es dem Kunden. Danach hier markieren, dann kannst du
+                    die Annahme des Kunden erfassen.
+                  </p>
+                  <Btn icon={Send} onClick={() => onUpdate({ ...a, angebotVersendet: { datum: heute(), von: user.name },
+                    verlauf: [...a.verlauf, { d: heute(), t: "Angebot an den Kunden versendet", w: user.name }] })}>
+                    An Kunde versendet
+                  </Btn>
+                </>
+              )}
             </div>
           )}
 
@@ -6499,7 +6738,13 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                           <div className="mt-2"><DateiChip datei={v.individualangebot} label="Individualangebot" /></div>
                         )}
 
-                        {istPartner && ["angebot", "abgeschlossen"].includes(a.status) && !gewaehlt && (
+                        {istPartner && a.status === "angebot" && !a.angebotVersendet && !gewaehlt && (
+                          <p className="text-xs mt-4" style={{ color: C.muted }}>
+                            Die Annahme erfasst du, sobald das Angebot an den Kunden versendet ist.
+                          </p>
+                        )}
+                        {istPartner && ["angebot", "abgeschlossen"].includes(a.status) && !gewaehlt
+                          && (a.status !== "angebot" || a.angebotVersendet) && (
                           <div className="mt-4">
                             <Btn variante="ok" icon={Check} onClick={() => annehmen(v)}>
                               {varianten(a).length > 1 ? "Diese Variante annehmen" : "Angebot angenommen"}
@@ -6633,8 +6878,14 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           )}
 
           {/* Vertragsmanagement */}
-          {istVM && a.status === "abgeschlossen" && (
+          {(istVM || user.rolle === "Geschäftsführung") && a.status === "abgeschlossen" && !a.lieferbestaetigung && (
+            <Lieferbestaetigung a={a} user={user} onUpdate={onUpdate} />
+          )}
+          {istVM && a.status === "abgeschlossen" && a.lieferbestaetigung && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+              <p className="text-sm mb-4 flex items-center gap-2" style={{ color: C.ok }}>
+                <Check size={15} /> Lieferbestätigung erfasst am {datum(a.lieferbestaetigung.datum)} von {a.lieferbestaetigung.von}
+              </p>
               <Select label="Vertragsstatus" value={a.vertragsStatus || "Vertrag zu erstellen"}
                 onChange={(v) => onUpdate({ ...a, vertragsStatus: v })}
                 options={["Vertrag zu erstellen", "Vertrag versendet", "Vertrag unterschrieben",
@@ -6732,7 +6983,7 @@ function Liste({ anfragen, onOeffnen, leerText }) {
             {num(verbrauchGesamt(a))} kWh
           </div>
           <div className="w-40">
-            <StatusPunkt status={a.status} />
+            <StatusPunkt status={a.status} a={a} />
             {liegezeit(a) > 3 && !["abgeschlossen", "abgelehnt"].includes(a.status) && (
               <span className="block text-xs"
                     style={{ color: liegezeit(a) > 10 ? C.warn : C.muted }}>
@@ -6758,7 +7009,7 @@ function Provisionen({ anfragen, mitarbeiter, user, onOeffnen, onListe }) {
     if (vollsicht) return true;
     return anteilVon(a, user.id, mitarbeiter) > 0;
   });
-  const offen = rel.filter((a) => ["angebot", "uebermittelt", "bestaetigt"].includes(a.status));
+  const offen = rel.filter((a) => ["angebot", "uebermittelt", "einreichung", "bestaetigt"].includes(a.status));
   const fix = rel.filter((a) => a.status === "abgeschlossen");
 
   const eigen = (a) => anteilVon(a, user.id, mitarbeiter);
@@ -9770,7 +10021,7 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
       (AKQUISE_ART.find((x) => x.value === (a.akquiseArt || "eigen")) || {}).label || "",
       a.herkunft || "", a.herkunftDetail || "",
       a.kunde.strasse, a.kunde.plz, a.kunde.ort,
-      a.kunde.ansprechpartner, a.kunde.telefon, a.kunde.email, STATUS[a.status].label,
+      a.kunde.ansprechpartner, a.kunde.telefon, a.kunde.email, statusVon(a).label,
       a.partnerName, teile.join(" / "), a.team,
       v ? v.produkt : a.produkt, laufzeitVon(a),
       v && v.lieferbeginn ? datum(v.lieferbeginn) : "",
@@ -10565,7 +10816,7 @@ function Suche({ anfragen, leads, tickets, akquise, mitarbeiter, user, aufSprung
       const zaehler = a.lieferstellen.map((l) => l.zaehlernummer).join(" ");
       if (passt(a.kunde.firma, a.id, a.kunde.ansprechpartner, a.kunde.ort, a.kunde.branche, malo, zaehler))
         treffer.push({ art: "Vorgang", titel: a.kunde.firma,
-          unten: a.id + " · " + STATUS[a.status].label + " · " + a.partnerName,
+          unten: a.id + " · " + statusVon(a).label + " · " + a.partnerName,
           ziel: { ansicht: "alle", vorgang: a.id } });
     });
 
@@ -10793,7 +11044,7 @@ function Kundenpruefung({ anfragen, leads, mitarbeiter, user }) {
             <div className="text-sm mb-2">Davon betreust du selbst:</div>
             {ergebnis.eigene.map((a) => (
               <div key={a.id} className="text-sm py-1">
-                {a.kunde.firma} · {a.id} · {STATUS[a.status].label}
+                {a.kunde.firma} · {a.id} · {statusVon(a).label}
               </div>
             ))}
           </div>
@@ -13857,8 +14108,8 @@ function Kalkulationen({ anfragen, onOeffnen, user }) {
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <span className="text-sm">{a.kunde.firma || a.id}</span>
                     <span className="text-xs px-2 py-0.5 rounded"
-                      style={{ color: (STATUS[a.status] || {}).color, border: "1px solid " + C.line }}>
-                      {(STATUS[a.status] || {}).label}
+                      style={{ color: (statusVon(a) || {}).color, border: "1px solid " + C.line }}>
+                      {(statusVon(a) || {}).label}
                     </span>
                   </div>
                   <div className="text-xs mt-1" style={{ color: C.muted }}>
@@ -13961,6 +14212,7 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
     kacheln = [
       { k: "Neue Anfragen", v: neu.length, farbe: C.strom, klick: liste("Neue Anfragen", neu) },
       { k: "Beim Versorger angefragt", v: angefragt.length, farbe: C.gas, klick: liste("Beim Versorger angefragt", angefragt) },
+      { k: "Angebote beim Vertriebspartner", v: st("angebot").length, farbe: C.ok, klick: liste("Angebote beim Vertriebspartner", st("angebot")) },
       { k: "Neue Aufträge einreichen", v: auftraege.length, farbe: C.warn, klick: ansicht("auftraege") },
       { k: "Bestätigung vom Versorger offen", v: eingereicht.length, farbe: C.gas, klick: ansicht("versorger") },
       { k: "Unterlagen beim Vertrieb angefordert", v: klaer.length, klick: liste("Unterlagen angefordert", klaer) },
@@ -13973,7 +14225,7 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
         {reihe.length === 0 ? <Leer text="Nichts offen. Alle Anfragen sind bearbeitet." /> :
           reihe.slice(0, 12).map((a, i) => (
             <Reihe key={a.id} i={i} links={a.kunde.firma}
-              unten={STATUS[a.status].label + " · " + a.partnerName + " · " + a.id}
+              unten={statusVon(a).label + " · " + a.partnerName + " · " + a.id}
               rechts={seit(a.angelegt)} klick={() => onOeffnen(a.id)} />
           ))}
       </Karte>
@@ -13990,7 +14242,9 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
       return rest != null && rest >= 0 && rest <= VERLAENGERUNG_VORLAUF[1];
     });
     const stornos = offeneProbleme.filter((p) => p.art === "Storno");
+    const neueLb = vertraege.filter((a) => !a.lieferbestaetigung);
     kacheln = [
+      { k: "Neue Lieferbestätigungen", v: neueLb.length, farbe: C.gold, klick: liste("Neue Lieferbestätigungen", neueLb) },
       { k: "Neu: Vertrag zu erstellen", v: je("Vertrag zu erstellen").length, farbe: C.warn,
         klick: liste("Vertrag zu erstellen", je("Vertrag zu erstellen")) },
       { k: "Vertrag versendet", v: je("Vertrag versendet").length, farbe: C.gas,
@@ -14474,7 +14728,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
                 </div>
                 {langlieger.map((a, i) => (
                   <Reihe key={a.id} i={i + 1} links={a.kunde.firma}
-                    unten={a.id + " · " + STATUS[a.status].label + " · " + a.partnerName}
+                    unten={a.id + " · " + statusVon(a).label + " · " + a.partnerName}
                     rechts={num(liegezeit(a)) + " Tage"} klick={() => onOeffnen(a.id)} />
                 ))}
               </>
@@ -14488,7 +14742,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
           {wartend.length === 0 && <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>Nichts offen.</div>}
           {wartend.map((a, i) => (
             <Reihe key={a.id} i={i} links={a.kunde.firma}
-              unten={a.id + " · " + a.partnerName + " · " + STATUS[a.status].label}
+              unten={a.id + " · " + a.partnerName + " · " + statusVon(a).label}
               rechts={"seit " + datum(a.angelegt)} klick={() => onOeffnen(a.id)} />
           ))}
         </Karte>
@@ -14512,7 +14766,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
           )}
           {meineOffen.map((a, i) => (
             <Reihe key={a.id} i={i} links={a.kunde.firma}
-              unten={a.id + " · " + STATUS[a.status].label}
+              unten={a.id + " · " + statusVon(a).label}
               rechts={a.status === "angebot" ? eur(anteilVon(a, user.id, mitarbeiter)) : ""}
               klick={() => onOeffnen(a.id)} />
           ))}
@@ -14602,6 +14856,20 @@ function PortalApp() {
   const [geladen, setGeladen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [pwDialog, setPwDialog] = useState(false);
+  const [pdfAnsicht, setPdfAnsicht] = useState(null);
+  /* PDF-Betrachter mit eigenem Eintrag im Verlauf: Zurück schließt ihn */
+  PDF_ZEIGEN = (d) => {
+    setPdfAnsicht(d);
+    try {
+      const st = window.history.state || {};
+      window.history.pushState({ ...st, egc: true, pdf: true, n: (st.n || 0) + 1 }, "",
+        window.location.hash.replace(/\/pdf$/, "") + "/pdf");
+    } catch (e) { /* ohne Verlauf trotzdem anzeigen */ }
+  };
+  const pdfSchliessen = () => {
+    if (window.history.state && window.history.state.pdf) window.history.back(); else setPdfAnsicht(null);
+  };
+  const verlaufUeberspringen = React.useRef(false);
 
   const user = mitarbeiter.find((u) => u.id === userId) || null;
 
@@ -14784,9 +15052,15 @@ function PortalApp() {
     setSitzung("keine");
   };
 
-  const speichern = (a) =>
+  const speichern = (a) => {
+    /* Vorgang aus der Vertriebssicht: echten Status zurückholen, nie die Anzeige speichern */
+    if (a && a._echterStatus !== undefined) {
+      const { _echterStatus, ...rest } = a;
+      a = { ...rest, status: rest.status === "einreichung" ? _echterStatus : rest.status };
+    }
     setAnfragen((prev) => (prev.some((x) => x.id === a.id)
       ? prev.map((x) => (x.id === a.id ? a : x)) : [a, ...prev]));
+  };
 
   const einreichen = (a) => {
     speichern({
@@ -15008,7 +15282,10 @@ function PortalApp() {
     setMenu(false);
   };
 
-  const meine = user ? anfragen.filter((a) => istBeteiligt(a, user.id)) : [];
+  SICHT_ROLLE = user ? user.rolle : null;
+  /* Anzeige: der Vertrieb sieht bestätigte Aufträge erst nach der Lieferbestätigung als bestätigt */
+  const anfragenSicht = user && VERTRIEB_SICHT_ROLLEN.includes(user.rolle) ? anfragen.map(vertriebsSicht) : anfragen;
+  const meine = user ? anfragenSicht.filter((a) => istBeteiligt(a, user.id)) : [];
   const rolle = user ? user.rolle : "Vertriebspartner";
 
   /* Jede Rolle sieht nur, was sie für ihre Arbeit braucht.
@@ -15192,26 +15469,89 @@ function PortalApp() {
     return [...teile, ...(rest.length ? [["Weiteres", rest]] : [])].filter(([, p]) => p.length);
   })();
 
+  /* Ansichten, die über Kacheln erreichbar sind und deshalb nicht im Menü stehen */
+  const WEITERE_ANSICHTEN = ["neu", "eingang", "auftraege", "versorger", "kalkulationen"];
   useEffect(() => {
     setOffen(null); setEntwurf(null);
     if (!userId) return;
     const m = mitarbeiter.find((x) => x.id === userId);
-    setAnsicht(m && ["registriert", "abgelehnt", "pruefung"].includes(m.status) ? "meine-daten" : NAV[0].id);
+    const gesperrtM = m && ["registriert", "abgelehnt", "pruefung"].includes(m.status);
+    /* Adresse wie #/alle/A-2026-1042: dieselbe Ansicht nach Neuladen wieder öffnen */
+    const treffer = window.location.hash.match(/^#\/([a-z-]+)(?:\/([^/]+))?/);
+    const h1 = treffer && treffer[1], h2 = treffer && treffer[2] && decodeURIComponent(treffer[2]);
+    const erlaubt = h1 && (NAV.some((n) => n.id === h1) || WEITERE_ANSICHTEN.includes(h1));
+    const start = gesperrtM ? "meine-daten" : erlaubt ? h1 : NAV[0].id;
+    const vorgang = !gesperrtM && erlaubt && h2 && !["liste", "pdf"].includes(h2) && h1 !== "neu" ? h2 : null;
+    setAnsicht(start);
+    if (vorgang) setOffen(vorgang);
+    /* Schutzeintrag davor: Zurück auf der ersten Seite verlässt das Portal nicht */
+    try {
+      const ziel = "#/" + start + (vorgang ? "/" + encodeURIComponent(vorgang) : "");
+      window.history.replaceState({ egc: true, schutz: true, n: 0 }, "", ziel);
+      window.history.pushState({ egc: true, ansicht: start, offen: vorgang, n: 1 }, "", ziel);
+      verlaufUeberspringen.current = true;
+    } catch (e) { /* ohne Verlauf weiter */ }
   }, [userId]);
 
-  const aktuell = anfragen.find((a) => a.id === offen);
+  /* Jede Ansicht bekommt eine eigene Adresse, damit Zurück im Browser eine Ansicht zurückspringt */
+  useEffect(() => {
+    if (!user) return;
+    if (verlaufUeberspringen.current) { verlaufUeberspringen.current = false; return; }
+    const ziel = "#/" + (entwurf ? "neu" + (entwurf.id ? "/" + encodeURIComponent(entwurf.id) : "") : ansicht
+      + (offen ? "/" + encodeURIComponent(offen) : listenAnsicht ? "/liste" : ""));
+    if (window.location.hash === ziel) return;
+    try {
+      const n = ((window.history.state && window.history.state.n) || 0) + 1;
+      window.history.pushState({ egc: true, ansicht, offen: offen || null, liste: !!listenAnsicht, entwurf: !!entwurf, n }, "", ziel);
+    } catch (e) { /* egal */ }
+  }, [ansicht, offen, !!listenAnsicht, entwurf ? (entwurf.id || "neu") : null, user && user.id]);
+
+  useEffect(() => {
+    const zurueck = (e) => {
+      const st = e.state || {};
+      setPwDialog(false); setMenu(false);
+      if (!st.pdf) setPdfAnsicht(null);
+      if (st.pdf) return;
+      if (!st.egc || st.schutz) {
+        /* ganz am Anfang: auf der Startansicht bleiben statt das Portal zu verlassen */
+        const start = NAV[0] ? NAV[0].id : "dashboard";
+        try { window.history.pushState({ egc: true, ansicht: start, offen: null, n: 1 }, "", "#/" + start); } catch (x) { /* egal */ }
+        verlaufUeberspringen.current = true;
+        setListenAnsicht(null); setEntwurf(null); setOffen(null); setAnsicht(start);
+        return;
+      }
+      verlaufUeberspringen.current = true;
+      if (!st.liste) setListenAnsicht(null);
+      if (!st.entwurf) setEntwurf(null);
+      setOffen(st.offen || null);
+      if (st.ansicht) setAnsicht(st.ansicht);
+    };
+    window.addEventListener("popstate", zurueck);
+    return () => window.removeEventListener("popstate", zurueck);
+  });
+
+  /* Zurück-Knopf im Portal: wie Zurück im Browser */
+  const zurueckGehen = () => {
+    const st = window.history.state;
+    if (st && st.egc && !st.schutz && (st.n || 0) > 1) { window.history.back(); return; }
+    setListenAnsicht(null); setEntwurf(null); setOffen(null); setAnsicht(NAV[0] ? NAV[0].id : "dashboard");
+  };
+  const zeigeZurueck = !!(offen || listenAnsicht || entwurf || (NAV[0] && ansicht !== NAV[0].id));
+
+  const aktuell = anfragenSicht.find((a) => a.id === offen);
 
   const TABS = [
     { id: "offen", label: "Offene Anfragen", f: (a) => ["entwurf", "eingereicht", "ruecksprache", "angefragt"].includes(a.status) },
-    { id: "angebote", label: "Angebote", f: (a) => a.status === "angebot" },
+    { id: "angebote", label: "Neue Angebote", f: (a) => a.status === "angebot" && !a.angebotVersendet },
+    { id: "kunde", label: "Beim Kunden", f: (a) => a.status === "angebot" && !!a.angebotVersendet },
     { id: "klaer", label: "Klärfälle", f: (a) => a.status === "klaerfall" },
-    { id: "uebermittelt", label: "Beim Versorger", f: (a) => ["uebermittelt", "einreichung"].includes(a.status) },
-    { id: "bestaetigt", label: "Bestätigt, Provision offen", f: (a) => a.status === "bestaetigt" },
-    { id: "fix", label: "Abgeschlossene Kunden", f: (a) => a.status === "abgeschlossen" },
+    { id: "bereit", label: "Bereit zum Einreichen", f: (a) => a.status === "uebermittelt" },
+    { id: "uebermittelt", label: "An Versorger übermittelt", f: (a) => ["einreichung", "bestaetigt"].includes(a.status) },
+    { id: "fix", label: "Vom Versorger bestätigt", f: (a) => a.status === "abgeschlossen" },
   ];
 
   const sichtbar =
-    rolle === "Teamleiter" && user ? anfragen.filter((a) => a.team === user.team) : anfragen;
+    rolle === "Teamleiter" && user ? anfragenSicht.filter((a) => a.team === user.team) : anfragenSicht;
 
   /* Registrierung über den Einladungslink */
   if (registriert)
@@ -15256,8 +15596,8 @@ function PortalApp() {
   } else if (aktuell) {
     inhalt = (
       <Detail a={aktuell} user={user} mitarbeiter={mitarbeiter} versorger={versorger} tippgeber={tippgeber}
-        alleAnfragen={anfragen}
-        onZurueck={() => setOffen(null)} onUpdate={(a) => speichern(a)}
+        alleAnfragen={anfragenSicht}
+        onZurueck={zurueckGehen} onUpdate={(a) => speichern(a)}
         onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }}
         onVerlaengern={verlaengern} onNotieren={notieren} />
     );
@@ -15265,9 +15605,6 @@ function PortalApp() {
     inhalt = (
       <div>
         <div className="flex items-center gap-3 mb-5">
-          <button onClick={() => setListenAnsicht(null)} style={{ color: C.muted }}>
-            <ArrowLeft size={18} />
-          </button>
           <h2 className="text-lg">{listenAnsicht.titel}</h2>
         </div>
         <Liste anfragen={listenAnsicht.liste} leerText="Keine Vorgänge in dieser Auswahl."
@@ -15276,7 +15613,7 @@ function PortalApp() {
     );
   } else if (ansicht === "neu" || entwurf) {
     inhalt = (
-      <Assistent user={user} mitarbeiter={mitarbeiter} alleAnfragen={anfragen}
+      <Assistent user={user} mitarbeiter={mitarbeiter} alleAnfragen={anfragenSicht}
         tippgeber={tippgeber} entwurf={entwurf}
         onSpeichern={(a) => { speichern(a); setEntwurf(null); setAnsicht("anfragen"); setTab("offen"); }}
         onSenden={einreichen}
@@ -15305,15 +15642,16 @@ function PortalApp() {
         <Liste
           anfragen={meine.filter(t.f)}
           leerText={
-            tab === "uebermittelt" ? "Hier stehen Aufträge, die beim Versorger eingereicht sind."
-            : tab === "bestaetigt" ? "Bestätigte Aufträge, bei denen noch die Provision aussteht."
+            tab === "uebermittelt" ? "Hier stehen Aufträge, die die Kalkulation an den Versorger übermittelt hat."
+            : tab === "bereit" ? "Aufträge, die du an die Kalkulation gesendet hast. Sie reicht sie beim Versorger ein."
+            : tab === "kunde" ? "Angebote, die du an den Kunden versendet hast."
             : tab === "klaer" ? "Keine offenen Klärfälle. Gut so."
             : tab === "angebote" ? "Sobald die Kalkulation ein Angebot zurückschickt, erscheint es hier."
-            : tab === "fix" ? "Noch keine abgeschlossenen Kunden."
+            : tab === "fix" ? "Noch keine vom Versorger bestätigten Kunden."
             : "Noch keine Anfragen. Leg mit „Neue Anfrage“ los."
           }
           onOeffnen={(id) => {
-            const a = anfragen.find((x) => x.id === id);
+            const a = anfragenSicht.find((x) => x.id === id);
             if (a.status === "entwurf") setEntwurf(a);
             else setOffen(id);
           }}
@@ -15322,18 +15660,28 @@ function PortalApp() {
     );
   } else if (ansicht === "eingang") {
     inhalt = (
-      <Liste anfragen={anfragen.filter((a) => ["eingereicht", "angefragt"].includes(a.status))}
+      <Liste anfragen={anfragenSicht.filter((a) => ["eingereicht", "angefragt"].includes(a.status))}
         leerText="Keine neuen Anfragen im Eingang." onOeffnen={setOffen} />
     );
   } else if (ansicht === "versorger") {
     inhalt = (
-      <Liste anfragen={anfragen.filter((a) => ["uebermittelt", "einreichung"].includes(a.status))}
+      <Liste anfragen={anfragenSicht.filter((a) => ["uebermittelt", "einreichung"].includes(a.status))}
         leerText="Keine Aufträge in der Versorgerbestätigung." onOeffnen={setOffen} />
     );
   } else if (ansicht === "vertraege") {
     inhalt = (
-      <Liste anfragen={anfragen.filter((a) => a.status === "abgeschlossen")}
-        leerText="Noch keine Verträge zu bearbeiten." onOeffnen={setOffen} />
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-sm mb-2">Neue Lieferbestätigungen</h3>
+          <Liste anfragen={anfragenSicht.filter((a) => a.status === "abgeschlossen" && !a.lieferbestaetigung)}
+            leerText="Keine neuen Lieferbestätigungen." onOeffnen={setOffen} />
+        </div>
+        <div>
+          <h3 className="text-sm mb-2">Verträge</h3>
+          <Liste anfragen={anfragenSicht.filter((a) => a.status === "abgeschlossen" && a.lieferbestaetigung)}
+            leerText="Noch keine Verträge zu bearbeiten." onOeffnen={setOffen} />
+        </div>
+      </div>
     );
   } else if (ansicht === "provisionen") {
     inhalt = <Provisionen anfragen={sichtbar} mitarbeiter={mitarbeiter} user={user}
@@ -15341,7 +15689,7 @@ function PortalApp() {
                onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />;
   } else if (ansicht === "dashboard") {
     inhalt = (
-      <Dashboard anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
+      <Dashboard anfragen={anfragenSicht} mitarbeiter={mitarbeiter} user={user}
         termine={termine} leads={leads} setMitarbeiter={setMitarbeiter}
         aufgaben={aufgaben} setAufgaben={setAufgaben} bonusziele={bonusziele}
         probleme={probleme} smartmeter={smartmeter}
@@ -15350,11 +15698,11 @@ function PortalApp() {
     );
   } else if (ansicht === "ruecksprachen") {
     inhalt = (
-      <Liste anfragen={anfragen.filter((a) => a.status === "ruecksprache")}
+      <Liste anfragen={anfragenSicht.filter((a) => a.status === "ruecksprache")}
         leerText="Keine offenen Rücksprachen." onOeffnen={setOffen} />
     );
   } else if (ansicht === "kunden") {
-    inhalt = <Kunden anfragen={anfragen} leads={leads} mitarbeiter={mitarbeiter} user={user}
+    inhalt = <Kunden anfragen={anfragenSicht} leads={leads} mitarbeiter={mitarbeiter} user={user}
                onOeffnen={setOffen} onLead={() => setAnsicht("leads")} />;
   } else if (ansicht === "leads") {
     inhalt = (
@@ -15363,21 +15711,21 @@ function PortalApp() {
         onGelesen={(id) => setLeads(leads.map((l) => (l.id === id ? { ...l, gelesen: true } : l)))} />
     );
   } else if (ansicht === "kalkulationen") {
-    inhalt = <Kalkulationen anfragen={anfragen} onOeffnen={setOffen} user={user} />;
+    inhalt = <Kalkulationen anfragen={anfragenSicht} onOeffnen={setOffen} user={user} />;
   } else if (ansicht === "auftraege") {
     inhalt = (
-      <Liste anfragen={anfragen.filter((a) => a.status === "uebermittelt")}
+      <Liste anfragen={anfragenSicht.filter((a) => a.status === "uebermittelt")}
         leerText="Keine neuen Aufträge." onOeffnen={setOffen} />
     );
   } else if (ansicht === "probleme") {
-    inhalt = <Problemfaelle probleme={probleme} setProbleme={setProbleme} anfragen={anfragen}
+    inhalt = <Problemfaelle probleme={probleme} setProbleme={setProbleme} anfragen={anfragenSicht}
                mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "stornos") {
-    inhalt = <Problemfaelle probleme={probleme} setProbleme={setProbleme} anfragen={anfragen}
+    inhalt = <Problemfaelle probleme={probleme} setProbleme={setProbleme} anfragen={anfragenSicht}
                mitarbeiter={mitarbeiter} user={user} nurStorno />;
   } else if (ansicht === "ziele") {
     inhalt = <Ziele mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter}
-               anfragen={anfragen} user={user}
+               anfragen={anfragenSicht} user={user}
                bonusziele={bonusziele} setBonusziele={setBonusziele} />;
   } else if (ansicht === "akquise") {
     inhalt = (
@@ -15414,28 +15762,28 @@ function PortalApp() {
   } else if (ansicht === "kalender") {
     inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} />;
   } else if (ansicht === "branchen") {
-    inhalt = <Branchen anfragen={anfragen}
+    inhalt = <Branchen anfragen={anfragenSicht}
                onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />;
   } else if (ansicht === "ausstehend") {
-    inhalt = <ProvisionAusstehend anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
+    inhalt = <ProvisionAusstehend anfragen={anfragenSicht} mitarbeiter={mitarbeiter} user={user}
                onOeffnen={(id) => setOffen(id)} />;
   } else if (ansicht === "tippgeber") {
     inhalt = <Tippgeber tippgeber={tippgeber} setTippgeber={setTippgeber}
-               anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} />;
+               anfragen={anfragenSicht} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "pruefung") {
-    inhalt = <Kundenpruefung anfragen={anfragen} leads={leads} mitarbeiter={mitarbeiter} user={user} />;
+    inhalt = <Kundenpruefung anfragen={anfragenSicht} leads={leads} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "aufgaben") {
     inhalt = <Aufgaben aufgaben={aufgaben} setAufgaben={setAufgaben} user={user}
                mitarbeiter={mitarbeiter} onOeffnen={(id) => setOffen(id)} />;
   } else if (ansicht === "pipeline") {
-    inhalt = <Pipeline anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
+    inhalt = <Pipeline anfragen={anfragenSicht} mitarbeiter={mitarbeiter} user={user}
                onOeffnen={(id) => setOffen(id)}
                onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />;
   } else if (ansicht === "protokoll") {
     inhalt = <Protokoll protokoll={protokoll} mitarbeiter={mitarbeiter} />;
   } else if (ansicht === "export") {
     inhalt = (
-      <Datenexport anfragen={anfragen} mitarbeiter={mitarbeiter} leads={leads} ablage={ablage}
+      <Datenexport anfragen={anfragenSicht} mitarbeiter={mitarbeiter} leads={leads} ablage={ablage}
         versorger={versorger} tickets={tickets} smartmeter={smartmeter} user={user}
         kundenImport={kundenImport}
         alleSetzen={(d) => {
@@ -15452,9 +15800,9 @@ function PortalApp() {
     inhalt = <Tickets tickets={tickets} setTickets={setTickets} user={user} mitarbeiter={mitarbeiter} />;
   } else if (ansicht === "smartmeter") {
     inhalt = <Smartmeter vorgaenge={smartmeter} setVorgaenge={setSmartmeter}
-               anfragen={anfragen} mitarbeiter={mitarbeiter} user={user} />;
+               anfragen={anfragenSicht} mitarbeiter={mitarbeiter} user={user} />;
   } else if (ansicht === "abrechnung") {
-    inhalt = <Abrechnung anfragen={anfragen} mitarbeiter={mitarbeiter} user={user}
+    inhalt = <Abrechnung anfragen={anfragenSicht} mitarbeiter={mitarbeiter} user={user}
                setAnfragen={setAnfragen} notieren={notieren} onOeffnen={(id) => setOffen(id)} />;
   } else if (ansicht === "versorgerliste") {
     inhalt = <Versorgerliste versorger={versorger} setVersorger={setVersorger} user={user}
@@ -15474,7 +15822,7 @@ function PortalApp() {
     inhalt = <Portalsteuerung mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} user={user} notieren={notieren} />;
   } else if (ansicht === "vertraege-gf") {
     inhalt = <Vertraege tippgeber={tippgeber} setTippgeber={setTippgeber} mitarbeiter={mitarbeiter}
-               setMitarbeiter={setMitarbeiter} anfragen={anfragen} user={user} notieren={notieren}
+               setMitarbeiter={setMitarbeiter} anfragen={anfragenSicht} user={user} notieren={notieren}
                firmendaten={firmendaten} setFirmendaten={setFirmendaten} />;
   } else if (ansicht === "struktur") {
     inhalt = <Strukturanfragen anfragen={strukturanfragen} setAnfragen={setStrukturanfragen} user={user} />;
@@ -15532,7 +15880,7 @@ function PortalApp() {
             </button>
           </div>
 
-          <Suche anfragen={anfragen} leads={leads} tickets={tickets} akquise={akquise}
+          <Suche anfragen={anfragenSicht} leads={leads} tickets={tickets} akquise={akquise}
             mitarbeiter={mitarbeiter} user={user}
             aufSprung={(ziel) => {
               setListenAnsicht(null);
@@ -15610,6 +15958,14 @@ function PortalApp() {
       {/* Inhalt */}
       <main className="flex-1 px-4 sm:px-8 py-5 lg:py-6 max-w-6xl w-full">
         {pwDialog && <PasswortDialog onSchliessen={() => setPwDialog(false)} />}
+        {pdfAnsicht && <PdfBetrachter datei={pdfAnsicht} onSchliessen={pdfSchliessen} />}
+        {zeigeZurueck && !gesperrt && (
+          <button onClick={zurueckGehen}
+            className="inline-flex items-center gap-1.5 text-sm mb-4 px-3 py-1.5 rounded"
+            style={{ border: "1px solid " + C.line, background: C.card, color: C.text }}>
+            <ArrowLeft size={16} /> Zurück
+          </button>
+        )}
         {meldung && (
           <div className="flex items-start gap-2 p-3 mb-4 rounded text-sm"
                style={{ background: "#FCF3F0", border: "1px solid " + C.warn, color: C.warn }}>

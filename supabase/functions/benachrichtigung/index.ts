@@ -97,11 +97,12 @@ Deno.serve(async (req) => {
         text: [`Für <strong>${kunde}</strong> braucht die Kalkulation noch Angaben, bevor sie weiterrechnen kann.`,
                ...(a.fehlendText ? [`Hinweis der Kalkulation: <em>${esc(a.fehlendText)}</em>`] : []),
                "Bitte ergänze die Unterlagen am Vorgang im Vertriebsportal."] });
-    if (e.art === "bestaetigt" && partner.length)
-      mails.push({ an: partner.map((m) => m.daten.email), betreff: "Abschluss bestätigt: " + (a.kunde?.firma || id),
+    /* Der Vertrieb erfährt die Bestätigung erst mit der Lieferbestätigung des Vertragsmanagements */
+    if (e.art === "lieferbestaetigt" && partner.length)
+      mails.push({ an: partner.map((m) => m.daten.email), betreff: "Vom Versorger bestätigt: " + (a.kunde?.firma || id),
         titel: "Glückwunsch zum Abschluss",
-        text: [`Der Versorger hat den Vertrag für <strong>${kunde}</strong> bestätigt.`,
-               "Die Provision ist damit vorgemerkt. Sobald sie fällig ist, wird sie ausgezahlt."] });
+        text: [`Der Versorger hat die Belieferung für <strong>${kunde}</strong> bestätigt.`,
+               "Deine Provision siehst du jetzt unter „Meine Provisionen“ im Vertriebsportal."] });
     if (e.art === "test" && e.schluessel) {
       const empf = person(e.schluessel);
       if (aktivMitMail(empf))
