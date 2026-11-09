@@ -7441,14 +7441,20 @@ function DateiBild({ datei, hoehe = 80 }) {
 }
 
 function Unterschrift({ onChange, label = "Unterschrift" }) {
+  /* Am iPhone zuverlässig: echte Touch-Ereignisse mit passive:false (verhindert das Scrollen der Seite),
+     dazu Maus für den Rechner. Zeigerereignisse brach Safari ab, sobald es ein Scrollen vermutete. */
   const ref = React.useRef(null);
   const zieht = React.useRef(false);
+  const gemalt = React.useRef(false);
+  const meldung = React.useRef(onChange);
+  meldung.current = onChange;
   const [leer, setLeer] = useState(true);
 
   const vorbereiten = () => {
     const c = ref.current;
     if (!c) return;
     const r = c.getBoundingClientRect();
+    if (!r.width) return;
     const f = window.devicePixelRatio || 1;
     c.width = Math.round(r.width * f);
     c.height = Math.round(r.height * f);
@@ -7458,52 +7464,76 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
     g.fillRect(0, 0, r.width, r.height);
     g.lineWidth = 2.2; g.lineCap = "round"; g.lineJoin = "round"; g.strokeStyle = "#0A1626";
   };
-  useEffect(() => { vorbereiten(); }, []);
 
-  const punkt = (e) => {
-    const r = ref.current.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
-  };
-  const runter = (e) => {
-    e.preventDefault();
-    ref.current.setPointerCapture && ref.current.setPointerCapture(e.pointerId);
-    zieht.current = true;
-    const g = ref.current.getContext("2d");
-    const [x, y] = punkt(e);
-    g.beginPath(); g.moveTo(x, y); g.lineTo(x + 0.1, y + 0.1); g.stroke();
-  };
-  const ziehen = (e) => {
-    if (!zieht.current) return;
-    e.preventDefault();
-    const g = ref.current.getContext("2d");
-    const [x, y] = punkt(e);
-    g.lineTo(x, y); g.stroke();
-  };
-  const hoch = () => {
-    if (!zieht.current) return;
-    zieht.current = false;
-    setLeer(false);
-    /* in festes Format übertragen und als JPEG ablegen */
-    const aus = document.createElement("canvas");
-    aus.width = UNTERSCHRIFT_B; aus.height = UNTERSCHRIFT_H;
-    const g = aus.getContext("2d");
-    g.fillStyle = "#fff"; g.fillRect(0, 0, UNTERSCHRIFT_B, UNTERSCHRIFT_H);
-    g.drawImage(ref.current, 0, 0, UNTERSCHRIFT_B, UNTERSCHRIFT_H);
-    const url = aus.toDataURL("image/jpeg", 0.85);
-    onChange({ name: "unterschrift.jpg", typ: "image/jpeg", groesse: Math.round(url.length * 0.75),
-               breite: UNTERSCHRIFT_B, hoehe: UNTERSCHRIFT_H, url });
-  };
-  const loeschen = () => { vorbereiten(); setLeer(true); onChange(null); };
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    vorbereiten();
+    const pos = (x, y) => { const r = c.getBoundingClientRect(); return [x - r.left, y - r.top]; };
+    const start = (x, y) => {
+      /* Feld war beim Laden noch unsichtbar oder hat die Größe geändert: jetzt einrichten */
+      const f = window.devicePixelRatio || 1;
+      if (!gemalt.current && Math.round(c.getBoundingClientRect().width * f) !== c.width) vorbereiten();
+      zieht.current = true;
+      const g = c.getContext("2d");
+      const [px, py] = pos(x, y);
+      g.beginPath(); g.moveTo(px, py); g.lineTo(px + 0.1, py + 0.1); g.stroke();
+    };
+    const weiter = (x, y) => {
+      if (!zieht.current) return;
+      const g = c.getContext("2d");
+      const [px, py] = pos(x, y);
+      g.lineTo(px, py); g.stroke();
+      gemalt.current = true;
+    };
+    const ende = () => {
+      if (!zieht.current) return;
+      zieht.current = false;
+      gemalt.current = true;
+      setLeer(false);
+      /* in festes Format übertragen und als JPEG ablegen */
+      const aus = document.createElement("canvas");
+      aus.width = UNTERSCHRIFT_B; aus.height = UNTERSCHRIFT_H;
+      const g = aus.getContext("2d");
+      g.fillStyle = "#fff"; g.fillRect(0, 0, UNTERSCHRIFT_B, UNTERSCHRIFT_H);
+      /* seitenrichtig einpassen, damit die Unterschrift bei schmalem Feld nicht verzerrt */
+      const m = Math.min(UNTERSCHRIFT_B / c.width, UNTERSCHRIFT_H / c.height);
+      const dw = c.width * m, dh = c.height * m;
+      g.drawImage(c, (UNTERSCHRIFT_B - dw) / 2, (UNTERSCHRIFT_H - dh) / 2, dw, dh);
+      const url = aus.toDataURL("image/jpeg", 0.85);
+      if (meldung.current) meldung.current({ name: "unterschrift.jpg", typ: "image/jpeg", groesse: Math.round(url.length * 0.75),
+        breite: UNTERSCHRIFT_B, hoehe: UNTERSCHRIFT_H, url });
+    };
+    const tStart = (e) => { e.preventDefault(); const t = e.touches[0]; if (t) start(t.clientX, t.clientY); };
+    const tWeiter = (e) => { e.preventDefault(); const t = e.touches[0]; if (t) weiter(t.clientX, t.clientY); };
+    const tEnde = (e) => { e.preventDefault(); ende(); };
+    const mStart = (e) => { if (e.button !== 0) return; e.preventDefault(); start(e.clientX, e.clientY); };
+    const mWeiter = (e) => weiter(e.clientX, e.clientY);
+    const mEnde = () => ende();
+    c.addEventListener("touchstart", tStart, { passive: false });
+    c.addEventListener("touchmove", tWeiter, { passive: false });
+    c.addEventListener("touchend", tEnde, { passive: false });
+    c.addEventListener("touchcancel", tEnde, { passive: false });
+    c.addEventListener("mousedown", mStart);
+    window.addEventListener("mousemove", mWeiter);
+    window.addEventListener("mouseup", mEnde);
+    return () => {
+      c.removeEventListener("touchstart", tStart); c.removeEventListener("touchmove", tWeiter);
+      c.removeEventListener("touchend", tEnde); c.removeEventListener("touchcancel", tEnde);
+      c.removeEventListener("mousedown", mStart);
+      window.removeEventListener("mousemove", mWeiter); window.removeEventListener("mouseup", mEnde);
+    };
+  }, []);
+
+  const loeschen = () => { gemalt.current = false; vorbereiten(); setLeer(true); onChange(null); };
 
   return (
     <div>
       <span className="block text-xs mb-1" style={{ color: C.muted }}>{label}</span>
       <canvas ref={ref}
-        onPointerDown={runter} onPointerMove={ziehen} onPointerUp={hoch} onPointerLeave={hoch}
-        onPointerCancel={hoch}
         className="w-full rounded"
-        style={{ aspectRatio: "3 / 1", maxWidth: 480, display: "block", touchAction: "none",
-                 background: "#fff", border: "1px solid " + C.line }} />
+        style={{ height: 130, maxWidth: 480, display: "block", touchAction: "none", WebkitUserSelect: "none",
+                 userSelect: "none", WebkitTouchCallout: "none", background: "#fff", border: "1px solid " + C.line }} />
       <div className="flex items-center gap-3 mt-1 text-xs" style={{ color: C.muted }}>
         <span>{leer ? "Mit dem Finger im Feld unterschreiben." : "Unterschrift erfasst."}</span>
         {!leer && <button onClick={loeschen} style={{ color: C.strom }}>Neu unterschreiben</button>}
