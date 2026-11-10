@@ -1,7 +1,8 @@
 # EGC-Energie Vertriebsportal
 
-Vertriebs-CRM für EGC-Energie (Energate-Consulting), B2B-Energieberatung im
-Saarland und in Rheinland-Pfalz. Deutschsprachig, komplett.
+Vertriebs-CRM für EGC-Energie (Energate-Consulting), B2B-Energieberatung,
+**bundesweit tätig** (Sitz Waldmohr). Texte, Broschüren und Unterlagen nie auf
+eine Region beschränken. Deutschsprachig, komplett.
 
 ## Das Wichtigste zuerst
 

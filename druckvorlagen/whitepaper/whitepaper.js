@@ -6,10 +6,9 @@
      logoT          weißes Logo als data:-Adresse
      schriften      { regular, fett } Liberation Sans als Base64
      D              Beispiel-Lastgang (daten.json der Broschüre)
-     P              Ansprechpartner { name, titel, zusatz, mobil, telefon, email } oder null (allgemeine Fassung)
    Rückgabe: das jsPDF-Dokument.
    Zahlen 2027: Stand 10.11.2026, Quellen auf der letzten Seite. Vor jeder Neuauflage prüfen. */
-module.exports = async function baueWhitepaper({ jsPDF, QR, bild, logoT, schriften, D, P = null, log = () => {} }) {
+module.exports = async function baueWhitepaper({ jsPDF, QR, bild, logoT, schriften, D, log = () => {} }) {
 const W = 210, H = 297, RA = 18, BR = W - 2 * RA;
 const doc = new jsPDF({ unit: 'mm', format: [W, H], compress: true });
 doc.addFileToVFS('LS-R.ttf', schriften.regular); doc.addFont('LS-R.ttf', 'LS', 'normal');
@@ -19,9 +18,9 @@ const NAVY = [10, 22, 38], NAVY1 = [7, 16, 29], NAVY2 = [27, 58, 96], GRUEN = [1
   GRUEN2 = [150, 206, 96], WEISS = [255, 255, 255], TEXT = [22, 33, 44], GRAU = [107, 119, 135], HELL = [244, 247, 250],
   HELLBLAU = [196, 208, 222], LINIE = [216, 221, 228], GRUENHELL = [236, 246, 228], ROT = [196, 70, 60], NAVYKARTE = [20, 40, 64];
 const F = { strasse: 'In den Erlenwiesen 11', ort: '66914 Waldmohr', tel: '06373 8920114', mail: 'anfrage@egc-energie.de', web: 'www.egc-energie.de' };
-const kontakt = P ? { name: P.name, titel: P.titel, tel: P.mobil || P.telefon, mail: P.email }
-  : { name: 'EGC Energie', titel: 'Anfrage und Beratung', tel: F.tel, mail: F.mail };
-const qr = await QR.toDataURL(P && P.email ? 'mailto:' + P.email + '?subject=Energiekosten-Check' : 'https://' + F.web,
+/* Eine allgemeine Fassung für alle: Kontakt immer EGC, damit das Dokument frei weitergegeben werden kann */
+const kontakt = { name: 'EGC Energie', titel: 'Anfrage und Beratung, bundesweit', tel: F.tel, mail: F.mail };
+const qr = await QR.toDataURL('https://' + F.web,
   { margin: 0, width: 500, color: { dark: '#0A1626', light: '#FFFFFF' } });
 
 const fl = (c) => doc.setFillColor(...c), st = (c) => doc.setDrawColor(...c), fa = (c) => doc.setTextColor(...c);
@@ -152,16 +151,18 @@ const diagramm = (werte, x, y, w, h, { max, achse = [], linien = [], farbe = NAV
 
 /* ============ 1 Titel ============ */
 neueSeite(true);
-doc.addImage(bild('umspannwerk.jpg'), 'JPEG', 0, 0, W, H * 0.62);
+doc.addImage(bild('umspannwerk.jpg'), 'JPEG', -1, 0, W + 2, H * 0.62);
 /* weicher Übergang vom Bild in das Navy */
 doc.saveGraphicsState();
-for (let i = 0; i < 40; i++) { dk(i / 40); fl(NAVY1); doc.rect(0, H * 0.42 + i * 2.1, W, 2.2, 'F'); }
+/* Verlauf über die unteren 80 mm des Bildes, am Bildrand vollständig deckend */
+const ende1 = H * 0.62, n1 = 40, st1 = 80 / n1;
+for (let i = 0; i < n1; i++) { dk(Math.pow((i + 1) / n1, 1.6)); fl(NAVY1); doc.rect(-1, ende1 - 80 + i * st1, W + 2, st1 + 0.15, 'F'); }
 dk(1); doc.restoreGraphicsState();
-fl(NAVY1); doc.rect(0, H * 0.42 + 84, W, H, 'F');
+fl(NAVY1); doc.rect(-1, ende1 - 0.2, W + 2, H, 'F');
 doc.addImage(logoT, 'PNG', RA, 22, (420 / 196) * 22, 22);
-fl(NAVY1); dk(0.55); doc.roundedRect(RA, 118, 95, 9, 4.5, 4.5, 'F'); dk(1);
+fl(NAVY1); dk(0.55); doc.roundedRect(RA, 118, 82, 9, 4.5, 4.5, 'F'); dk(1);
 fl(GRUEN); doc.circle(RA + 5, 122.5, 1.3, 'F');
-schrift(8, true); fa(WEISS); doc.text('Für Geschäftsführung, Einkauf und Technik', RA + 9, 123.7);
+schrift(8, true); fa(WEISS); doc.text('Für Unternehmen in ganz Deutschland', RA + 9, 123.7);
 schrift(36, true); fa(WEISS); doc.text('Energieeinkauf', RA, 148); fa(GRUEN2); doc.text('2027', RA, 162);
 schrift(13); fa(HELLBLAU);
 doc.text(['Der Leitfaden für Unternehmen:', 'Strom und Erdgas wirtschaftlich einkaufen,', 'Kosten verstehen, Fristen im Griff behalten.'], RA, 176, { lineHeightFactor: 1.45 });
@@ -242,11 +243,11 @@ neueSeite();
 y = titel('02 · ÜBER UNS', 'Ihre externe', 'Energieeinkaufsabteilung', 30);
 const bw5 = 72, bh5 = bw5 / 1.6;
 bildRund('beratung.jpg', RA + BR - bw5, y - 2, bw5, bh5);
-let yt5 = absatz('EGC Energie ist ein versorgerunabhängiger Energiedienstleister mit Sitz in Waldmohr. Wir kaufen für Unternehmen Strom und Erdgas ein: von der Analyse Ihrer Rechnungen und Ihres Verbrauchs über die Ausschreibung bei vielen Energieversorgern bis zur Betreuung Ihrer Verträge.', RA, y, BR - bw5 - 7, 9.8) + 3;
+let yt5 = absatz('EGC Energie ist ein versorgerunabhängiger Energiedienstleister mit Sitz in Waldmohr. Wir kaufen für Unternehmen in ganz Deutschland Strom und Erdgas ein: von der Analyse Ihrer Rechnungen und Ihres Verbrauchs über die Ausschreibung bei vielen Energieversorgern bis zur Betreuung Ihrer Verträge.', RA, y, BR - bw5 - 7, 9.8) + 3;
 yt5 = absatz('Wir sind kein Versorger und verkaufen keine eigene Energie. Deshalb empfehlen wir, was zu Ihrem Unternehmen passt, und bleiben auch nach dem Abschluss Ihr Ansprechpartner.', RA, yt5, BR - bw5 - 7, 9.8);
 y = Math.max(yt5, y - 2 + bh5) + 10;
 const k5 = (BR - 9) / 4;
-[['Versorger', 'unabhängig', 'viele Versorger im Vergleich'], ['Strom & Gas', 'aus einer Hand', 'SLP und RLM, ein Standort oder viele'], ['Persönlich', 'vor Ort', 'Ihr fester Ansprechpartner'], ['0 €', 'Erstprüfung', 'ohne Wechselpflicht']].forEach(([a, b, c], i) => {
+[['Versorger', 'unabhängig', 'viele Versorger im Vergleich'], ['Strom & Gas', 'aus einer Hand', 'SLP und RLM, ein Standort oder viele'], ['Bundesweit', 'vor Ort und digital', 'Ihr fester Ansprechpartner'], ['0 €', 'Erstprüfung', 'ohne Wechselpflicht']].forEach(([a, b, c], i) => {
   const x = RA + i * (k5 + 3);
   if (i === 3) verlauf(x, y, k5, 34, GRUEN1, GRUEN2, { r: 3, n: 30 }); else karte(x, y, k5, 34);
   schrift(15, true); fa(i === 3 ? NAVY1 : NAVY); doc.text(a, x + 4, y + 12);
@@ -617,7 +618,7 @@ absatz('Halten Sie bereit: letzte Jahresrechnung Strom und Erdgas, Vertragsende 
 /* Kontaktfeld */
 const yk = 205, hk = 52;
 fl(WEISS); doc.roundedRect(RA, yk, BR - 50, hk, 3, 3, 'F');
-schrift(7.5, true); fa(GRUEN1); doc.text(P ? 'IHR PERSÖNLICHER ANSPRECHPARTNER' : 'IHR KONTAKT', RA + 7, yk + 10, { charSpace: 0.8 });
+schrift(7.5, true); fa(GRUEN1); doc.text('IHR KONTAKT', RA + 7, yk + 10, { charSpace: 0.8 });
 schrift(15, true); fa(NAVY); doc.text(kontakt.name, RA + 7, yk + 20);
 if (kontakt.titel) { schrift(9.5, true); fa(GRUEN1); doc.text(kontakt.titel, RA + 7, yk + 26.5); }
 [['Telefon', kontakt.tel, 'tel:'], ['E-Mail', kontakt.mail, 'mailto:']].filter((z) => z[1]).forEach(([k, v, art], i) => {
@@ -628,8 +629,8 @@ if (kontakt.titel) { schrift(9.5, true); fa(GRUEN1); doc.text(kontakt.titel, RA 
 });
 fl(WEISS); doc.roundedRect(RA + BR - 44, yk, 44, hk, 3, 3, 'F');
 doc.addImage(qr, 'PNG', RA + BR - 38, yk + 5, 32, 32);
-schrift(7.5, true); fa(NAVY); doc.text(P && P.email ? 'Scannen und schreiben' : 'Scannen und anfragen', RA + BR - 22, yk + 44, { align: 'center' });
-doc.link(RA + BR - 44, yk, 44, hk, { url: P && P.email ? 'mailto:' + P.email + '?subject=Energiekosten-Check' : 'https://' + F.web });
+schrift(7.5, true); fa(NAVY); doc.text('Scannen und anfragen', RA + BR - 22, yk + 44, { align: 'center' });
+doc.link(RA + BR - 44, yk, 44, hk, { url: 'https://' + F.web });
 verlauf(RA, yk + hk + 5, BR, 12, GRUEN1, GRUEN2, { r: 3, n: 40 });
 schrift(10.5, true); fa(NAVY1); doc.text('Energiekosten-Check anfragen  →', RA + 6, yk + hk + 12.8);
 schrift(8.5, true); doc.text(kontakt.mail, RA + BR - 6, yk + hk + 12.8, { align: 'right' });
