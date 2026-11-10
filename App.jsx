@@ -52,6 +52,21 @@ const STATUS = {
   abgelehnt: { label: "Abgelehnt", color: C.muted },
 };
 
+/* Was der Vertriebspartner als Nächstes tun muss, je Status. art: tun (Handlung nötig) oder warten */
+function naechsterSchritt(a) {
+  const st = a.status;
+  if (st === "entwurf") return { art: "tun", text: "Anfrage vervollständigen und an die Kalkulation senden." };
+  if (st === "klaerfall") return { art: "dringend", text: "Die Kalkulation braucht noch Unterlagen oder Angaben von dir. Was fehlt, steht direkt darunter." };
+  if (st === "angebot" && !a.angebotVersendet) return { art: "tun", text: "Angebot prüfen, an den Kunden schicken und danach „An Kunde versendet“ tippen." };
+  if (st === "angebot") return { art: "tun", text: "Sobald der Kunde zusagt: „Angebot angenommen“ tippen, Umfang wählen und Vollmacht mit Angebot hochladen. Sagt er ab: „Kein Angebot angenommen“." };
+  if (["eingereicht", "angefragt", "ruecksprache"].includes(st)) return { art: "warten", text: "Nichts zu tun. Die Kalkulation erstellt dein Angebot, du bekommst eine Mail." };
+  if (st === "uebermittelt") return { art: "warten", text: "Nichts zu tun. Die Kalkulation reicht den Auftrag beim Versorger ein." };
+  if (st === "einreichung" || st === "bestaetigt") return { art: "warten", text: "Nichts zu tun. Wir warten auf die Bestätigung des Versorgers, du bekommst eine Mail." };
+  if (st === "abgeschlossen") return { art: "fertig", text: "Abgeschlossen. Deine Provision findest du unter „Meine Provisionen“." };
+  if (st === "abgelehnt") return { art: "fertig", text: "Kein Abschluss. Den Vorgang kannst du über die Wiedervorlage später wieder aufnehmen." };
+  return null;
+}
+
 /* Wer gerade schaut: der Vertrieb sieht einen bestätigten Auftrag erst nach der Lieferbestätigung
    durch das Vertragsmanagement als „Vom Versorger bestätigt“, vorher als „An Versorger übermittelt“. */
 const VERTRIEB_SICHT_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
@@ -322,7 +337,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.23 · 09.11.2026 · Abweichende Laufzeit bei der Annahme";
+const VERSION = "v5.24 · 10.11.2026 · Einfachere Bedienung für den Vertrieb";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -3554,12 +3569,30 @@ function seedLeads() {
 /* ------------------------------------------------------------------ */
 /*  Kleine UI-Bausteine                                                */
 /* ------------------------------------------------------------------ */
+/* Passende Tastatur am Handy aus der Beschriftung des Feldes:
+   E-Mail mit @, Telefon mit Ziffernblock, Preise und Mengen mit Zahlentastatur (mit Komma, wo Dezimalstellen vorkommen).
+   Felder mit Buchstaben (Zählernummer, Kundennummer, IBAN) behalten die normale Tastatur. */
+const tastaturFuer = (label, type) => {
+  if (type && type !== "text") return {};
+  const l = typeof label === "string" ? label : "";
+  if (!l) return {};
+  if (/e-?mail/i.test(l)) return { type: "email", inputMode: "email", autoComplete: "email" };
+  if (/telefon|mobil|handy|fax/i.test(l)) return { type: "tel", inputMode: "tel", autoComplete: "tel" };
+  if (/zählernummer|kundennummer|vertragsnummer|iban|bic|ust|steuer-?nr|bezeichnung|name/i.test(l)) return {};
+  if (/\bplz\b|postleitzahl/i.test(l)) return { inputMode: "numeric", autoComplete: "postal-code" };
+  if (/marktlokation|\bmalo\b/i.test(l)) return { inputMode: "numeric" };
+  if (/ct\/kwh|€|eur\b|\bkw\b|\(kw\)|prozent|%|preis|aufschlag|satz|bonus|betrag|leistung|lastspitze|anteil/i.test(l)) return { inputMode: "decimal" };
+  if (/kwh|mwh|monate|laufzeit|anzahl|jahr|stunden|menge|verbrauch|stück|tage/i.test(l)) return { inputMode: "numeric" };
+  return {};
+};
+
 const Feld = ({ label, value, onChange, placeholder, type = "text", fehler, breit, min, gesperrt, zahl }) => (
   <label className={"block " + (breit ? "sm:col-span-2" : "")}>
     <span className="block text-xs mb-1" style={{ color: C.muted }}>{label}</span>
     <input
-      type={zahl ? "text" : type}
-      inputMode={zahl ? "numeric" : undefined}
+      {...(zahl ? {} : tastaturFuer(label, type))}
+      type={zahl ? "text" : (tastaturFuer(label, type).type || type)}
+      inputMode={zahl ? "numeric" : tastaturFuer(label, type).inputMode}
       value={zahl
         ? (String(value ?? "") === "" ? "" : Number(String(value).replace(/\D/g, "")).toLocaleString("de-DE"))
         : value}
@@ -3838,7 +3871,7 @@ const Datei = ({ label, datei, onSet, hinweis, bild }) => (
 );
 
 /* Provisionsaufteilung – zeigt je nach Rolle alles oder nur den eigenen Anteil */
-function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
+function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante, ohneHinweis }) {
   const gesamt = gesamtprovision(a, variante);
   const v = gesamtverteilung(a, mitarbeiter, gesamt);
   /* Die gesamte ausgeschüttete Provision sehen nur Geschäftsführung und Finanzbuchhaltung.
@@ -3906,7 +3939,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante }) {
         {jahre ? " · über " + jahreText(laufzeit) + " " + eur(kopfGesamt) : ""}
       </div>
 
-      {vorlaeufig && eigen && (
+      {vorlaeufig && eigen && !ohneHinweis && (
         <div className="text-xs mb-3 px-2 py-1.5 rounded" style={{ background: "#FFF8EC", color: C.gas }}>
           Gilt bei bestätigter Liefermenge. Berechnet aus dem Jahresverbrauch laut Anfrage; bestätigt der Versorger
           weniger, sinkt die Provision entsprechend. Endgültig bestätigen Vertragsmanagement und Geschäftsführung.
@@ -4103,7 +4136,6 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
   return (
     <div>
       <div className="flex items-center gap-3 mb-5">
-        <button onClick={onAbbrechen} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
         <h2 className="text-lg" style={{ letterSpacing: "-0.01em" }}>
           {entwurf ? "Anfrage " + a.id + " ergänzen" : "Neue Angebotsanfrage"}
         </h2>
@@ -4158,12 +4190,13 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                 </p>
               </div>
             )}
-            <Feld label="Firma / Kunde" value={a.kunde.firma} onChange={(v) => setK("firma", v)}
+            <p className="sm:col-span-2 text-xs" style={{ color: C.muted }}>Felder mit * braucht die Kalkulation für ein Angebot.</p>
+            <Feld label="Firma / Kunde *" value={a.kunde.firma} onChange={(v) => setK("firma", v)}
               placeholder="Musterbetrieb GmbH" fehler={geprueft && !a.kunde.firma} breit />
-            <Feld label="Straße und Hausnummer" value={a.kunde.strasse} onChange={(v) => setK("strasse", v)} breit />
-            <Feld label="PLZ" value={a.kunde.plz} onChange={(v) => setK("plz", v)} fehler={geprueft && !a.kunde.plz} />
-            <Feld label="Ort" value={a.kunde.ort} onChange={(v) => setK("ort", v)} fehler={geprueft && !a.kunde.ort} />
-            <Feld label="Ansprechpartner" value={a.kunde.ansprechpartner}
+            <Feld label="Straße und Hausnummer *" value={a.kunde.strasse} onChange={(v) => setK("strasse", v)} breit />
+            <Feld label="PLZ *" value={a.kunde.plz} onChange={(v) => setK("plz", v)} fehler={geprueft && !a.kunde.plz} />
+            <Feld label="Ort *" value={a.kunde.ort} onChange={(v) => setK("ort", v)} fehler={geprueft && !a.kunde.ort} />
+            <Feld label="Ansprechpartner *" value={a.kunde.ansprechpartner}
               onChange={(v) => setK("ansprechpartner", v)} fehler={geprueft && !a.kunde.ansprechpartner} />
             <Feld label="Telefon" value={a.kunde.telefon} onChange={(v) => setK("telefon", v)} />
             <Feld label="E-Mail" value={a.kunde.email} onChange={(v) => setK("email", v)} breit />
@@ -4381,7 +4414,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                           </div>
                         )}
 
-                        <Feld label="Aktueller Versorger" value={l.neueinzug ? "" : l.versorger}
+                        <Feld label="Aktueller Versorger *" value={l.neueinzug ? "" : l.versorger}
                           onChange={(v) => { setL(l.id, "versorger", v); setL(l.id, "versorgerVon", "manuell"); }}
                           gesperrt={!!l.neueinzug}
                           placeholder={l.neueinzug ? "entfällt bei Neueinzug" : ""}
@@ -4390,12 +4423,12 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                           onChange={(v) => { setL(l.id, "kundennummer", v); setL(l.id, "versorgerVon", "manuell"); }}
                           gesperrt={!!l.neueinzug}
                           placeholder={l.neueinzug ? "entfällt bei Neueinzug" : ""} />
-                        <Feld label="Zählernummer" value={l.zaehlernummer}
+                        <Feld label="Zählernummer *" value={l.zaehlernummer}
                           onChange={(v) => setL(l.id, "zaehlernummer", v)} fehler={geprueft && !l.zaehlernummer} />
-                        <Feld label="Marktlokations-ID (MaLo)" value={l.maloId}
+                        <Feld label="Marktlokations-ID (MaLo) *" value={l.maloId}
                           onChange={(v) => setL(l.id, "maloId", v)} placeholder="11-stellig"
                           fehler={geprueft && !l.maloId} />
-                        <Feld label="Jahresverbrauch in kWh" value={l.verbrauch} zahl
+                        <Feld label="Jahresverbrauch in kWh *" value={l.verbrauch} zahl
                           onChange={(v) => setL(l.id, "verbrauch", v)}
                           fehler={geprueft && !l.verbrauch} />
                         <Select label="Zählerart" value={l.zaehlerart}
@@ -4578,7 +4611,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
             <div className="grid sm:grid-cols-2 gap-x-8 gap-y-3 text-sm mb-5">
               <div><span style={{ color: C.muted }}>Kunde</span><div>{a.kunde.firma || "–"}</div></div>
               <div><span style={{ color: C.muted }}>Anschrift</span>
-                <div>{a.kunde.strasse}, {a.kunde.plz} {a.kunde.ort}</div></div>
+                <div>{[a.kunde.strasse, [a.kunde.plz, a.kunde.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ") || "fehlt"}</div></div>
               <div><span style={{ color: C.muted }}>Produktwunsch</span>
                 <div>
                   {stromStellen.length > 0 ? "Strom: " + a.produkt : ""}
@@ -4939,6 +4972,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
   const istKalk = user.rolle === "Kalkulation";
   const istPartner = istBeteiligt(a, user.id);
+  /* Beim Vertriebspartner steht die Handlung oben, Nachrichten und Zielpreis unten */
+  const reihe = (n) => (istPartner ? { order: n } : {});
   const istVM = user.rolle === "Vertragsmanagement";
   /* Verschwiegenheitserklärung: nur Kalkulation und Geschäftsführung, unterschreibt immer die Geschäftsführung */
   const ndaSicht = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
@@ -5297,7 +5332,6 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   return (
     <div>
       <div className="flex items-center flex-wrap gap-3 mb-1">
-        <button onClick={onZurueck} style={{ color: C.muted }}><ArrowLeft size={18} /></button>
         <h2 className="text-lg" style={{ letterSpacing: "-0.01em" }}>{a.kunde.firma}</h2>
         {a.kunde.branche && (
           <span className="text-xs px-2 py-0.5 rounded"
@@ -5313,7 +5347,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           </button>
         )}
       </div>
-      <p className="text-sm mb-5 ml-8" style={{ color: C.muted }}>
+      <p className="text-sm mb-5" style={{ color: C.muted }}>
         {a.id} · angelegt {datum(a.angelegt)} ·{" "}
         {liegezeit(a) != null && !["abgeschlossen", "abgelehnt"].includes(a.status) &&
           "seit " + num(liegezeit(a)) + " Tagen in diesem Status · "}
@@ -5326,10 +5360,27 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       </p>
       {kurz && <Kurzinfo a={a} onSchliessen={() => setKurz(false)} />}
 
+      {istPartner && naechsterSchritt(a) && (() => {
+        const n = naechsterSchritt(a);
+        const farbe = n.art === "dringend" ? C.warn : n.art === "tun" ? C.ok : C.muted;
+        const grund = n.art === "dringend" ? "#FCF3F0" : n.art === "tun" ? "#F1F7F0" : "#F6F8FA";
+        return (
+          <div className="rounded px-4 py-3 mb-5 flex items-start gap-3"
+               style={{ background: grund, borderLeft: "4px solid " + farbe }}>
+            <div className="min-w-0">
+              <div className="text-xs mb-0.5" style={{ color: farbe, letterSpacing: "0.04em" }}>
+                {n.art === "warten" ? "GERADE BEI UNS" : n.art === "fertig" ? "STAND" : "DEIN NÄCHSTER SCHRITT"}
+              </div>
+              <div className="text-sm">{n.text}</div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="grid lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 space-y-5 min-w-0">
-          {/* Nachrichten zum Vorgang */}
-          <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <div className="lg:col-span-2 flex flex-col gap-5 min-w-0">
+          {/* Nachrichten zum Vorgang (beim Vertriebspartner unter Angebot und Lieferstellen) */}
+          <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line, ...reihe(30) }}>
             <div className="flex items-baseline justify-between px-4 py-3"
                  style={{ borderBottom: "1px solid " + C.line }}>
               <span className="text-sm">Nachrichten zum Vorgang</span>
@@ -5558,7 +5609,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           {/* Zielpreis bei Spotmarkt */}
           {istSpot && (
             <div className="rounded p-4"
-                 style={{ background: C.card, border: "1px solid " + (a.zielpreis ? C.gruen : C.line) }}>
+                 style={{ background: C.card, border: "1px solid " + (a.zielpreis ? C.gruen : C.line), ...reihe(31) }}>
               <div className="flex items-baseline justify-between mb-1">
                 <span className="text-sm">Zielpreis Spotmarkt</span>
                 {a.zielpreis && (
@@ -5595,7 +5646,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           )}
 
           {/* Lieferstellen */}
-          <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line, ...reihe(20) }}>
             <div className="px-4 py-3 text-sm" style={{ borderBottom: "1px solid " + C.line }}>
               Lieferstellen ({a.lieferstellen.length})
             </div>
@@ -6483,7 +6534,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
           {/* Aufgabe 8: Klärfall beim Vertriebspartner */}
           {istPartner && a.status === "klaerfall" && (
-            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.warn }}>
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.warn, ...reihe(-2) }}>
               <div className="flex items-center gap-2 mb-3" style={{ color: C.warn }}>
                 <AlertTriangle size={16} />
                 <span className="text-sm">Das Team Kalkulation braucht noch etwas von dir</span>
@@ -6543,7 +6594,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
           {/* Aufgabe 9: Abschlussmaske nach Annahme */}
           {istPartner && annahme.variante && (
-            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok }}>
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok, ...reihe(-2) }}>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm">Abschluss vorbereiten</span>
                 <button onClick={() => setAnnahme({ ...annahme, variante: null })} style={{ color: C.muted }}>
@@ -6701,7 +6752,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
           {/* Neues Angebot: erst an den Kunden schicken, dann hier markieren */}
           {istPartner && a.status === "angebot" && (
-            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + (a.angebotVersendet ? C.line : C.ok) }}>
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + (a.angebotVersendet ? C.line : C.ok), ...reihe(-2) }}>
               {a.angebotVersendet ? (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm flex items-center gap-2" style={{ color: C.ok }}>
@@ -6731,7 +6782,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
           {/* Angebotsansicht */}
           {a.kalkulation && (
-            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line, ...reihe(-1) }}>
               <div className="flex items-baseline justify-between mb-1">
                 <span className="text-sm">
                   {varianten(a).length > 1 ? varianten(a).length + " Angebote" : "Angebot"} vom {datum(a.kalkulation.datum)}
@@ -6800,7 +6851,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
                         <div className="mt-3">
                           <Provisionsblock a={a} mitarbeiter={mitarbeiter} user={user}
-                            laufzeit={laufzeitFuer(a, v)} variante={v} />
+                            laufzeit={laufzeitFuer(a, v)} variante={v} ohneHinweis={varianten(a).length > 1} />
                         </div>
 
                         {v.bemerkung && (
@@ -6832,6 +6883,14 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   );
                 })}
               </div>
+
+              {/* bei mehreren Varianten den Hinweis zur Liefermenge nur einmal */}
+              {varianten(a).length > 1 && !a.bestaetigung && VERTRIEB_SICHT_ROLLEN.includes(user.rolle) && (
+                <div className="text-xs mt-3 px-2 py-1.5 rounded" style={{ background: "#FFF8EC", color: C.gas }}>
+                  Die Provision gilt bei bestätigter Liefermenge. Berechnet aus dem Jahresverbrauch laut Anfrage; bestätigt der Versorger
+                  weniger, sinkt die Provision entsprechend. Endgültig bestätigen Vertragsmanagement und Geschäftsführung.
+                </div>
+              )}
 
               <div className="mt-4 space-y-2">
                 {a.kalkulation.vollmacht && (
@@ -14518,7 +14577,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
     { id: "eingang", k: "Neue Anfragen", v: z.eingang, farbe: C.strom, f: (a) => a.status === "eingereicht" },
     { id: "angefragt", k: "Angebot in Bearbeitung", v: z.angefragt, farbe: C.gas, f: (a) => a.status === "angefragt" },
     { id: "klaer", k: "Klärfälle", v: z.klaer, farbe: z.klaer ? C.warn : C.text, f: (a) => a.status === "klaerfall" },
-    { id: "angebot", k: "Angebote beim Kunden", v: z.angebot, farbe: C.ok, f: (a) => a.status === "angebot" },
+    { id: "angebot", k: "Offene Angebote", v: z.angebot, farbe: C.ok, f: (a) => a.status === "angebot" },
     { id: "auftrag", k: "Aufträge beim Versorger", v: z.auftrag, farbe: C.strom, f: (a) => a.status === "uebermittelt" },
     { id: "fix", k: "Abschlüsse", v: z.fix, f: (a) => ["bestaetigt", "abgeschlossen"].includes(a.status) },
   ];
@@ -14576,7 +14635,16 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
 
   /* Schnellzugriff: Angebot anfragen und Auftrag einreichen, oben und groß */
   const schnell = vertrieb || user.rolle === "Geschäftsführung";
-  const annehmbar = menge_.filter((a) => a.status === "angebot");
+  /* annehmen kann man erst, wenn das Angebot beim Kunden ist */
+  const annehmbar = menge_.filter((a) => a.status === "angebot" && a.angebotVersendet);
+  /* Zu tun für den Vertriebspartner, das Dringendste zuerst */
+  const zuTun = vertrieb ? menge_.filter((a) => istBeteiligt(a, user.id)).map((a) => {
+    if (a.status === "klaerfall") return { a, rang: 0, farbe: C.warn, text: "Unterlagen nachreichen" };
+    if (a.status === "angebot" && !a.angebotVersendet) return { a, rang: 1, farbe: C.ok, text: "Angebot an den Kunden schicken" };
+    if (a.status === "angebot") return { a, rang: 2, farbe: C.ok, text: "Zusage des Kunden erfassen" };
+    if (a.status === "entwurf") return { a, rang: 3, farbe: C.muted, text: "Entwurf fertigstellen und senden" };
+    return null;
+  }).filter(Boolean).sort((x, y) => x.rang - y.rang) : [];
   const auftragEinreichen = () => annehmbar.length === 1
     ? onOeffnen(annehmbar[0].id)
     : onListe("Auftrag einreichen: Angebot wählen", annehmbar);
@@ -14605,12 +14673,35 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
               <span className="block text-base">Auftrag einreichen</span>
               <span className="block text-xs" style={{ color: C.muted }}>
                 {annehmbar.length === 0 ? "Kein Angebot beim Kunden"
-                  : annehmbar.length === 1 ? "1 Angebot wartet: " + annehmbar[0].kunde.firma
+                  : annehmbar.length === 1 ? "Angebot beim Kunden: " + annehmbar[0].kunde.firma
                   : annehmbar.length + " Angebote warten auf die Zusage des Kunden"}
               </span>
             </span>
           </button>
         </div>
+      )}
+
+      {vertrieb && (
+        <Karte titel="Zu tun für dich"
+          rechts={<span className="text-xs" style={{ color: C.muted }}>{zuTun.length ? zuTun.length + " offen" : "alles erledigt"}</span>}>
+          {zuTun.length === 0 && (
+            <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>
+              Gerade ist nichts von dir gefragt. Sobald ein Angebot kommt oder Unterlagen fehlen, steht es hier.
+            </div>
+          )}
+          {zuTun.map(({ a, farbe, text }, i) => (
+            <button key={a.id} onClick={() => onOeffnen(a.id)}
+              className="w-full text-left flex items-center gap-3 px-4 py-3 text-sm"
+              style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: farbe }} />
+              <span className="flex-1 min-w-0">
+                <span className="block" style={{ color: farbe === C.muted ? C.text : farbe }}>{text}</span>
+                <span className="block text-xs truncate" style={{ color: C.muted }}>{a.kunde.firma || "ohne Namen"} · {a.id}</span>
+              </span>
+              <ChevronRight size={16} color={C.muted} />
+            </button>
+          ))}
+        </Karte>
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -14649,7 +14740,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
       {stil === "ring" ? (
         <div className="rounded p-5 flex flex-wrap gap-6 justify-around"
              style={{ background: C.card, border: "1px solid " + C.line }}>
-          {KACHELN.filter((x) => zeigt(x.id)).map((x) => {
+          {KACHELN.filter((x) => zeigt(x.id) && (!vertrieb || x.v > 0)).map((x) => {
             const gesamt = KACHELN.reduce((t, y) => t + y.v, 0) || 1;
             return (
               <button key={x.id} onClick={() => onListe(x.k, menge_.filter(x.f))}>
@@ -14661,7 +14752,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          {KACHELN.filter((x) => zeigt(x.id)).map((x) => (
+          {KACHELN.filter((x) => zeigt(x.id) && (!vertrieb || x.v > 0)).map((x) => (
             <Kachel key={x.id} k={x.k} v={x.v} farbe={x.farbe}
               klick={() => onListe(x.k, menge_.filter(x.f))} />
           ))}
@@ -14958,6 +15049,8 @@ function PortalApp() {
   const [ansicht, setAnsicht] = useState("anfragen");
   const [offen, setOffen] = useState(null);
   const [tab, setTab] = useState("offen");
+  /* vom Nutzer bewusst gewählter Reiter: sonst öffnet „Meine Anfragen“ den ersten Reiter mit Einträgen */
+  const [tabGewaehlt, setTabGewaehlt] = useState(null);
   const [entwurf, setEntwurf] = useState(null);
   const [geladen, setGeladen] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -15177,7 +15270,7 @@ function PortalApp() {
         w: user.name,
       }],
     });
-    setAnsicht("anfragen"); setTab("offen"); setEntwurf(null);
+    setAnsicht("anfragen"); setTab("offen"); setTabGewaehlt("offen"); setEntwurf(null);
   };
 
   const neueLeads = user ? leads.filter((l) => l.zugewiesen === user.id && !l.gelesen).length : 0;
@@ -15721,24 +15814,31 @@ function PortalApp() {
     inhalt = (
       <Assistent user={user} mitarbeiter={mitarbeiter} alleAnfragen={anfragenSicht}
         tippgeber={tippgeber} entwurf={entwurf}
-        onSpeichern={(a) => { speichern(a); setEntwurf(null); setAnsicht("anfragen"); setTab("offen"); }}
+        onSpeichern={(a) => { speichern(a); setEntwurf(null); setAnsicht("anfragen"); setTab("offen"); setTabGewaehlt("offen"); }}
         onSenden={einreichen}
         onAbbrechen={() => { setEntwurf(null); setAnsicht("anfragen"); }} />
     );
   } else if (ansicht === "anfragen") {
-    const t = TABS.find((x) => x.id === tab);
+    /* Reiter mit Arbeit zuerst: Klärfall vor neuem Angebot vor Angebot beim Kunden */
+    const anzahl = (id) => meine.filter(TABS.find((x) => x.id === id).f).length;
+    const vorrang = ["klaer", "angebote", "kunde", "offen", "bereit", "uebermittelt", "fix"];
+    const tabAktiv = tabGewaehlt === tab || anzahl(tab) > 0 ? tab : (vorrang.find((id) => anzahl(id) > 0) || tab);
+    const t = TABS.find((x) => x.id === tabAktiv);
+    const anderswo = TABS.filter((x) => x.id !== tabAktiv && anzahl(x.id) > 0).map((x) => anzahl(x.id) + " in „" + x.label + "“");
     inhalt = (
       <div>
         <div className="flex flex-wrap gap-1 mb-5">
           {TABS.map((x) => {
             const n = meine.filter(x.f).length;
+            const an = tabAktiv === x.id;
             return (
-              <button key={x.id} onClick={() => setTab(x.id)}
+              <button key={x.id} onClick={() => { setTab(x.id); setTabGewaehlt(x.id); }}
                 className="px-3 py-1.5 text-sm rounded"
                 style={{
-                  background: tab === x.id ? C.ink : "transparent",
-                  color: tab === x.id ? "#fff" : C.muted,
-                  border: "1px solid " + (tab === x.id ? C.ink : C.line),
+                  background: an ? C.ink : "transparent",
+                  color: an ? "#fff" : n > 0 ? C.text : C.muted,
+                  border: "1px solid " + (an ? C.ink : C.line),
+                  opacity: an || n > 0 ? 1 : 0.55,
                 }}>
                 {x.label} {n > 0 && <span style={{ opacity: 0.7 }}>{n}</span>}
               </button>
@@ -15747,15 +15847,15 @@ function PortalApp() {
         </div>
         <Liste
           anfragen={meine.filter(t.f)}
-          leerText={
-            tab === "uebermittelt" ? "Hier stehen Aufträge, die die Kalkulation an den Versorger übermittelt hat."
-            : tab === "bereit" ? "Aufträge, die du an die Kalkulation gesendet hast. Sie reicht sie beim Versorger ein."
-            : tab === "kunde" ? "Angebote, die du an den Kunden versendet hast."
-            : tab === "klaer" ? "Keine offenen Klärfälle. Gut so."
-            : tab === "angebote" ? "Sobald die Kalkulation ein Angebot zurückschickt, erscheint es hier."
-            : tab === "fix" ? "Noch keine vom Versorger bestätigten Kunden."
-            : "Noch keine Anfragen. Leg mit „Neue Anfrage“ los."
-          }
+          leerText={(
+            tabAktiv === "uebermittelt" ? "Hier stehen Aufträge, die die Kalkulation an den Versorger übermittelt hat."
+            : tabAktiv === "bereit" ? "Aufträge, die du an die Kalkulation gesendet hast. Sie reicht sie beim Versorger ein."
+            : tabAktiv === "kunde" ? "Angebote, die du an den Kunden versendet hast."
+            : tabAktiv === "klaer" ? "Keine offenen Klärfälle. Gut so."
+            : tabAktiv === "angebote" ? "Sobald die Kalkulation ein Angebot zurückschickt, erscheint es hier."
+            : tabAktiv === "fix" ? "Noch keine vom Versorger bestätigten Kunden."
+            : meine.length ? "Hier liegt gerade nichts." : "Noch keine Anfragen. Leg mit „Neue Anfrage“ los.")
+            + (anderswo.length ? " Gerade aktuell: " + anderswo.join(", ") + "." : "")}
           onOeffnen={(id) => {
             const a = anfragenSicht.find((x) => x.id === id);
             if (a.status === "entwurf") setEntwurf(a);
@@ -15799,7 +15899,11 @@ function PortalApp() {
         termine={termine} leads={leads} setMitarbeiter={setMitarbeiter}
         aufgaben={aufgaben} setAufgaben={setAufgaben} bonusziele={bonusziele}
         probleme={probleme} smartmeter={smartmeter}
-        onOeffnen={(id, ziel) => { if (ziel) { setOffen(null); setAnsicht(ziel); } else setOffen(id); }}
+        onOeffnen={(id, ziel) => {
+          if (ziel) { setOffen(null); setAnsicht(ziel); return; }
+          const x = anfragenSicht.find((y) => y.id === id);
+          if (x && x.status === "entwurf") setEntwurf(x); else setOffen(id);
+        }}
         onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />
     );
   } else if (ansicht === "ruecksprachen") {
