@@ -7181,8 +7181,74 @@ const STATUS_REITER = [
   { id: "abgelehnt", label: "Abgelehnt", f: (a) => a.status === "abgelehnt" },
   { id: "entwurf", label: "Entwurf", f: (a) => a.status === "entwurf" },
 ];
-function VorgaengeNachStatus({ anfragen, onOeffnen }) {
+/* Spalten der Kanban-Tafel: der Weg eines Vorgangs von der Anfrage bis zur Bestätigung */
+const BOARD_SPALTEN = ["eingereicht", "angefragt", "ruecksprache", "klaerfall", "angebotVP", "angebotKunde", "uebermittelt", "einreichung", "bestaetigt", "lb"];
+const ANSICHT_SPEICHER = "egc-alle-vorgaenge-ansicht";
+
+function VorgaengeBoard({ anfragen, onOeffnen }) {
+  const spalten = BOARD_SPALTEN.map((id) => STATUS_REITER.find((r) => r.id === id));
+  return (
+    <div className="overflow-x-auto pb-3 -mx-1 px-1" style={{ WebkitOverflowScrolling: "touch" }}>
+      <div className="flex gap-3 items-start" style={{ minWidth: "min-content" }}>
+        {spalten.map((sp) => {
+          const drin = anfragen.filter(sp.f).sort((x, y) => (liegezeit(y) || 0) - (liegezeit(x) || 0));
+          const kwh = drin.reduce((t, a) => t + verbrauchGesamt(a), 0);
+          const farbe = (statusVon(drin[0] || { status: sp.id === "angebotVP" || sp.id === "angebotKunde" ? "angebot" : sp.id === "lb" ? "abgeschlossen" : sp.id, angebotVersendet: sp.id === "angebotKunde" }) || {}).color || C.muted;
+          return (
+            <div key={sp.id} className="rounded flex-shrink-0" style={{ width: 236, background: "#F6F8FA", border: "1px solid " + C.line }}>
+              <div className="px-3 py-2.5" style={{ borderBottom: "1px solid " + C.line }}>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: farbe }} />
+                  <span className="flex-1 min-w-0">{sp.label}</span>
+                  <span className="text-xs" style={{ color: C.muted }}>{drin.length}</span>
+                </div>
+                <div className="text-xs mt-0.5 ml-4" style={{ color: C.muted }}>{num(kwh)} kWh</div>
+              </div>
+              <div className="p-2 space-y-2">
+                {drin.length === 0 && (
+                  <div className="text-xs text-center py-4 rounded" style={{ color: C.muted, border: "1px dashed " + C.line }}>leer</div>
+                )}
+                {drin.map((a) => {
+                  const lz = liegezeit(a);
+                  return (
+                    <button key={a.id} onClick={() => onOeffnen(a.id)} className="w-full text-left rounded p-3"
+                      style={{ background: C.card, border: "1px solid " + C.line }}>
+                      <div className="flex items-start gap-2">
+                        <span className="flex-1 min-w-0 text-sm">{a.kunde.firma || "Neue Anfrage"}</span>
+                        <span className="flex gap-0.5 flex-shrink-0">
+                          {a.lieferstellen.some((l) => l.medium === "strom") && <MediumIcon medium="strom" size={12} />}
+                          {a.lieferstellen.some((l) => l.medium === "gas") && <MediumIcon medium="gas" size={12} />}
+                        </span>
+                      </div>
+                      <div className="text-xs mt-1" style={{ color: C.muted }}>{a.id} · {num(verbrauchGesamt(a))} kWh</div>
+                      <div className="flex items-center justify-between gap-2 text-xs mt-2 pt-2" style={{ borderTop: "1px solid " + C.line }}>
+                        <span className="truncate" style={{ color: C.muted }}>{a.partnerName}</span>
+                        {lz != null && (
+                          <span className="flex-shrink-0" style={{ color: lz > 10 ? C.warn : C.muted }}>
+                            {lz === 0 ? "heute" : "seit " + num(lz) + (lz === 1 ? " Tag" : " Tagen")}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function VorgaengeNachStatus({ anfragen, onOeffnen, rolle }) {
   const [reiter, setReiter] = useState("alle");
+  /* Kalkulation startet mit der Tafel, alle anderen mit den Reitern; die Wahl merkt sich das Gerät */
+  const [modus, setModusRoh] = useState(() => {
+    try { const m = localStorage.getItem(ANSICHT_SPEICHER + ":" + rolle); if (m === "board" || m === "reiter") return m; } catch (e) { /* egal */ }
+    return rolle === "Kalkulation" ? "board" : "reiter";
+  });
+  const setModus = (m) => { setModusRoh(m); try { localStorage.setItem(ANSICHT_SPEICHER + ":" + rolle, m); } catch (e) { /* egal */ } };
   const zahl = (r) => anfragen.filter(r.f).length;
   /* Reiter ohne Vorgänge bleiben sichtbar, aber blass; Entwurf nur, wenn es welche gibt */
   const reiterListe = STATUS_REITER.filter((r) => r.id !== "entwurf" || zahl(r) > 0);
@@ -7195,8 +7261,19 @@ function VorgaengeNachStatus({ anfragen, onOeffnen }) {
       {label} {n > 0 && <span style={{ opacity: 0.7 }}>{n}</span>}
     </button>
   );
+  const umschalter = (
+    <div className="flex gap-1 mb-4">
+      {[["board", "Board"], ["reiter", "Reiter"]].map(([id, label]) => (
+        <button key={id} onClick={() => setModus(id)} className="px-3 py-1.5 text-sm rounded"
+          style={{ background: modus === id ? C.ink : "transparent", color: modus === id ? "#fff" : C.muted,
+                   border: "1px solid " + (modus === id ? C.ink : C.line) }}>{label}</button>
+      ))}
+    </div>
+  );
+  if (modus === "board") return <div>{umschalter}<VorgaengeBoard anfragen={anfragen} onOeffnen={onOeffnen} /></div>;
   return (
     <div>
+      {umschalter}
       <div className="flex flex-wrap gap-1 mb-5">
         {knopf("alle", "Alle", anfragen.length)}
         {reiterListe.map((r) => knopf(r.id, r.label, zahl(r)))}
@@ -16182,7 +16259,7 @@ function PortalApp() {
   } else if (ansicht === "meine-daten") {
     inhalt = <MeineStammdaten user={user} mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} />;
   } else if (ansicht === "alle") {
-    inhalt = <VorgaengeNachStatus anfragen={sichtbar} onOeffnen={setOffen} />;
+    inhalt = <VorgaengeNachStatus anfragen={sichtbar} onOeffnen={setOffen} rolle={user.rolle} />;
   } else {
     inhalt = <Liste anfragen={sichtbar} leerText="Keine Vorgänge." onOeffnen={setOffen} />;
   }
