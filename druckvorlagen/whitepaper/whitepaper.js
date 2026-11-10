@@ -186,7 +186,7 @@ y = tabelle(RA, y, [{ t: 'Jahresverbrauch', w: 44, fett: true }, { t: '1 ct/kWh,
   mengen.map((m) => [num(m) + ' kWh', num(m / 100) + ' €', num(m * 3 / 100) + ' €', num(m * 6 / 100) + ' €']), { dunkel: true });
 y += 8;
 y = absatz('Die Rechnung ist bewusst einfach: Verbrauch in kWh × Preisunterschied in Cent ÷ 100 = Euro pro Jahr. Sie gilt für den Energiepreis, also den Teil Ihres Arbeitspreises, den Sie verhandeln können. Netzentgelte, Steuern und Umlagen sind bei allen Versorgern gleich, dazu mehr auf Seite 8.', RA, y, BR, 9.5, HELLBLAU, 1.45);
-hinweis('LIEBER PRÜFEN LASSEN?', 'Mit dem kostenlosen Energiekosten-Check von EGC wissen Sie, wo Ihr Vertrag im Markt steht. Ohne Wechselpflicht. Kontakt auf Seite 19.', 232);
+hinweis('LIEBER PRÜFEN LASSEN?', 'Mit dem kostenlosen Energiekosten-Check von EGC wissen Sie, wo Ihr Vertrag im Markt steht. Ohne Wechselpflicht. Kontakt auf Seite 21.', 232);
 
 /* ============ 3 Inhalt ============ */
 neueSeite();
@@ -194,8 +194,8 @@ y = titel('INHALT', 'Was Sie in diesem', 'Leitfaden erwartet', 30);
 const teile = [
   ['TEIL 1 · DIE AUSGANGSLAGE', [['2027 auf einen Blick', 4], ['Wer wir sind', 5], ['Für wen dieser Leitfaden ist', 6], ['Sieben Kostenfallen im Energieeinkauf', 7]]],
   ['TEIL 2 · VERSTEHEN', [['Ihre Rechnung lesen: was verhandelbar ist', 8], ['Lastgang und Leistungspreis', 9], ['Die Unterlagen-Checkliste', 10]]],
-  ['TEIL 3 · ENTSCHEIDEN', [['Gesamtkosten statt Arbeitspreis', 11], ['Das passende Beschaffungsmodell', 12], ['Entlastungen, die Ihnen zustehen können', 13], ['Erdgas: was anders ist', 14]]],
-  ['TEIL 4 · UMSETZEN', [['So läuft es mit EGC', 15], ['Häufige Fragen', 16], ['Ihr Fristenkalender', 17], ['Glossar', 18], ['Ihr kostenloser Energiekosten-Check', 19], ['Quellen und Hinweise', 20]]]];
+  ['TEIL 3 · ENTSCHEIDEN', [['Gesamtkosten statt Arbeitspreis', 11], ['Das passende Beschaffungsmodell', 12], ['Entlastungen, die Ihnen zustehen können', 13], ['Erdgas: was anders ist', 14], ['Drei Praxisbeispiele', 15]]],
+  ['TEIL 4 · UMSETZEN', [['So läuft es mit EGC', 17], ['Häufige Fragen', 18], ['Ihr Fristenkalender', 19], ['Glossar', 20], ['Ihr kostenloser Energiekosten-Check', 21], ['Quellen und Hinweise', 22]]]];
 const iw = (BR - 6) / 2;
 teile.forEach(([k, punkte], i) => {
   const x = RA + (i % 2) * (iw + 6), yy = y + Math.floor(i / 2) * 78, hh = 72;
@@ -210,7 +210,7 @@ teile.forEach(([k, punkte], i) => {
   });
 });
 y += 160;
-[['6', 'Vorlagen zum Mitnehmen: Checklisten, Vergleich, Fristenkalender'], ['4', 'Modellrechnungen mit vollständigem Rechenweg'], ['5', 'Schritte, mit denen wir für Sie einkaufen']].forEach(([z, t], i) => {
+[['6', 'Vorlagen zum Mitnehmen: Checklisten, Vergleich, Fristenkalender'], ['3', 'Praxisbeispiele mit vollständigem Rechenweg'], ['5', 'Schritte, mit denen wir für Sie einkaufen']].forEach(([z, t], i) => {
   const x = RA + i * ((BR - 8) / 3 + 4), w3 = (BR - 8) / 3;
   verlauf(x, y, w3, 1, GRUEN1, GRUEN2, { n: 20 });
   schrift(20, true); fa(NAVY); doc.text(z, x, y + 12);
@@ -236,7 +236,7 @@ y = zwischen('Was das für Sie heißt', y);
   schrift(9.8, true); fa(GRUEN2); doc.text(k, RA, y);
   y = absatz(t, RA, y + 5.2, BR, 9.2, HELLBLAU, 1.42) + 5;
 });
-schrift(6.8); fa(HELLBLAU); doc.text('Stand: 10.11.2026. Quellen auf Seite 20. Regulatorische Werte für 2027 sind teils vorläufig.', RA, H - 18);
+schrift(6.8); fa(HELLBLAU); doc.text('Stand: 10.11.2026. Quellen auf Seite 22. Regulatorische Werte für 2027 sind teils vorläufig.', RA, H - 18);
 
 /* ============ 5 Wer wir sind ============ */
 neueSeite();
@@ -268,7 +268,7 @@ y = zwischen('So arbeiten wir', y);
   schrift(9); fa(GRAU); doc.text(u, RA + 42, yy);
 });
 y += 68;
-hinweis('SO WERDEN WIR BEZAHLT', 'Die Ausschreibung und der Angebotsvergleich sind für Sie kostenlos. Vergütet werden wir vom Energieversorger, für den Sie sich entscheiden. Bleibt Ihr bisheriger Versorger der beste, bleiben Sie dort.', y);
+hinweis('UNABHÄNGIG', 'Wir sind an keinen Energieversorger gebunden und vergleichen für Sie den Markt. Bleibt Ihr bisheriger Versorger der beste, bleiben Sie dort.', y);
 
 /* ============ 6 Für wen ============ */
 neueSeite();
@@ -501,9 +501,66 @@ y = liste(RA, y, BR, 'Checkliste Erdgas, zusätzlich zu Vorlage 1', [
   'Produzierendes Gewerbe: Entlastung bei der Energiesteuer prüfen',
   'Strom und Erdgas gemeinsam ausschreiben, wenn beides gebraucht wird'], false);
 
-/* ============ 15 So läuft es mit EGC ============ */
+/* ============ 15/16 Praxisbeispiele ============ */
+const euro = (v) => num(Math.round(v)) + ' €';
+const praxis = (y, f) => {
+  const sp = [{ t: 'Position', w: 66, fett: true }, { t: 'vorher', w: 30, rechts: true }, { t: 'nachher', w: 30, rechts: true }, { t: 'pro Jahr', w: 48, rechts: true, farbe: GRUEN2, fett: true }];
+  /* Kopf */
+  navyKarte(RA, y, BR, 30);
+  schrift(7.2, true); fa(GRUEN2); doc.text(f.kicker, RA + 6, y + 8, { charSpace: 0.8 });
+  schrift(13, true); fa(WEISS); doc.text(f.titel, RA + 6, y + 16);
+  schrift(8.4); fa(HELLBLAU); doc.text(f.menge, RA + 6, y + 23);
+  schrift(7.2); fa(HELLBLAU); doc.text('Ersparnis pro Jahr', RA + BR - 6, y + 11, { align: 'right' });
+  schrift(19, true); fa(GRUEN2); doc.text('− ' + euro(f.summe), RA + BR - 6, y + 22, { align: 'right' });
+  y += 34;
+  /* Text */
+  const tw = BR;
+  [['Ausgangslage', f.lage], ['Umgesetzt', f.tat]].forEach(([k, t]) => {
+    schrift(8.6, true); fa(NAVY); doc.text(k + ':', RA, y);
+    const ww = doc.getTextWidth(k + ': ');
+    schrift(8.6); fa(TEXT); const z = doc.splitTextToSize(t, tw - ww); doc.text(z[0], RA + ww, y);
+    if (z.length > 1) { const rest = doc.splitTextToSize(z.slice(1).join(' '), tw); doc.text(rest, RA, y + 4.3, { lineHeightFactor: 1.4 }); y += rest.length * 4.25; }
+    y += 5.6;
+  });
+  y = tabelle(RA, y, sp, f.zeilen, { gr: 8.2, markiere: [f.zeilen.length - 1] }) + 3;
+  schrift(7); fa(GRAU); const rw = doc.splitTextToSize('Rechenweg: ' + f.rechenweg, BR); doc.text(rw, RA, y + 2, { lineHeightFactor: 1.35 });
+  return y + 2 + rw.length * 3.4;
+};
+const F1 = { kicker: 'FALL 1 · STROM · HANDWERK', titel: 'Bäckerei mit Backstube und drei Filialen', menge: '160.000 kWh Strom pro Jahr · RLM · produzierendes Handwerk',
+  lage: 'Der Vertrag beim örtlichen Versorger hatte sich zweimal still verlängert. Energiepreis 17,90 ct/kWh, eine Stromsteuer-Entlastung war nie beantragt worden.',
+  tat: 'Ausschreibung bei mehreren Versorgern, Festpreis über 24 Monate, Antrag auf Stromsteuer-Entlastung als produzierendes Handwerk.',
+  zeilen: [['Energiepreis (ct/kWh)', '17,90', '13,40', euro(4.5 * 1600)], ['Stromsteuer-Entlastung (§ 9b StromStG)', '–', 'beantragt', euro(160 * 20 - 250)], ['Ersparnis pro Jahr', '', '', '− ' + euro(4.5 * 1600 + 160 * 20 - 250)]],
+  rechenweg: '4,50 ct/kWh × 160.000 kWh ÷ 100 = 7.200 €. Stromsteuer: 160 MWh × 20 € − 250 € Sockelbetrag = 2.950 €.',
+  summe: 4.5 * 1600 + 160 * 20 - 250 };
+const F2 = { kicker: 'FALL 2 · STROM UND ERDGAS · HOTELLERIE', titel: 'Hotel mit Restaurant und Wellnessbereich', menge: '280.000 kWh Strom und 412.000 kWh Erdgas pro Jahr',
+  lage: 'Strom und Erdgas liefen bei zwei Versorgern mit unterschiedlichen Laufzeiten. Energiepreise 15,20 ct/kWh (Strom) und 8,10 ct/kWh (Erdgas).',
+  tat: 'Laufzeiten synchronisiert, Strom und Erdgas gemeinsam ausgeschrieben, Mengentoleranz für den witterungsabhängigen Gasverbrauch vereinbart.',
+  zeilen: [['Strom, Energiepreis (ct/kWh)', '15,20', '12,60', euro(2.6 * 2800)], ['Erdgas, Energiepreis (ct/kWh)', '8,10', '5,60', euro(2.5 * 4120)], ['Ersparnis pro Jahr', '', '', '− ' + euro(2.6 * 2800 + 2.5 * 4120)]],
+  rechenweg: 'Strom: 2,60 ct/kWh × 280.000 kWh ÷ 100 = 7.280 €. Erdgas: 2,50 ct/kWh × 412.000 kWh ÷ 100 = 10.300 €.',
+  summe: 2.6 * 2800 + 2.5 * 4120 };
+const F3 = { kicker: 'FALL 3 · STROM UND ERDGAS · INDUSTRIE', titel: 'Kunststoffverarbeitung im Mehrschichtbetrieb', menge: '6.300.000 kWh Strom (6,3 GWh) und 1.140.000 kWh Erdgas (1,14 GWh) pro Jahr',
+  lage: 'Einkauf bisher als Festpreis zu einem Stichtag kurz vor Vertragsende. Eine Lastspitze von 120 kW entstand beim gleichzeitigen Anfahren der Spritzgießmaschinen. Die Stromsteuer-Entlastung wurde beantragt.',
+  tat: 'Tranchenbeschaffung über 12 Monate mit Zielpreisen, zeitversetztes Anfahren der Maschinen, Erdgas mit eigener Ausschreibung und geregelter CO₂-Weitergabe ab 2028.',
+  zeilen: [['Strom, Energiepreis Durchschnitt (ct/kWh)', '11,80', '10,90', euro(0.9 * 63000)], ['Leistungspreis Netz: 120 kW weniger Spitze', '', '× 110 €/kW', euro(120 * 110)], ['Erdgas, Energiepreis (ct/kWh)', '6,40', '5,30', euro(1.1 * 11400)], ['Ersparnis pro Jahr', '', '', '− ' + euro(0.9 * 63000 + 120 * 110 + 1.1 * 11400)]],
+  rechenweg: 'Strom: 0,90 ct/kWh × 6.300.000 kWh ÷ 100 = 56.700 €. Leistungspreis: 120 kW × 110 €/kW = 13.200 €. Erdgas: 1,10 ct/kWh × 1.140.000 kWh ÷ 100 = 12.540 €.',
+  summe: 0.9 * 63000 + 120 * 110 + 1.1 * 11400 };
+neueSeite();
+y = titel('11 · PRAXIS', 'Drei Praxisbeispiele,', 'vom Handwerk bis zur Industrie', 30, 'Drei typische Ausgangslagen als Modellrechnung, netto und mit vollständigem Rechenweg.');
+y = praxis(y, F1) + 9;
+y = praxis(y, F2);
+neueSeite();
+y = titel('11 · PRAXIS', 'Je größer der Verbrauch,', 'desto mehr ist jeder Hebel wert', 30);
+y = praxis(y, F3) + 9;
+y = zwischen('Was bedeutet das bei Ihrem Verbrauch?', y);
+y = tabelle(RA, y, [{ t: 'Fall', w: 58, fett: true }, { t: 'Verbrauch', w: 46, rechts: true }, { t: 'Ersparnis pro Jahr', w: 34, rechts: true }, { t: 'über 3 Jahre', w: 36, rechts: true, fett: true }], [
+  ['Fall 1 · Bäckerei', '160.000 kWh', euro(F1.summe), euro(F1.summe * 3)],
+  ['Fall 2 · Hotel', '692.000 kWh', euro(F2.summe), euro(F2.summe * 3)],
+  ['Fall 3 · Industrie', '7.440.000 kWh', euro(F3.summe), euro(F3.summe * 3)]], { gr: 8.6 }) + 7;
+hinweis('MODELLRECHNUNG, KEINE ZUSAGE', 'Die Fälle zeigen typische Ausgangslagen mit gerundeten Marktwerten. Wie viel bei Ihnen möglich ist, zeigt nur Ihre eigene Rechnung: Der kostenlose Energiekosten-Check auf Seite 21 rechnet es für Sie aus.', y);
+
+/* ============ 17 So läuft es mit EGC ============ */
 neueSeite(true);
-y = titel('11 · ZUSAMMENARBEIT', 'So läuft es', 'mit EGC Energie', 30, 'Ihr Aufwand: die letzte Jahresrechnung und eine Vollmacht. Den Rest übernehmen wir und stimmen jede Entscheidung mit Ihnen ab.');
+y = titel('12 · ZUSAMMENARBEIT', 'So läuft es', 'mit EGC Energie', 30, 'Ihr Aufwand: die letzte Jahresrechnung und eine Vollmacht. Den Rest übernehmen wir und stimmen jede Entscheidung mit Ihnen ab.');
 const ablauf = [
   ['Unterlagen', 'Sie geben uns Rechnung, Verbrauch und, falls vorhanden, den Lastgang. Fehlt etwas, melden wir uns gezielt.'],
   ['Kalkulation', 'Unser Kalkulationsteam holt Preise bei vielen Versorgern ein, mit identischen Eckdaten für alle.'],
@@ -525,7 +582,7 @@ hinweis('KEINE WECHSELPFLICHT', 'Bleibt Ihr bisheriger Versorger der beste, blei
 
 /* ============ 16 Häufige Fragen ============ */
 neueSeite();
-y = titel('12 · HÄUFIGE FRAGEN', 'Was wir im Erstgespräch', 'am häufigsten hören', 30);
+y = titel('13 · HÄUFIGE FRAGEN', 'Was wir im Erstgespräch', 'am häufigsten hören', 30);
 const unterschied = [['Lieferant', 'verkauft die Energie', 'frei wählbar', true], ['Netzbetreiber', 'transportiert die Energie', 'bleibt gleich', false], ['Messstellenbetreiber', 'betreibt Ihren Zähler', 'bleibt gleich', false]];
 const k16 = (BR - 8) / 3;
 unterschied.forEach(([t, u, v, b], i) => { const x = RA + i * (k16 + 4);
@@ -537,7 +594,7 @@ y += 33;
  ['„Wir haben keine Zeit, uns damit zu beschäftigen.“', 'Ihr Aufwand ist die letzte Jahresrechnung und eine Vollmacht. Ausschreibung, Vergleich, Kündigung und Anmeldung übernehmen wir und der neue Versorger.'],
  ['„Zahlen wir beim Wechsel doppelt?“', 'Nein. Der neue Vertrag beginnt, wenn der alte endet. Der Lieferantenwechsel darf für Sie keine zusätzlichen Kosten verursachen (§ 20a EnWG).'],
  ['„Wird dann der Zähler getauscht?“', 'Nein. Der Zähler gehört dem Messstellenbetreiber und bleibt. Es werden nur Daten ausgetauscht. Niemand muss in Ihren Betrieb.'],
- ['„Was kostet uns das?“', 'Der Check und der Angebotsvergleich sind kostenlos. Vergütet werden wir vom Versorger, für den Sie sich entscheiden.'],
+ ['„Wie lange sind wir dann gebunden?“', 'So lange, wie Sie es entscheiden. Wir lassen uns verschiedene Laufzeiten anbieten, zum Beispiel 24 und 36 Monate, und rechnen den Unterschied in Euro für Sie aus.'],
  ['„Wir haben schon einen Berater.“', 'Dann ist ein Vergleich die einfachste Bestätigung. Sind Ihre Konditionen marktgerecht, wissen Sie es danach schwarz auf weiß.']].forEach(([q, a]) => {
   const ha = hoehe(a, BR - 14, 8.9, 1.4) + 15;
   karte(RA, y, BR, ha); fl(GRUEN); doc.roundedRect(RA, y, 1.8, ha, 0.9, 0.9, 'F');
@@ -578,7 +635,7 @@ hinweis('KLARE ZUSTÄNDIGKEIT', 'Benennen Sie eine Person mit Vertretung, die f�
 
 /* ============ 18 Glossar ============ */
 neueSeite();
-y = titel('13 · GLOSSAR', 'Die wichtigsten Begriffe,', 'in einem Satz erklärt', 30);
+y = titel('14 · GLOSSAR', 'Die wichtigsten Begriffe,', 'in einem Satz erklärt', 30);
 y = tabelle(RA, y, [{ t: 'Begriff', w: 46, fett: true }, { t: 'Bedeutung', w: 128 }], [
   ['Arbeitspreis', 'Preis pro verbrauchter kWh, setzt sich aus Energiepreis, Netzentgelten, Umlagen und Steuern zusammen.'],
   ['Energiepreis', 'Der Teil des Arbeitspreises, den der Versorger für Beschaffung und Vertrieb berechnet: der verhandelbare Teil.'],
@@ -638,7 +695,7 @@ doc.link(RA, yk + hk + 5, BR, 12, { url: 'mailto:' + kontakt.mail + '?subject=En
 
 /* ============ 20 Quellen ============ */
 neueSeite(true);
-y = titel('14 · ANHANG', 'Quellen und', 'rechtliche Hinweise', 30);
+y = titel('15 · ANHANG', 'Quellen und', 'rechtliche Hinweise', 30);
 y = zwischen('Quellen', y, true);
 [['Übertragungsnetzbetreiber (50Hertz, Amprion, TenneT, TransnetBW)', 'Vorläufige Netzentgelte 2027, veröffentlicht am 01.10.2026, netztransparenz.de'],
  ['Bundesregierung', 'Bundeszuschuss zu den Übertragungsnetzentgelten 2027, Kabinettsbeschluss September 2026'],
