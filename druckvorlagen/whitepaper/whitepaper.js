@@ -186,7 +186,7 @@ y = tabelle(RA, y, [{ t: 'Jahresverbrauch', w: 44, fett: true }, { t: '1 ct/kWh,
   mengen.map((m) => [num(m) + ' kWh', num(m / 100) + ' €', num(m * 3 / 100) + ' €', num(m * 6 / 100) + ' €']), { dunkel: true });
 y += 8;
 y = absatz('Die Rechnung ist bewusst einfach: Verbrauch in kWh × Preisunterschied in Cent ÷ 100 = Euro pro Jahr. Sie gilt für den Energiepreis, also den Teil Ihres Arbeitspreises, den Sie verhandeln können. Netzentgelte, Steuern und Umlagen sind bei allen Versorgern gleich, dazu mehr auf Seite 8.', RA, y, BR, 9.5, HELLBLAU, 1.45);
-hinweis('LIEBER PRÜFEN LASSEN?', 'Mit dem kostenlosen Energiekosten-Check von EGC wissen Sie, wo Ihr Vertrag im Markt steht. Ohne Wechselpflicht. Kontakt auf Seite 21.', 232);
+hinweis('LIEBER PRÜFEN LASSEN?', 'Mit dem Energiekosten-Check von EGC wissen Sie, wo Ihr Vertrag im Markt steht. Ohne Wechselpflicht. Kontakt auf Seite 21.', 232);
 
 /* ============ 3 Inhalt ============ */
 neueSeite();
@@ -195,7 +195,7 @@ const teile = [
   ['TEIL 1 · DIE AUSGANGSLAGE', [['2027 auf einen Blick', 4], ['Wer wir sind', 5], ['Für wen dieser Leitfaden ist', 6], ['Sieben Kostenfallen im Energieeinkauf', 7]]],
   ['TEIL 2 · VERSTEHEN', [['Ihre Rechnung lesen: was verhandelbar ist', 8], ['Lastgang und Leistungspreis', 9], ['Die Unterlagen-Checkliste', 10]]],
   ['TEIL 3 · ENTSCHEIDEN', [['Gesamtkosten statt Arbeitspreis', 11], ['Das passende Beschaffungsmodell', 12], ['Entlastungen, die Ihnen zustehen können', 13], ['Erdgas: was anders ist', 14], ['Drei Praxisbeispiele', 15]]],
-  ['TEIL 4 · UMSETZEN', [['So läuft es mit EGC', 17], ['Häufige Fragen', 18], ['Ihr Fristenkalender', 19], ['Glossar', 20], ['Ihr kostenloser Energiekosten-Check', 21], ['Quellen und Hinweise', 22]]]];
+  ['TEIL 4 · UMSETZEN', [['So läuft es mit EGC', 17], ['Häufige Fragen', 18], ['Ihr Fristenkalender', 19], ['Glossar', 20], ['Ihr Energiekosten-Check', 21], ['Quellen und Hinweise', 22]]]];
 const iw = (BR - 6) / 2;
 teile.forEach(([k, punkte], i) => {
   const x = RA + (i % 2) * (iw + 6), yy = y + Math.floor(i / 2) * 78, hh = 72;
@@ -247,7 +247,7 @@ let yt5 = absatz('EGC Energie ist ein versorgerunabhängiger Energiedienstleiste
 yt5 = absatz('Wir sind kein Versorger und verkaufen keine eigene Energie. Deshalb empfehlen wir, was zu Ihrem Unternehmen passt, und bleiben auch nach dem Abschluss Ihr Ansprechpartner.', RA, yt5, BR - bw5 - 7, 9.8);
 y = Math.max(yt5, y - 2 + bh5) + 10;
 const k5 = (BR - 9) / 4;
-[['Versorger', 'unabhängig', 'viele Versorger im Vergleich'], ['Strom & Gas', 'aus einer Hand', 'SLP und RLM, ein Standort oder viele'], ['Bundesweit', 'vor Ort und digital', 'Ihr fester Ansprechpartner'], ['0 €', 'Erstprüfung', 'ohne Wechselpflicht']].forEach(([a, b, c], i) => {
+[['Versorger', 'unabhängig', 'viele Versorger im Vergleich'], ['Strom & Gas', 'aus einer Hand', 'SLP und RLM, ein Standort oder viele'], ['Bundesweit', 'vor Ort und digital', 'Ihr fester Ansprechpartner'], ['Keine', 'Wechselpflicht', 'Sie entscheiden frei']].forEach(([a, b, c], i) => {
   const x = RA + i * (k5 + 3);
   if (i === 3) verlauf(x, y, k5, 34, GRUEN1, GRUEN2, { r: 3, n: 30 }); else karte(x, y, k5, 34);
   schrift(15, true); fa(i === 3 ? NAVY1 : NAVY); doc.text(a, x + 4, y + 12);
@@ -405,7 +405,7 @@ y = liste(RA, y, BR, 'Zusätzlich bei registrierender Leistungsmessung (RLM)', [
   'Lastgang der letzten 12 Monate als Viertelstundenwerte (CSV oder Excel)',
   'Jahreshöchstlast in kW und Leistungspreis des Netzbetreibers',
   'Bestehende Vereinbarungen zu individuellen Netzentgelten (§ 19 StromNEV)'], false) + 6;
-hinweis('TIPP', 'Den Lastgang bekommen Sie kostenlos von Ihrem Netz- oder Messstellenbetreiber. Mit Ihrer Vollmacht fordern wir ihn für Sie an.', y, false);
+hinweis('TIPP', 'Den Lastgang bekommen Sie von Ihrem Netz- oder Messstellenbetreiber. Mit Ihrer Vollmacht fordern wir ihn für Sie an.', y, false);
 
 /* ============ 11 Gesamtkosten ============ */
 neueSeite();
@@ -556,7 +556,7 @@ y = tabelle(RA, y, [{ t: 'Fall', w: 58, fett: true }, { t: 'Verbrauch', w: 46, r
   ['Fall 1 · Bäckerei', '160.000 kWh', euro(F1.summe), euro(F1.summe * 3)],
   ['Fall 2 · Hotel', '692.000 kWh', euro(F2.summe), euro(F2.summe * 3)],
   ['Fall 3 · Industrie', '7.440.000 kWh', euro(F3.summe), euro(F3.summe * 3)]], { gr: 8.6 }) + 7;
-hinweis('MODELLRECHNUNG, KEINE ZUSAGE', 'Die Fälle zeigen typische Ausgangslagen mit gerundeten Marktwerten. Wie viel bei Ihnen möglich ist, zeigt nur Ihre eigene Rechnung: Der kostenlose Energiekosten-Check auf Seite 21 rechnet es für Sie aus.', y);
+hinweis('MODELLRECHNUNG, KEINE ZUSAGE', 'Die Fälle zeigen typische Ausgangslagen mit gerundeten Marktwerten. Wie viel bei Ihnen möglich ist, zeigt nur Ihre eigene Rechnung: Der Energiekosten-Check auf Seite 21 rechnet es für Sie aus.', y);
 
 /* ============ 17 So läuft es mit EGC ============ */
 neueSeite(true);
@@ -592,7 +592,7 @@ unterschied.forEach(([t, u, v, b], i) => { const x = RA + i * (k16 + 4);
 y += 33;
 [['„Wir sind seit Jahren beim Stadtwerk, läuft doch alles.“', 'Dass alles läuft, liegt am Netz, nicht am Vertrag. Das Netz bleibt beim Wechsel dasselbe. Treue wird beim Energiepreis selten belohnt.'],
  ['„Wir haben keine Zeit, uns damit zu beschäftigen.“', 'Ihr Aufwand ist die letzte Jahresrechnung und eine Vollmacht. Ausschreibung, Vergleich, Kündigung und Anmeldung übernehmen wir und der neue Versorger.'],
- ['„Zahlen wir beim Wechsel doppelt?“', 'Nein. Der neue Vertrag beginnt, wenn der alte endet. Der Lieferantenwechsel darf für Sie keine zusätzlichen Kosten verursachen (§ 20a EnWG).'],
+ ['„Zahlen wir beim Wechsel doppelt?“', 'Nein. Der neue Vertrag beginnt, wenn der alte endet, ohne Überschneidung. Der Lieferantenwechsel ist gesetzlich geregelt (§ 20a EnWG).'],
  ['„Wird dann der Zähler getauscht?“', 'Nein. Der Zähler gehört dem Messstellenbetreiber und bleibt. Es werden nur Daten ausgetauscht. Niemand muss in Ihren Betrieb.'],
  ['„Wie lange sind wir dann gebunden?“', 'So lange, wie Sie es entscheiden. Wir lassen uns verschiedene Laufzeiten anbieten, zum Beispiel 24 und 36 Monate, und rechnen den Unterschied in Euro für Sie aus.'],
  ['„Wir haben schon einen Berater.“', 'Dann ist ein Vergleich die einfachste Bestätigung. Sind Ihre Konditionen marktgerecht, wissen Sie es danach schwarz auf weiß.']].forEach(([q, a]) => {
@@ -657,9 +657,9 @@ y = tabelle(RA, y, [{ t: 'Begriff', w: 46, fett: true }, { t: 'Bedeutung', w: 12
 neueSeite(true);
 doc.addImage(bild('rueckseite.jpg'), 'JPEG', 0, 0, W, H);
 doc.addImage(logoT, 'PNG', W - RA - 22, 14, 22, 22 * 196 / 420);
-y = titel('IHR NÄCHSTER SCHRITT', 'Ihr kostenloser', 'Energiekosten-Check', 30, 'Sie schicken uns Ihre letzte Jahresrechnung. Wir zeigen Ihnen, wo Ihr Vertrag im Markt steht und was möglich ist.');
+y = titel('IHR NÄCHSTER SCHRITT', 'Ihr persönlicher', 'Energiekosten-Check', 30, 'Sie schicken uns Ihre letzte Jahresrechnung. Wir zeigen Ihnen, wo Ihr Vertrag im Markt steht und was möglich ist.');
 const k19 = (BR - 6) / 3;
-[['0 €', 'für die Prüfung'], ['Strom & Gas', 'SLP und RLM'], ['Keine', 'Wechselpflicht']].forEach(([a, b], i) => {
+[['Ihr Markt', 'im Vergleich'], ['Strom & Gas', 'SLP und RLM'], ['Keine', 'Wechselpflicht']].forEach(([a, b], i) => {
   const x = RA + i * (k19 + 3);
   if (i === 0) verlauf(x, y, k19, 26, GRUEN1, GRUEN2, { r: 3, n: 30 }); else { dk(0.85); karte(x, y, k19, 26, NAVYKARTE); dk(1); }
   schrift(16, true); fa(i === 0 ? NAVY1 : WEISS); doc.text(a, x + 5, y + 12); schrift(8.5, true); fa(i === 0 ? NAVY : HELLBLAU); doc.text(b, x + 5, y + 19.5); });
@@ -703,7 +703,7 @@ y = zwischen('Quellen', y, true);
  ['Generalzolldirektion', 'Steuerentlastung nach § 9b StromStG, Voraussetzungen und Fristen, zoll.de'],
  ['Bundesnetzagentur', 'Individuelle Netzentgelte nach § 19 StromNEV; Lieferantenwechsel, bundesnetzagentur.de'],
  ['Netztransparenz.de', 'Umlagen 2027: KWKG-Umlage, Offshore-Netzumlage, Aufschlag für besondere Netznutzung'],
- ['Energiewirtschaftsgesetz', '§ 20a EnWG, Lieferantenwechsel ohne zusätzliche Kosten']].forEach(([a, b]) => {
+ ['Energiewirtschaftsgesetz', '§ 20a EnWG, Lieferantenwechsel']].forEach(([a, b]) => {
   schrift(9, true); fa(WEISS); doc.text(a, RA, y); y = absatz(b, RA, y + 4.8, BR, 8.4, HELLBLAU, 1.35) + 4;
 });
 y += 4;
