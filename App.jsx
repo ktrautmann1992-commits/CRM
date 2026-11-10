@@ -3160,7 +3160,8 @@ const setzeFirmenanteil = (wert, jeVersorger) => {
 const firmenanteilVon = (versorgerName) => {
   const eigen = FIRMENANTEIL_JE_VERSORGER[versorgerName];
   const w = parseFloat(eigen);
-  return eigen !== undefined && eigen !== "" && !isNaN(w) ? w : FIRMENANTEIL;
+  /* fehlt die Einstellung, gilt die Vorgabe 75 % */
+  return eigen !== undefined && eigen !== "" && !isNaN(w) ? w : (isNaN(FIRMENANTEIL) ? 75 : FIRMENANTEIL);
 };
 
 /* Eigener Satz in Prozent der Gesamtprovision. Die Geschäftsführung erhält immer den Firmenanteil (Vorgabe 75 %),
