@@ -14831,11 +14831,16 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
   const profilRef = React.useRef(null);
 
   /* Kurzstand (gesichert, Preis, Ampel) in der Zusammenfassung mitführen: Vorgang und Liste lesen ihn */
+  /* Lieferbeginn je Lieferjahr: 1. Januar, im ersten Jahr der vereinbarte Beginn */
+  const beginnJahr = (jahr) => {
+    const s1 = jahr + "-01-01";
+    return b.lieferbeginn && b.lieferbeginn > s1 ? b.lieferbeginn : s1;
+  };
   const mitKurzstand = (n) => {
     if (!n.ergebnis || !n.ergebnis.jahre) return n;
     const jahre = n.ergebnis.jahre.map((j) => {
       const st = tranchenStand(n.tranchen, j.jahr, j, n.stress, heute());
-      const a = ampel(st, j, { hoechstpreis: n.hoechstpreis }, b.lieferbeginn, heute());
+      const a = ampel(st, j, { hoechstpreis: n.hoechstpreis }, beginnJahr(j.jahr), heute());
       return { ...j, gesichert: st.gekauftAnteil, preis: st.preis, ampelJahr: a.stufe };
     });
     return { ...n, ergebnis: { ...n.ergebnis, jahre, ampel: Math.max(0, ...jahre.map((j) => j.ampelJahr || 0)) } };
@@ -14914,7 +14919,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
   /* Stand der Tranchen je Jahr (braucht nur die gespeicherten Kennzahlen) */
   const standVon = (j) => {
     const st = tranchenStand(bw.tranchen, j.jahr, j, bw.stress, heute());
-    return { st, a: ampel(st, j, { hoechstpreis: bw.hoechstpreis }, b.lieferbeginn, heute()) };
+    return { st, a: ampel(st, j, { hoechstpreis: bw.hoechstpreis }, beginnJahr(j.jahr), heute()) };
   };
   const erg = bw.ergebnis;
 
@@ -15123,7 +15128,21 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
       {erg && erg.jahre && (
         <Abschnitt titel="4 · Bewertung" rechts={<span className="text-xs" style={{ color: C.muted }}>
           berechnet {datum(erg.berechnet)} · Preise vom {datum(erg.marktStand)}{erg.profil ? " · mit Stundenprofil" : ""}</span>}>
-          <div className="overflow-x-auto">
+          <div className="sm:hidden space-y-3">
+            {erg.jahre.map((j) => (
+              <div key={j.jahr} className="rounded p-3" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                <div className="text-sm mb-2">Lieferjahr {j.jahr}</div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm" style={tz}>
+                  {[["Menge", num(j.menge, 0) + " MWh"], ["Absicherung", num(j.baseMW, 3) + " Base · " + num(j.peakMW, 3) + " Peak MW"],
+                    ["Base/Peak", num(j.hedgePreis, 2) + " €/MWh"], ["Struktur", num(j.strukturProMWh, 2) + " €/MWh"],
+                    ["Lastgang gesamt", num(j.hedgePreis + j.strukturProMWh, 2) + " €/MWh"], ["Benutzungsstunden", num(j.benutzung) + " h"]].map(([t, v]) => (
+                    <div key={t}><div className="text-xs" style={{ color: C.muted }}>{t}</div>{v}</div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm" style={tz}>
               <thead>
                 <tr className="text-xs text-left" style={{ color: C.muted }}>
