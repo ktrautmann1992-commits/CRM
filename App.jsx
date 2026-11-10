@@ -94,6 +94,9 @@ function naechsterSchrittInnen(a, rolle) {
   return null;
 }
 
+/* Rollen, in denen die Geschäftsführung arbeiten kann, ohne sich neu anzumelden */
+const ARBEITEN_ALS = ["Kalkulation", "Vertragsmanagement", "Leadmanagement", "Finanzbuchhaltung"];
+
 /* Wer gerade schaut: der Vertrieb sieht einen bestätigten Auftrag erst nach der Lieferbestätigung
    durch das Vertragsmanagement als „Vom Versorger bestätigt“, vorher als „An Versorger übermittelt“. */
 const VERTRIEB_SICHT_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
@@ -15289,7 +15292,18 @@ function PortalApp() {
   };
   const verlaufUeberspringen = React.useRef(false);
 
-  const user = mitarbeiter.find((u) => u.id === userId) || null;
+  /* Die Geschäftsführung kann in der Rolle eines anderen Teams arbeiten, ohne sich neu anzumelden.
+     Angezeigt werden Menü, Startseite und Knöpfe dieser Rolle; Verlauf und Nachrichten tragen den echten Namen
+     mit dem Zusatz „(als …)“. Die Datenbank prüft weiter die echte Rolle. Gespeichert wird nur auf diesem Gerät. */
+  const [arbeitenAls, setArbeitenAlsRoh] = useState(() => {
+    try { return localStorage.getItem("egc-arbeiten-als") || ""; } catch (e) { return ""; }
+  });
+  const angemeldet = mitarbeiter.find((u) => u.id === userId) || null;
+  const darfWechseln = !!angemeldet && angemeldet.rolle === "Geschäftsführung";
+  const alsRolle = darfWechseln && ARBEITEN_ALS.includes(arbeitenAls) ? arbeitenAls : "";
+  const user = alsRolle
+    ? { ...angemeldet, rolle: alsRolle, name: angemeldet.name + " (als " + alsRolle + ")", echteRolle: angemeldet.rolle }
+    : angemeldet;
 
   /* ---------- Anbindung an die Datenbank ---------- */
   const [sitzung, setSitzung] = useState("pruefen"); /* pruefen · keine · aktiv */
@@ -15954,6 +15968,11 @@ function PortalApp() {
     if (st && st.egc && !st.schutz && (st.n || 0) > 1) { window.history.back(); return; }
     setListenAnsicht(null); setEntwurf(null); setOffen(null); setAnsicht(NAV[0] ? NAV[0].id : "dashboard");
   };
+  const setArbeitenAls = (r) => {
+    setArbeitenAlsRoh(r);
+    try { if (r) localStorage.setItem("egc-arbeiten-als", r); else localStorage.removeItem("egc-arbeiten-als"); } catch (e) { /* egal */ }
+    setOffen(null); setListenAnsicht(null); setEntwurf(null); setAnsicht("dashboard"); setMenu(false);
+  };
   const zeigeZurueck = !!(offen || listenAnsicht || entwurf || (NAV[0] && ansicht !== NAV[0].id));
 
   const aktuell = anfragenSicht.find((a) => a.id === offen);
@@ -16302,15 +16321,26 @@ function PortalApp() {
         {/* Alles Weitere: mobil nur bei geöffnetem Menü */}
         <div className={(menu ? "block" : "hidden") + " lg:block px-4 pb-4 lg:px-0 lg:pb-0"}>
           <div className="flex items-center gap-3 mb-3">
-            <Avatar m={user} size={38} />
+            <Avatar m={angemeldet} size={38} />
             <div className="flex-1 min-w-0">
-              <div className="text-sm truncate">{user.name}</div>
-              <div className="text-xs truncate" style={{ color: "#8B9BB0" }}>{user.rolle}</div>
+              <div className="text-sm truncate">{angemeldet.name}</div>
+              <div className="text-xs truncate" style={{ color: "#8B9BB0" }}>{angemeldet.rolle}</div>
             </div>
             <button onClick={abmeldenUndLeeren} title="Abmelden" style={{ color: "#8B9BB0" }}>
               <ArrowLeft size={16} />
             </button>
           </div>
+          {darfWechseln && (
+            <label className="block mb-3">
+              <span className="block text-xs mb-1" style={{ color: "#8B9BB0" }}>Arbeiten als</span>
+              <select value={alsRolle} onChange={(e) => setArbeitenAls(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded outline-none"
+                style={{ background: alsRolle ? C.gruen : "#1B2A3D", color: alsRolle ? C.ink : "#fff", border: "1px solid #2A3B52" }}>
+                <option value="">Geschäftsführung</option>
+                {ARBEITEN_ALS.map((r) => <option key={r} value={r}>{r === "Kalkulation" ? "Kalkulation (Kalk-Team)" : r}</option>)}
+              </select>
+            </label>
+          )}
 
           <Suche anfragen={anfragenSicht} leads={leads} tickets={tickets} akquise={akquise}
             mitarbeiter={mitarbeiter} user={user}
@@ -16391,6 +16421,17 @@ function PortalApp() {
       <main className="flex-1 px-4 sm:px-8 py-5 lg:py-6 max-w-6xl w-full">
         {pwDialog && <PasswortDialog onSchliessen={() => setPwDialog(false)} />}
         {pdfAnsicht && <PdfBetrachter datei={pdfAnsicht} onSchliessen={pdfSchliessen} />}
+        {alsRolle && (
+          <div className="flex flex-wrap items-center gap-3 mb-4 px-4 py-2.5 rounded text-sm"
+               style={{ background: "#F1F7F0", border: "1px solid " + C.ok }}>
+            <span className="w-full sm:w-auto sm:flex-1 min-w-0">
+              Du arbeitest gerade als <strong>{alsRolle}</strong>. Alles, was du hier tust, ist echt und erscheint bei allen Beteiligten,
+              im Verlauf mit deinem Namen.
+            </span>
+            <button onClick={() => setArbeitenAls("")} className="px-3 py-1.5 rounded text-sm"
+              style={{ background: C.ink, color: "#fff" }}>Zurück zur Geschäftsführung</button>
+          </div>
+        )}
         {zeigeZurueck && !gesperrt && (
           <button onClick={zurueckGehen}
             className="inline-flex items-center gap-1.5 text-sm mb-4 px-3 py-1.5 rounded"
