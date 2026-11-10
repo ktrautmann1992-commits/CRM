@@ -3676,11 +3676,11 @@ const Btn = ({ children, onClick, variante = "primär", icon: Icon, disabled }) 
   );
 };
 
-const StatusPunkt = ({ status, a }) => {
+const StatusPunkt = ({ status, a, umbrechen }) => {
   const s = a ? statusVon(a) : (STATUS[status] || { label: status, color: C.muted });
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs whitespace-nowrap" style={{ color: s.color }}>
-      <span className="w-2 h-2 rounded-full" style={{ background: s.color }} />
+    <span className={"inline-flex items-" + (umbrechen ? "start" : "center") + " gap-1.5 text-xs" + (umbrechen ? "" : " whitespace-nowrap")} style={{ color: s.color }}>
+      <span className={"w-2 h-2 rounded-full flex-shrink-0" + (umbrechen ? " mt-1" : "")} style={{ background: s.color }} />
       {s.label}
     </span>
   );
@@ -5000,8 +5000,9 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
   const istKalk = user.rolle === "Kalkulation";
   const istPartner = istBeteiligt(a, user.id);
-  /* Beim Vertriebspartner steht die Handlung oben, Nachrichten und Zielpreis unten */
-  const reihe = (n) => (istPartner ? { order: n } : {});
+  /* Reihenfolge im Vorgang für alle Rollen: Handlung der eigenen Rolle oben, dann Angebot und Lieferstellen,
+     Nachrichten und Zielpreis unten. Die Blöcke stehen im Code weiter in ihrer gewohnten Reihenfolge. */
+  const reihe = (n) => ({ order: n });
   const istVM = user.rolle === "Vertragsmanagement";
   /* Verschwiegenheitserklärung: nur Kalkulation und Geschäftsführung, unterschreibt immer die Geschäftsführung */
   const ndaSicht = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
@@ -5740,7 +5741,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
           {/* Kalkulationsbereich */}
           {istKalk && ["eingereicht", "angefragt", "ruecksprache"].includes(a.status) && (
-            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line, ...reihe(-2) }}>
               <label className="flex items-center gap-3 text-sm mb-4 p-3 rounded"
                      style={{ background: a.status === "angefragt" ? "#FDF6EE" : "#F6F8FA",
                               border: "1px solid " + (a.status === "angefragt" ? C.gas : C.line) }}>
@@ -6271,7 +6272,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           {/* Rücksprache mit der Geschäftsführung */}
           {intern && a.ruecksprache && (
             <div className="rounded p-5" style={{ background: C.card,
-                 border: "1px solid " + (a.status === "ruecksprache" ? C.gruen : C.line) }}>
+                 border: "1px solid " + (a.status === "ruecksprache" ? C.gruen : C.line), ...reihe(a.status === "ruecksprache" ? -2 : 0) }}>
               <div className="text-sm mb-3">Rücksprache Geschäftsführung</div>
               <div className="p-3 rounded text-sm" style={{ background: "#F6F8FA" }}>
                 {a.ruecksprache.frage}
@@ -6311,7 +6312,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           {istKalk && ["uebermittelt", "einreichung"].includes(a.status) && (
             <div className="rounded p-5"
                  style={{ background: a.einreichung ? "#FDF9EC" : C.card,
-                          border: "1px solid " + (a.einreichung ? C.gold : C.strom) }}>
+                          border: "1px solid " + (a.einreichung ? C.gold : C.strom), ...reihe(-2) }}>
               <div className="text-sm mb-3">
                 {a.status === "uebermittelt" ? "Auftrag vom Vertriebspartner: bereit zum Einreichen" : "An Versorger übermittelt, Bestätigung ausstehend"}
               </div>
@@ -6519,7 +6520,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
           {/* Geschäftsführung: Provisionseingang erfassen und bestätigen */}
           {user.rolle === "Geschäftsführung" && a.status === "bestaetigt" && (
-            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok }}>
+            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok, ...reihe(-2) }}>
               <div className="text-sm mb-3">Provisionseingang erfassen</div>
               <div className="grid sm:grid-cols-2 gap-x-8 mb-4">
                 <Zeile k="Versorger" v={a.bestaetigung && a.bestaetigung.versorger} />
@@ -6766,7 +6767,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           )}
 
           {istKalk && a.status === "angebot" && (
-            <div className="rounded p-4 flex items-start gap-3" style={{ background: "#F1F7F0", border: "1px solid " + C.ok }}>
+            <div className="rounded p-4 flex items-start gap-3" style={{ background: "#F1F7F0", border: "1px solid " + C.ok, ...reihe(-2) }}>
               <Check size={18} style={{ color: C.ok }} className="shrink-0 mt-0.5" />
               <div className="text-sm">
                 Angebot an den Vertriebspartner gesendet{a.kalkulation && a.kalkulation.datum ? " am " + datum(a.kalkulation.datum) : ""}.
@@ -7042,7 +7043,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
           {/* Vertragsmanagement */}
           {(istVM || user.rolle === "Geschäftsführung") && a.status === "abgeschlossen" && !a.lieferbestaetigung && (
-            <Lieferbestaetigung a={a} user={user} onUpdate={onUpdate} />
+            <div style={reihe(-2)}><Lieferbestaetigung a={a} user={user} onUpdate={onUpdate} /></div>
           )}
           {istVM && a.status === "abgeschlossen" && a.lieferbestaetigung && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
@@ -7145,8 +7146,8 @@ function Liste({ anfragen, onOeffnen, leerText }) {
           <div className="text-sm text-right w-28" style={{ fontVariantNumeric: "tabular-nums" }}>
             {num(verbrauchGesamt(a))} kWh
           </div>
-          <div className="w-40">
-            <StatusPunkt status={a.status} a={a} />
+          <div className="w-44 min-w-0">
+            <StatusPunkt status={a.status} a={a} umbrechen />
             {liegezeit(a) > 3 && !["abgeschlossen", "abgelehnt"].includes(a.status) && (
               <span className="block text-xs"
                     style={{ color: liegezeit(a) > 10 ? C.warn : C.muted }}>
@@ -7160,6 +7161,48 @@ function Liste({ anfragen, onOeffnen, leerText }) {
           <ChevronRight size={15} style={{ color: C.muted }} />
         </button>
       ))}
+    </div>
+  );
+}
+
+/* „Alle Vorgänge“ mit Reitern je Status. Der Vertrieb sieht die Status so, wie sie bei ihm heißen (statusVon). */
+const STATUS_REITER = [
+  { id: "eingereicht", label: "Bei Kalkulation", f: (a) => a.status === "eingereicht" },
+  { id: "angefragt", label: "Beim Versorger angefragt", f: (a) => a.status === "angefragt" },
+  { id: "ruecksprache", label: "Rücksprache Geschäftsführung", f: (a) => a.status === "ruecksprache" },
+  { id: "klaerfall", label: "Daten fehlen", f: (a) => a.status === "klaerfall" },
+  { id: "angebotVP", label: "Angebot beim Vertriebspartner", f: (a) => a.status === "angebot" && !a.angebotVersendet },
+  { id: "angebotKunde", label: "Angebot beim Kunden", f: (a) => a.status === "angebot" && !!a.angebotVersendet },
+  { id: "uebermittelt", label: "Bereit zum Einreichen", f: (a) => a.status === "uebermittelt" },
+  { id: "einreichung", label: "An Versorger übermittelt", f: (a) => a.status === "einreichung" },
+  { id: "bestaetigt", label: "Bestätigt, Provision offen", f: (a) => a.status === "bestaetigt" },
+  { id: "lb", label: "Lieferbestätigung offen", f: (a) => a.status === "abgeschlossen" && !a.lieferbestaetigung },
+  { id: "abgeschlossen", label: "Abgeschlossen", f: (a) => a.status === "abgeschlossen" && !!a.lieferbestaetigung },
+  { id: "abgelehnt", label: "Abgelehnt", f: (a) => a.status === "abgelehnt" },
+  { id: "entwurf", label: "Entwurf", f: (a) => a.status === "entwurf" },
+];
+function VorgaengeNachStatus({ anfragen, onOeffnen }) {
+  const [reiter, setReiter] = useState("alle");
+  const zahl = (r) => anfragen.filter(r.f).length;
+  /* Reiter ohne Vorgänge bleiben sichtbar, aber blass; Entwurf nur, wenn es welche gibt */
+  const reiterListe = STATUS_REITER.filter((r) => r.id !== "entwurf" || zahl(r) > 0);
+  const aktiv = reiterListe.find((r) => r.id === reiter);
+  const liste = aktiv ? anfragen.filter(aktiv.f) : anfragen;
+  const knopf = (id, label, n) => (
+    <button key={id} onClick={() => setReiter(id)} className="px-3 py-1.5 text-sm rounded"
+      style={{ background: reiter === id ? C.ink : "transparent", color: reiter === id ? "#fff" : n > 0 ? C.text : C.muted,
+               border: "1px solid " + (reiter === id ? C.ink : C.line), opacity: reiter === id || n > 0 ? 1 : 0.55 }}>
+      {label} {n > 0 && <span style={{ opacity: 0.7 }}>{n}</span>}
+    </button>
+  );
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1 mb-5">
+        {knopf("alle", "Alle", anfragen.length)}
+        {reiterListe.map((r) => knopf(r.id, r.label, zahl(r)))}
+      </div>
+      <Liste anfragen={liste} onOeffnen={onOeffnen}
+        leerText={aktiv ? "Kein Vorgang mit dem Status „" + aktiv.label + "“." : "Keine Vorgänge."} />
     </div>
   );
 }
@@ -16138,6 +16181,8 @@ function PortalApp() {
     inhalt = <Strukturanfragen anfragen={strukturanfragen} setAnfragen={setStrukturanfragen} user={user} />;
   } else if (ansicht === "meine-daten") {
     inhalt = <MeineStammdaten user={user} mitarbeiter={mitarbeiter} setMitarbeiter={setMitarbeiter} />;
+  } else if (ansicht === "alle") {
+    inhalt = <VorgaengeNachStatus anfragen={sichtbar} onOeffnen={setOffen} />;
   } else {
     inhalt = <Liste anfragen={sichtbar} leerText="Keine Vorgänge." onOeffnen={setOffen} />;
   }
