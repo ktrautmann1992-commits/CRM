@@ -67,6 +67,33 @@ function naechsterSchritt(a) {
   return null;
 }
 
+/* Nächster Schritt für die Innendienst-Rollen und die Geschäftsführung (ohne eigene Beteiligung) */
+function naechsterSchrittInnen(a, rolle) {
+  const st = a._echterStatus || a.status;
+  if (rolle === "Kalkulation") {
+    if (st === "eingereicht") return { art: "tun", text: "Anfrage prüfen: kalkulieren, beim Versorger anfragen, Rücksprache halten oder fehlende Unterlagen beim Vertrieb anfordern." };
+    if (st === "angefragt") return { art: "tun", text: "Preise des Versorgers abwarten, dann das Angebot kalkulieren und an den Vertriebspartner senden." };
+    if (st === "ruecksprache") return { art: "warten", text: "Wartet auf die Antwort der Geschäftsführung zur Rücksprache." };
+    if (st === "klaerfall") return { art: "warten", text: "Wartet auf Unterlagen oder Angaben vom Vertriebspartner." };
+    if (st === "angebot") return { art: "warten", text: a.angebotVersendet ? "Das Angebot liegt beim Kunden. Wartet auf dessen Zusage." : "Das Angebot liegt beim Vertriebspartner." };
+    if (st === "uebermittelt") return { art: "dringend", text: "Auftrag beim Versorger einreichen und danach „An Versorger übermittelt“ tippen." };
+    if (st === "einreichung") return { art: "tun", text: "Sobald der Versorger antwortet: Auftrag bestätigen, Klärfall melden oder Ablehnung erfassen." };
+    if (st === "bestaetigt") return { art: "warten", text: "Bestätigt. Wartet auf den Provisionseingang, den die Geschäftsführung erfasst." };
+  }
+  if (rolle === "Vertragsmanagement" && st === "abgeschlossen") {
+    if (!a.lieferbestaetigung) return { art: "dringend", text: "Lieferbestätigung erfassen: bestätigter Lieferbeginn, Vertrags- oder Kundennummer und Dokument des Versorgers." };
+    return { art: "tun", text: "Vertrag betreuen: Stand „" + (a.vertragsStatus || "Vertrag zu erstellen") + "“. Fristen und Verlängerung im Blick behalten." };
+  }
+  if (rolle === "Geschäftsführung") {
+    if (st === "bestaetigt") return { art: "dringend", text: "Provisionseingang des Versorgers erfassen und bestätigen (Provision ausstehend)." };
+    if (st === "ruecksprache") return { art: "dringend", text: "Die Kalkulation bittet um Rücksprache. Antwort unten im Vorgang geben." };
+    if (st === "abgeschlossen" && !a.lieferbestaetigung) return { art: "warten", text: "Abgeschlossen. Die Lieferbestätigung erfasst das Vertragsmanagement." };
+  }
+  if (rolle === "Finanzbuchhaltung" && st === "abgeschlossen")
+    return { art: "tun", text: "Auszahlungen je Lieferjahr über die Provisionsabrechnung." };
+  return null;
+}
+
 /* Wer gerade schaut: der Vertrieb sieht einen bestätigten Auftrag erst nach der Lieferbestätigung
    durch das Vertragsmanagement als „Vom Versorger bestätigt“, vorher als „An Versorger übermittelt“. */
 const VERTRIEB_SICHT_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
@@ -337,7 +364,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.24 · 10.11.2026 · Einfachere Bedienung für den Vertrieb";
+const VERSION = "v5.25 · 10.11.2026 · Zu tun und nächster Schritt für alle Rollen";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -5361,8 +5388,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       </p>
       {kurz && <Kurzinfo a={a} onSchliessen={() => setKurz(false)} />}
 
-      {istPartner && naechsterSchritt(a) && (() => {
-        const n = naechsterSchritt(a);
+      {(istPartner ? naechsterSchritt(a) : naechsterSchrittInnen(a, user.rolle)) && (() => {
+        const n = istPartner ? naechsterSchritt(a) : naechsterSchrittInnen(a, user.rolle);
         const farbe = n.art === "dringend" ? C.warn : n.art === "tun" ? C.ok : C.muted;
         const grund = n.art === "dringend" ? "#FCF3F0" : n.art === "tun" ? "#F1F7F0" : "#F6F8FA";
         return (
@@ -5370,7 +5397,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                style={{ background: grund, borderLeft: "4px solid " + farbe }}>
             <div className="min-w-0">
               <div className="text-xs mb-0.5" style={{ color: farbe, letterSpacing: "0.04em" }}>
-                {n.art === "warten" ? "GERADE BEI UNS" : n.art === "fertig" ? "STAND" : "DEIN NÄCHSTER SCHRITT"}
+                {n.art === "warten" ? (istPartner ? "GERADE BEI UNS" : "WARTET AUF ANDERE") : n.art === "fertig" ? "STAND" : "DEIN NÄCHSTER SCHRITT"}
               </div>
               <div className="text-sm">{n.text}</div>
             </div>
@@ -14368,7 +14395,8 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
   const liste = (titel, l) => () => onListe(titel, l);
   const ansicht = (id) => () => onOeffnen(null, id);
 
-  let kacheln = [], arbeit = null, hinweis = "";
+  /* zuTun: { n, text, farbe, klick } – nur Einträge mit n > 0 erscheinen oben auf der Startseite */
+  let kacheln = [], arbeit = null, hinweis = "", zuTun = [];
 
   if (rolle === "Kalkulation") {
     hinweis = "Anfragen kalkulieren, Angebote zurückgeben, Aufträge beim Versorger einreichen und bestätigen.";
@@ -14384,6 +14412,12 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
       { k: "Unterlagen beim Vertrieb angefordert", v: klaer.length, klick: liste("Unterlagen angefordert", klaer) },
       { k: "Smartmeter zu prüfen", v: sm.length, farbe: C.strom, klick: ansicht("smartmeter") },
       { k: "Kalkulationen bisher", v: anfragen.filter((a) => a.kalkulation).length, farbe: C.ink, klick: ansicht("kalkulationen") },
+    ];
+    zuTun = [
+      { n: auftraege.length, text: "Aufträge beim Versorger einreichen", farbe: C.warn, klick: ansicht("auftraege") },
+      { n: neu.length, text: "Neue Anfragen kalkulieren", farbe: C.strom, klick: liste("Neue Anfragen", neu) },
+      { n: eingereicht.length, text: "Bestätigung des Versorgers erfassen, sobald sie da ist", farbe: C.gas, klick: ansicht("versorger") },
+      { n: sm.length, text: "Smartmeter-Anträge prüfen", farbe: C.strom, klick: ansicht("smartmeter") },
     ];
     const reihe = [...auftraege, ...neu, ...angefragt].sort((x, y) => (x.angelegt || "").localeCompare(y.angelegt || ""));
     arbeit = (
@@ -14425,6 +14459,15 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
       { k: "Problemfälle offen", v: offeneProbleme.filter((p) => p.art !== "Storno").length, farbe: C.warn, klick: ansicht("probleme") },
       { k: "Stornierungen offen", v: stornos.length, farbe: C.warn, klick: ansicht("stornos") },
     ];
+    zuTun = [
+      { n: neueLb.length, text: "Lieferbestätigung erfassen", farbe: C.gas, klick: liste("Neue Lieferbestätigungen", neueLb) },
+      { n: je("Vertrag unterschrieben").length, text: "Unterschriebene Verträge an den Versorger weiterleiten", farbe: C.warn,
+        klick: liste("Unterschrieben, an den Versorger weiterleiten", je("Vertrag unterschrieben")) },
+      { n: je("Vertrag zu erstellen").length, text: "Vertrag erstellen und versenden", farbe: C.warn,
+        klick: liste("Vertrag zu erstellen", je("Vertrag zu erstellen")) },
+      { n: offeneProbleme.filter((p) => p.art !== "Storno").length, text: "Problemfälle bearbeiten", farbe: C.warn, klick: ansicht("probleme") },
+      { n: stornos.length, text: "Stornierungen bearbeiten", farbe: C.warn, klick: ansicht("stornos") },
+    ];
     const reihe = vertraege.filter((a) => ["Vertrag zu erstellen", "Vertrag versendet", "Vertrag unterschrieben"].includes(schritt(a)))
       .sort((x, y) => VM_SCHRITTE.indexOf(schritt(y)) - VM_SCHRITTE.indexOf(schritt(x))
         || ((x.provisionErhalten || {}).datum || x.angelegt || "").localeCompare((y.provisionErhalten || {}).datum || y.angelegt || ""));
@@ -14459,6 +14502,10 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
         klick: liste("Vom Versorger bestätigt, Provision noch nicht eingegangen", wartetVersorger) },
       { k: "Stornierungen offen", v: stornos.length, farbe: C.warn, klick: ansicht("stornos") },
     ];
+    zuTun = [
+      { n: faellig.length, text: "Fällige Auszahlungen überweisen", farbe: C.warn, klick: ansicht("abrechnung") },
+      { n: stornos.length, text: "Stornierungen verrechnen", farbe: C.warn, klick: ansicht("stornos") },
+    ];
     const reihe = [...faellig].sort((x, y) => (x.faellig || "").localeCompare(y.faellig || ""));
     arbeit = (
       <Karte titel="Fällige Auszahlungen"
@@ -14488,6 +14535,11 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
       { k: "Wiedervorlage", v: wv.length, farbe: C.gas, klick: ansicht("leads") },
       { k: "Zum Auftrag geworden", v: sp("auftrag").length, farbe: C.ok, klick: ansicht("leads") },
     ];
+    zuTun = [
+      { n: frei.length, text: "Leads einem Vertriebspartner zuweisen", farbe: C.warn, klick: ansicht("leads") },
+      { n: wv.length, text: "Wiedervorlagen nachhalten", farbe: C.gas, klick: ansicht("leads") },
+      { n: sp("neu").length, text: "Neue Leads sichten", farbe: C.ok, klick: ansicht("leads") },
+    ];
     arbeit = (
       <Karte titel="Noch zu verteilen" rechts={<span className="text-xs" style={{ color: C.muted }}>{frei.length} {frei.length === 1 ? "Lead" : "Leads"}</span>}>
         {frei.length === 0 ? <Leer text="Alle Leads sind verteilt." /> :
@@ -14510,9 +14562,12 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
         <div className="text-lg">Guten Tag, {String(user.name || "").replace(/^Team\s+/, "Team ")}</div>
         <div className="text-sm" style={{ color: C.muted }}>{hinweis}</div>
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {kacheln.map((x) => <Kachel key={x.k} {...x} />)}
-      </div>
+      <ZuTunKarte eintraege={zuTun} />
+      {kacheln.some((x) => x.v) && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {kacheln.filter((x) => x.v).map((x) => <Kachel key={x.k} {...x} />)}
+        </div>
+      )}
       {arbeit}
       <Aufgaben aufgaben={aufgaben} setAufgaben={setAufgaben} user={user}
         mitarbeiter={mitarbeiter} kompakt onOeffnen={onOeffnen} />
@@ -14528,6 +14583,31 @@ function ArbeitsUebersicht({ anfragen, mitarbeiter, user, leads, probleme, smart
   );
 }
 
+/* „Zu tun für dich“ als Zusammenfassung: je Aufgabe Anzahl, Text, Ziel */
+function ZuTunKarte({ eintraege, leerText }) {
+  const offen = (eintraege || []).filter((x) => x.n > 0);
+  return (
+    <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+      <div className="flex items-baseline justify-between px-4 py-3" style={{ borderBottom: "1px solid " + C.line }}>
+        <span className="text-sm">Zu tun für dich</span>
+        <span className="text-xs" style={{ color: C.muted }}>{offen.length ? offen.reduce((t, x) => t + x.n, 0) + " offen" : "alles erledigt"}</span>
+      </div>
+      {offen.length === 0 && (
+        <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>{leerText || "Gerade ist nichts von dir gefragt."}</div>
+      )}
+      {offen.map((x, i) => (
+        <button key={x.text} onClick={x.klick} className="w-full text-left flex items-center gap-3 px-4 py-3 text-sm"
+          style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+          <span className="min-w-7 h-7 px-2 rounded-full flex items-center justify-center flex-shrink-0 text-xs"
+                style={{ background: x.farbe || C.ink, color: "#fff", fontVariantNumeric: "tabular-nums" }}>{x.n}</span>
+          <span className="flex-1 min-w-0">{x.text}</span>
+          <ChevronRight size={16} color={C.muted} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* Übersicht: Innendienst und Vertrieb haben je eine eigene */
 function Dashboard(props) {
   return INNENDIENST.includes(props.user.rolle)
@@ -14536,7 +14616,7 @@ function Dashboard(props) {
 }
 
 function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, termine, leads,
-                    setMitarbeiter, aufgaben, setAufgaben, bonusziele }) {
+                    setMitarbeiter, aufgaben, setAufgaben, bonusziele, gfZahlen }) {
   const [bereich, setBereich] = useState("meine");
   const [anpassen, setAnpassen] = useState(false);
   const istTL = user.rolle === "Teamleiter";
@@ -14682,6 +14762,24 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
         </div>
       )}
 
+      {user.rolle === "Geschäftsführung" && (() => {
+        const g = gfZahlen || {};
+        const eigene = menge_.filter((a) => istBeteiligt(a, user.id));
+        const eigenKlaer = eigene.filter((a) => a.status === "klaerfall");
+        const eigenAngebot = eigene.filter((a) => a.status === "angebot");
+        return (
+          <ZuTunKarte eintraege={[
+            { n: g.provisionOffen || 0, text: "Provisionseingang erfassen und bestätigen", farbe: C.warn, klick: () => onOeffnen(null, "ausstehend") },
+            { n: anfragen.filter((a) => a.status === "ruecksprache").length, text: "Rücksprachen der Kalkulation beantworten", farbe: C.gruen, klick: () => onOeffnen(null, "ruecksprachen") },
+            { n: g.offeneStrukturanfragen || 0, text: "Strukturanfragen der Teamleiter entscheiden", farbe: C.gas, klick: () => onOeffnen(null, "partner") },
+            { n: mitarbeiter.filter((m) => m.status === "pruefung").length, text: "Neue Vertriebsmitarbeiter prüfen und freigeben", farbe: C.gas, klick: () => onOeffnen(null, "partner") },
+            { n: g.wartendeTippgeber || 0, text: "Tippgeber freigeben", farbe: C.gas, klick: () => onOeffnen(null, "vertraege-gf") },
+            { n: eigenKlaer.length, text: "Eigene Kunden: Unterlagen nachreichen", farbe: C.warn, klick: () => onListe("Eigene Klärfälle", eigenKlaer) },
+            { n: eigenAngebot.length, text: "Eigene Kunden: Angebot an den Kunden schicken oder Zusage erfassen", farbe: C.ok, klick: () => onListe("Eigene Angebote", eigenAngebot) },
+          ]} />
+        );
+      })()}
+
       {vertrieb && (
         <Karte titel="Zu tun für dich"
           rechts={<span className="text-xs" style={{ color: C.muted }}>{zuTun.length ? zuTun.length + " offen" : "alles erledigt"}</span>}>
@@ -14741,7 +14839,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
       {stil === "ring" ? (
         <div className="rounded p-5 flex flex-wrap gap-6 justify-around"
              style={{ background: C.card, border: "1px solid " + C.line }}>
-          {KACHELN.filter((x) => zeigt(x.id) && (!vertrieb || x.v > 0)).map((x) => {
+          {KACHELN.filter((x) => zeigt(x.id) && x.v > 0).map((x) => {
             const gesamt = KACHELN.reduce((t, y) => t + y.v, 0) || 1;
             return (
               <button key={x.id} onClick={() => onListe(x.k, menge_.filter(x.f))}>
@@ -14753,7 +14851,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          {KACHELN.filter((x) => zeigt(x.id) && (!vertrieb || x.v > 0)).map((x) => (
+          {KACHELN.filter((x) => zeigt(x.id) && x.v > 0).map((x) => (
             <Kachel key={x.id} k={x.k} v={x.v} farbe={x.farbe}
               klick={() => onListe(x.k, menge_.filter(x.f))} />
           ))}
@@ -15558,7 +15656,7 @@ function PortalApp() {
     /* Kalkulation rechnet und reicht beim Versorger ein. Kein Vertrieb, keine Provisionen. */
     Kalkulation: [
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
-      { id: "eingang", label: "Eingang", icon: Calculator },
+      { id: "eingang", label: "Neue Anfragen", icon: Calculator },
       { id: "versorger", label: "Versorgerbestätigung", icon: FileSignature },
       { id: "auftraege", label: "Neue Aufträge", icon: FileSignature, badge: neueAuftraege },
       { id: "smartmeter", label: "Smartmeter", icon: Zap, badge: offeneSmartmeter },
@@ -15900,6 +15998,7 @@ function PortalApp() {
         termine={termine} leads={leads} setMitarbeiter={setMitarbeiter}
         aufgaben={aufgaben} setAufgaben={setAufgaben} bonusziele={bonusziele}
         probleme={probleme} smartmeter={smartmeter}
+        gfZahlen={{ provisionOffen, offeneStrukturanfragen, wartendeTippgeber }}
         onOeffnen={(id, ziel) => {
           if (ziel) { setOffen(null); setAnsicht(ziel); return; }
           const x = anfragenSicht.find((y) => y.id === id);
