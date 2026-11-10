@@ -322,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.23 · 09.11.2026 · Abweichende Laufzeit bei der Annahme";
+const VERSION = "v5.24 · 10.11.2026 · Beschaffung: Lastgangbewertung und Tranchenplan";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -408,6 +408,7 @@ const ROLLENFARBE = {
   Vertragsmanagement: "#6B7787",
   Finanzbuchhaltung: "#7A5AA8",
   Leadmanagement: "#1F8A8A",
+  Beschaffung: "#0E7C66",
   "Geschäftsführung": "#0A1626",
 };
 /* frühestmöglicher Lieferbeginn: 14 Tage Vorlauf */
@@ -948,7 +949,7 @@ async function lastgangAuswerten(datei) {
   })();
 
   return { anzahl: werte.length, summe, max, schnitt, spitze, benutzung, profil,
-           datiert: mitDatum > werte.length / 2,
+           datiert: mitDatum > werte.length / 2, werte, zeitpunkte, proStunde,
            verlaeufe: lastgangVerlaeufe(werte, zeitpunkte, proStunde) };
 }
 
@@ -1725,7 +1726,7 @@ const bildAlsDataUrl = async (pfad) => {
 const BERUF_VORGABE = {
   Vertriebspartner: "Energieberater", Teamleiter: "Teamleiter Vertrieb", "Leitung Vertrieb": "Leitung Vertrieb",
   Kalkulation: "Kalkulation", Vertragsmanagement: "Vertragsmanagement", Finanzbuchhaltung: "Finanzbuchhaltung",
-  Leadmanagement: "Leadmanagement", "Geschäftsführung": "Geschäftsführer",
+  Leadmanagement: "Leadmanagement", Beschaffung: "Beschaffung", "Geschäftsführung": "Geschäftsführer",
 };
 /* was auf der Karte steht: Eintrag der Geschäftsführung, sonst die Angaben aus dem Profil */
 const visitenkartenDaten = (m) => {
@@ -4904,7 +4905,7 @@ function Kurzinfo({ a, onSchliessen }) {
 }
 
 function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
-                 onBearbeiten, onVerlaengern, onNotieren, tippgeber }) {
+                 onBearbeiten, onVerlaengern, onNotieren, tippgeber, beschaffung, setBeschaffung, onBeschaffung }) {
   const [vars, setVars] = useState(
     a.kalkulation && a.kalkulation.varianten && a.kalkulation.varianten.length
       ? a.kalkulation.varianten
@@ -6957,6 +6958,10 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           {(istVM || user.rolle === "Geschäftsführung") && a.status === "abgeschlossen" && !a.lieferbestaetigung && (
             <Lieferbestaetigung a={a} user={user} onUpdate={onUpdate} />
           )}
+          {setBeschaffung && (
+            <BeschaffungKarte a={a} user={user} mitarbeiter={mitarbeiter} beschaffung={beschaffung}
+              setBeschaffung={setBeschaffung} onOeffnen={onBeschaffung} />
+          )}
           {istVM && a.status === "abgeschlossen" && a.lieferbestaetigung && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
               <p className="text-sm mb-4 flex items-center gap-2" style={{ color: C.ok }}>
@@ -8125,7 +8130,7 @@ function StrukturFreigabe({ anfrage, mitarbeiter, setMitarbeiter, strukturanfrag
 /* Portalsteuerung (nur Geschäftsführung): Zugänge für alle Rollen anlegen und Passwörter setzen.
    Den Zugang legt der Server an (Server-Funktion „einladung“, Aktion zugang_setzen). */
 const ALLE_ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb", "Kalkulation", "Vertragsmanagement",
-  "Leadmanagement", "Finanzbuchhaltung", "Geschäftsführung"];
+  "Leadmanagement", "Finanzbuchhaltung", "Beschaffung", "Geschäftsführung"];
 const VERTRIEBSROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"];
 const passwortVorschlag = () => {
   const z = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789", sz = "!#+?-";
@@ -14260,6 +14265,1041 @@ function Kalkulationen({ anfragen, onOeffnen, user }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Beschaffung: Lastgang, Preiskurve, Bewertung und Tranchenplan      */
+/*                                                                     */
+/*  Alles rechnet im Browser. Eingaben sind der Lastgang des Kunden    */
+/*  und die Terminmarktpreise, die die Beschaffung je Bewertung von    */
+/*  Hand einträgt (Cal Base/Peak, wahlweise Quartale).                 */
+/*  Aus diesen Preisen entsteht eine stündliche Preiskurve (HPFC):     */
+/*  Jahr → Quartal → Monat → Peak/Offpeak → Stunde. Der Mittelwert     */
+/*  jeder Stufe trifft den eingegebenen Preis genau (arbitragefrei).   */
+/*  Ein Stundenprofil aus Day-Ahead-Preisen ist optional.              */
+/* ------------------------------------------------------------------ */
+
+/* Feiertage, die im Lastgang wie Sonntage wirken (bundesweit, dazu Saarland/RLP) */
+function ostersonntag(j) {
+  const a = j % 19, b = Math.floor(j / 100), c = j % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const monat = Math.floor((h + l - 7 * m + 114) / 31), tag = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(j, monat - 1, tag));
+}
+const FEIERTAGE_CACHE = {};
+function feiertage(j) {
+  if (FEIERTAGE_CACHE[j]) return FEIERTAGE_CACHE[j];
+  const os = ostersonntag(j).getTime(), T = 86400000;
+  const tage = [Date.UTC(j, 0, 1), os - 2 * T, os + T, Date.UTC(j, 4, 1), os + 39 * T, os + 50 * T,
+    os + 60 * T, Date.UTC(j, 7, 15), Date.UTC(j, 9, 3), Date.UTC(j, 10, 1), Date.UTC(j, 11, 25), Date.UTC(j, 11, 26)];
+  return (FEIERTAGE_CACHE[j] = new Set(tage.map((t) => new Date(t).toISOString().slice(0, 10))));
+}
+/* Tagesart für die Lastform: 0 Werktag, 1 Samstag, 2 Sonn- und Feiertag */
+function tagesart(jahr, monat, tag) {
+  const d = new Date(Date.UTC(jahr, monat, tag));
+  const w = d.getUTCDay();
+  if (w === 0 || feiertage(jahr).has(d.toISOString().slice(0, 10))) return 2;
+  return w === 6 ? 1 : 0;
+}
+
+/* Stunden eines Lieferjahres (ohne Zeitumstellung, 8760 bzw. 8784 Stunden).
+   Peak nach Börsendefinition: Montag bis Freitag 8 bis 20 Uhr, auch an Feiertagen. */
+function jahresStunden(jahr) {
+  const raus = [];
+  for (let m = 0; m < 12; m++) {
+    const tageImMonat = new Date(Date.UTC(jahr, m + 1, 0)).getUTCDate();
+    for (let t = 1; t <= tageImMonat; t++) {
+      const w = new Date(Date.UTC(jahr, m, t)).getUTCDay();
+      const art = tagesart(jahr, m, t);
+      for (let h = 0; h < 24; h++)
+        raus.push({ m, t, h, art, peak: w >= 1 && w <= 5 && h >= 8 && h < 20 });
+    }
+  }
+  return raus;
+}
+
+/* Lastgang (Werte und Zeitpunkte aus lastgangAuswerten) → Lastform:
+   mittlere kWh je Stunde für Monat × Tagesart × Stunde, dazu die Jahresmenge. */
+function lastform(werte, zeiten, proStunde, zeitLesenFn) {
+  const summe = Array.from({ length: 12 }, () => Array.from({ length: 3 }, () => Array(24).fill(0)));
+  const zahl = Array.from({ length: 12 }, () => Array.from({ length: 3 }, () => Array(24).fill(0)));
+  const proStd = new Map(); /* Stundenwerte zuerst aufsummieren (Viertelstunden → Stunde) */
+  let start = null, ohneDatum = 0;
+  werte.forEach((w, i) => {
+    let t = zeitLesenFn(zeiten[i]);
+    if (!t) {
+      ohneDatum++;
+      if (!start) start = new Date(new Date().getFullYear() - 1, 0, 1);
+      t = new Date(start.getTime() + (i / proStunde) * 3600000);
+    }
+    /* Zeitstempel am Ende der Viertelstunde (00:15) gehören zur Stunde davor */
+    const k = new Date(t.getTime() - 60000);
+    const schl = k.getFullYear() + "-" + k.getMonth() + "-" + k.getDate() + "-" + k.getHours();
+    const alt = proStd.get(schl);
+    if (alt) alt.kwh += w; else proStd.set(schl, { j: k.getFullYear(), m: k.getMonth(), t: k.getDate(), h: k.getHours(), kwh: w });
+  });
+  let gesamt = 0;
+  for (const s of proStd.values()) {
+    const art = tagesart(s.j, s.m, s.t);
+    summe[s.m][art][s.h] += s.kwh;
+    zahl[s.m][art][s.h] += 1;
+    gesamt += s.kwh;
+  }
+  /* fehlende Felder: erst andere Tagesart desselben Monats, dann Jahresmittel der Stunde */
+  const mittel = summe.map((mo, m) => mo.map((ar, a) => ar.map((x, h) => (zahl[m][a][h] ? x / zahl[m][a][h] : null))));
+  for (let m = 0; m < 12; m++) for (let a = 0; a < 3; a++) for (let h = 0; h < 24; h++) {
+    if (mittel[m][a][h] != null) continue;
+    const ersatz = [0, 1, 2].map((b) => mittel[m][b][h]).find((x) => x != null);
+    if (ersatz != null) { mittel[m][a][h] = ersatz; continue; }
+    const andere = [];
+    for (let n = 0; n < 12; n++) if (mittel[n][a][h] != null) andere.push(mittel[n][a][h]);
+    mittel[m][a][h] = andere.length ? andere.reduce((x, y) => x + y, 0) / andere.length : 0;
+  }
+  const stunden = proStd.size;
+  return { mittel, gesamt, stunden, ohneDatum, jahresmenge: stunden ? (gesamt / stunden) * 8760 : 0 };
+}
+
+/* Stundenlast eines Lieferjahres in MWh, auf die Jahresmenge (kWh) skaliert */
+function jahresLast(form, jahr, mengeKwh) {
+  const st = jahresStunden(jahr);
+  const roh = st.map((s) => form.mittel[s.m][s.art][s.h]);
+  const sum = roh.reduce((x, y) => x + y, 0) || 1;
+  const faktor = (mengeKwh || form.jahresmenge) / sum / 1000;
+  return { stunden: st, last: roh.map((x) => x * faktor) };
+}
+
+/* Standardverteilung der Monate, falls keine Quartalspreise vorliegen.
+   Grobe Saisonform am deutschen Terminmarkt; wird an die Eingaben kalibriert. */
+const MONATSFORM_BASE = [1.17, 1.12, 1.01, 0.9, 0.84, 0.86, 0.9, 0.9, 0.97, 1.04, 1.12, 1.16];
+const MONATSFORM_PEAK = [1.15, 1.1, 1.0, 0.88, 0.82, 0.86, 0.92, 0.91, 0.98, 1.05, 1.13, 1.18];
+
+/* Preiskurve für ein Lieferjahr.
+   p = { base, peak, q: [{ base, peak } × 4] (optional) }, alles €/MWh.
+   profil (optional): Faktoren je Monat × Tagesart × Stunde für Peak- und Offpeakstunden. */
+function preiskurve(jahr, p, profil) {
+  const st = jahresStunden(jahr);
+  const B = +p.base, P = +p.peak;
+  if (!(B > 0) || !(P > 0)) throw new Error("Für " + jahr + " fehlen Base- und Peakpreis.");
+  /* Stunden je Monat */
+  const hM = Array(12).fill(0), hPM = Array(12).fill(0);
+  st.forEach((s) => { hM[s.m]++; if (s.peak) hPM[s.m]++; });
+  const quartal = (m) => Math.floor(m / 3);
+
+  /* Monatspreise Base und Peak: Form × Kalibrierung auf Quartal (falls vorhanden) und Jahr */
+  const kalibriere = (form, ziel, stundenM, feld) => {
+    const qWerte = [0, 1, 2, 3].map((q) => {
+      const e = p.q && p.q[q];
+      const v = e && +e[feld];
+      return v > 0 ? v : null;
+    });
+    let mp = form.slice();
+    /* zuerst je Quartal auf den Quartalspreis */
+    for (let q = 0; q < 4; q++) {
+      const ms = [3 * q, 3 * q + 1, 3 * q + 2];
+      const hs = ms.reduce((x, m) => x + stundenM[m], 0);
+      const mittel = ms.reduce((x, m) => x + mp[m] * stundenM[m], 0) / hs;
+      const zielQ = qWerte[q] != null ? qWerte[q] : null;
+      if (zielQ != null) ms.forEach((m) => { mp[m] = (mp[m] / mittel) * zielQ; });
+    }
+    /* dann Quartale ohne Preis so verschieben, dass das Jahr stimmt */
+    const fest = [0, 1, 2, 3].filter((q) => qWerte[q] != null);
+    const frei = [0, 1, 2, 3].filter((q) => qWerte[q] == null);
+    const hJahr = stundenM.reduce((x, y) => x + y, 0);
+    const summeFest = stundenM.reduce((x, h, m) => x + (fest.includes(quartal(m)) ? mp[m] * h : 0), 0);
+    const summeFreiForm = stundenM.reduce((x, h, m) => x + (frei.includes(quartal(m)) ? mp[m] * h : 0), 0);
+    if (frei.length && summeFreiForm > 0) {
+      const faktor = (ziel * hJahr - summeFest) / summeFreiForm;
+      mp = mp.map((v, m) => (frei.includes(quartal(m)) ? v * faktor : v));
+    }
+    return { monate: mp, abweichung: frei.length ? 0 : summeFest / hJahr - ziel };
+  };
+  const base = kalibriere(MONATSFORM_BASE.map((f) => f * B), B, hM, "base");
+  const peak = kalibriere(MONATSFORM_PEAK.map((f) => f * P), P, hPM, "peak");
+  const offpeak = base.monate.map((b, m) => (b * hM[m] - peak.monate[m] * hPM[m]) / (hM[m] - hPM[m]));
+
+  /* Stundenpreise: Peak/Offpeak-Monatswert × Profilfaktor, danach je Monat und Zeitzone
+     auf den Monatswert zurückgeführt, damit die Kurve arbitragefrei bleibt */
+  const preis = st.map((s) => (s.peak ? peak.monate[s.m] : offpeak[s.m])
+    * (profil ? profil[s.peak ? 1 : 0][s.m][s.art][s.h] || 1 : 1));
+  if (profil) {
+    for (let m = 0; m < 12; m++) for (const pk of [true, false]) {
+      let sum = 0, n = 0;
+      st.forEach((s, i) => { if (s.m === m && s.peak === pk) { sum += preis[i]; n++; } });
+      const ziel = pk ? peak.monate[m] : offpeak[m];
+      const f = n && sum ? (ziel * n) / sum : 1;
+      st.forEach((s, i) => { if (s.m === m && s.peak === pk) preis[i] *= f; });
+    }
+  }
+  return { stunden: st, preis, monate: { base: base.monate, peak: peak.monate, offpeak },
+           quartalAbweichung: { base: base.abweichung, peak: peak.abweichung } };
+}
+
+/* Stundenprofil aus Day-Ahead-Preisen: Faktor je Monat × Tagesart × Stunde,
+   getrennt für Peak- und Offpeakstunden, jeweils relativ zum Monatsmittel der Zeitzone. */
+function profilAusPreisen(reihe /* [{ t: Date, preis }] */) {
+  const roh = [0, 1].map(() => Array.from({ length: 12 }, () => Array.from({ length: 3 }, () => Array(24).fill(null).map(() => [0, 0]))));
+  const mon = [0, 1].map(() => Array.from({ length: 12 }, () => [0, 0]));
+  reihe.forEach(({ t, preis }) => {
+    if (!t || !isFinite(preis)) return;
+    const j = t.getFullYear(), m = t.getMonth(), tg = t.getDate(), h = t.getHours(), w = t.getDay();
+    const pk = w >= 1 && w <= 5 && h >= 8 && h < 20 ? 1 : 0;
+    const art = tagesart(j, m, tg);
+    roh[pk][m][art][h][0] += preis; roh[pk][m][art][h][1]++;
+    mon[pk][m][0] += preis; mon[pk][m][1]++;
+  });
+  return roh.map((z, pk) => z.map((mo, m) => mo.map((ar) => ar.map(([s, n]) => {
+    const mm = mon[pk][m][1] ? mon[pk][m][0] / mon[pk][m][1] : 0;
+    /* Faktoren nur bei sinnvollem Monatsmittel; negative und sehr kleine Mittel ergäben Unsinn */
+    return n && mm > 5 ? Math.max(-1, Math.min(4, s / n / mm)) : 1;
+  }))));
+}
+
+/* Bewertung eines Lieferjahres */
+function jahresBewertung(last, kurve) {
+  const L = last.last, Pr = kurve.preis, st = last.stunden;
+  let menge = 0, wert = 0, peakMenge = 0, peakSt = 0, offSt = 0, offMenge = 0, spitze = 0;
+  for (let i = 0; i < L.length; i++) {
+    menge += L[i]; wert += L[i] * Pr[i];
+    if (L[i] > spitze) spitze = L[i];
+    if (st[i].peak) { peakMenge += L[i]; peakSt++; } else { offMenge += L[i]; offSt++; }
+  }
+  /* Mengen-Hedge mit Jahresprodukten: Base = mittlere Offpeaklast, Peak = Rest der Peaklast */
+  const baseMW = offSt ? offMenge / offSt : 0;
+  const peakMW = Math.max(0, (peakSt ? peakMenge / peakSt : 0) - baseMW);
+  const hedgeMenge = baseMW * L.length + peakMW * peakSt;
+  let hedgeWert = 0;
+  for (let i = 0; i < L.length; i++) hedgeWert += (baseMW + (st[i].peak ? peakMW : 0)) * Pr[i];
+  return {
+    menge, wert, preis: menge ? wert / menge : 0,
+    spitze, benutzung: spitze ? menge / spitze : 0, peakAnteil: menge ? peakMenge / menge : 0,
+    baseMW, peakMW, hedgeMenge, hedgeWert, hedgePreis: hedgeMenge ? hedgeWert / hedgeMenge : 0,
+    struktur: wert - hedgeWert, strukturProMWh: menge ? (wert - hedgeWert) / menge : 0,
+    gewichtBase: hedgeMenge ? (baseMW * L.length) / hedgeMenge : 1,
+  };
+}
+
+/* Tranchenplan eines Jahres: gekaufte Anteile mit Preis, offener Rest zum aktuellen Hedgepreis */
+function tranchenStand(tranchen, jahr, bew, stress, heuteStr) {
+  const t = (tranchen || []).filter((x) => +x.jahr === +jahr);
+  const anteil = (x) => Math.max(0, +String(x.anteil).replace(",", ".") || 0) / 100;
+  const z = (v) => +String(v || "").replace(",", ".") || 0;
+  /* Preis einer Tranche: direkt oder aus Base- und Peakpreis im Verhältnis des Lastgangs */
+  const preisVon = (x) => (z(x.preisBase) > 0 && z(x.preisPeak) > 0
+    ? bew.gewichtBase * z(x.preisBase) + (1 - bew.gewichtBase) * z(x.preisPeak) : z(x.preis));
+  const gekauft = t.filter((x) => x.status === "gekauft" && preisVon(x) > 0);
+  const gekauftAnteil = Math.min(1, gekauft.reduce((s, x) => s + anteil(x), 0));
+  const gekauftPreis = gekauftAnteil ? gekauft.reduce((s, x) => s + anteil(x) * preisVon(x), 0) / gekauft.reduce((s, x) => s + anteil(x), 0) : 0;
+  const offen = 1 - gekauftAnteil;
+  const s = (+stress || 0) / 100;
+  const misch = (aufschlag) => gekauftAnteil * gekauftPreis + offen * bew.hedgePreis * (1 + aufschlag) + bew.strukturProMWh * (1 + aufschlag);
+  /* Sollstand: Anteil der geplanten Tranchen, deren Termin schon vorbei ist */
+  const geplantBis = t.filter((x) => x.datum && x.datum <= heuteStr).reduce((s, x) => s + anteil(x), 0);
+  const geplant = t.reduce((s, x) => s + anteil(x), 0);
+  return {
+    anzahl: t.length, gekauftAnteil, gekauftPreis, offen, geplant,
+    soll: Math.min(1, geplantBis), rueckstand: Math.max(0, Math.min(1, geplantBis) - gekauftAnteil),
+    preis: misch(0), preisHoch: misch(s), preisTief: misch(-s),
+  };
+}
+
+/* Ampel je Lieferjahr */
+function ampel(stand, bew, regeln, lieferbeginn, heuteStr) {
+  const gruende = [];
+  let stufe = 0;
+  const hoechst = +String((regeln && regeln.hoechstpreis) || "").replace(",", ".");
+  if (hoechst > 0 && stand.preisHoch > hoechst) {
+    stufe = Math.max(stufe, stand.preis > hoechst ? 2 : 1);
+    gruende.push(stand.preis > hoechst ? "Höchstpreis schon ohne Stresstest überschritten"
+      : "Höchstpreis im Stresstest überschritten");
+  }
+  if (stand.rueckstand > 0.25) { stufe = 2; gruende.push("Mehr als 25 % hinter dem Tranchenplan"); }
+  else if (stand.rueckstand > 0.05) { stufe = Math.max(stufe, 1); gruende.push("Hinter dem Tranchenplan"); }
+  if (lieferbeginn) {
+    const tage = (new Date(lieferbeginn) - new Date(heuteStr)) / 86400000;
+    if (tage < 90 && stand.offen > 0.3) { stufe = 2; gruende.push("Weniger als drei Monate bis Lieferbeginn, über 30 % offen"); }
+  }
+  if (bew.benutzung && bew.benutzung < 2500) { stufe = Math.max(stufe, 1); gruende.push("Unruhiger Lastgang, Strukturrisiko beachten"); }
+  if (stand.geplant && Math.abs(stand.geplant - 1) > 0.01) { stufe = Math.max(stufe, 1); gruende.push("Tranchen ergeben nicht 100 %"); }
+  return { stufe, gruende };
+}
+
+/* Gleichmäßiger Tranchenplan: n Tranchen zwischen zwei Daten */
+function tranchenVorschlag(jahr, n, von, bis, produkt) {
+  const a = new Date(von), b = new Date(bis);
+  const raus = [];
+  const basisAnteil = Math.floor(10000 / n) / 100;
+  for (let i = 0; i < n; i++) {
+    const d = n === 1 ? a : new Date(a.getTime() + ((b - a) * i) / (n - 1));
+    const anteil = i === n - 1 ? Math.round((100 - basisAnteil * (n - 1)) * 100) / 100 : basisAnteil;
+    raus.push({ jahr, datum: d.toISOString().slice(0, 10), anteil: String(anteil).replace(".", ","), produkt, status: "geplant", preis: "" });
+  }
+  return raus;
+}
+
+/* ---------- Bewertungsauftrag aus einem Vorgang ----------
+   Abschrift der Kundendaten für die Beschaffung, ausdrücklich ohne Aufschlag,
+   Preise und Provisionsangaben. Die Datenbank entfernt diese Felder zusätzlich. */
+const BESCHAFFUNG_STATUS = {
+  offen: { label: "Neu", color: C.strom },
+  arbeit: { label: "In Bearbeitung", color: C.gas },
+  fertig: { label: "Plan steht", color: C.ok },
+};
+const BESCHAFFUNG_ROLLEN_BEARBEITEN = ["Beschaffung", "Geschäftsführung", "Vertragsmanagement", "Leitung Vertrieb"];
+
+const individuelleProdukte = (a) => {
+  const g = gewaehlte(a);
+  const p = g.length ? g.map((v) => v.produkt) : [a.produkt, a.produktGas];
+  return [...new Set(p.filter((x) => INDIVIDUAL_PRODUKTE.includes(x)))];
+};
+
+/* Lieferzeitraum einer Variante: Beginn und Ende als ISO-Datum */
+function lieferzeitraum(v, a) {
+  const beginn = (v && v.lieferbeginn) || a.wunschLieferbeginn || "";
+  let ende = (v && v.laufzeitArt === "ende" && v.lieferende) || (v && v.lieferende) || a.wunschLieferende || "";
+  const monate = parseInt((v && v.laufzeit) || a.laufzeit) || 0;
+  if (!ende && beginn && monate) {
+    const d = new Date(beginn);
+    d.setMonth(d.getMonth() + monate);
+    d.setDate(d.getDate() - 1);
+    ende = d.toISOString().slice(0, 10);
+  }
+  return { beginn, ende };
+}
+
+function lieferjahreAus(beginn, ende) {
+  const j1 = parseInt(String(beginn).slice(0, 4)), j2 = parseInt(String(ende).slice(0, 4));
+  if (!j1) return [new Date().getFullYear() + 1];
+  const bis = j2 && j2 >= j1 ? Math.min(j2, j1 + 9) : j1;
+  const raus = [];
+  for (let j = j1; j <= bis; j++) raus.push(j);
+  return raus;
+}
+
+function beschaffungsAuftragAus(a, user, hinweis, zustaendigId) {
+  const g = gewaehlte(a);
+  const v = (g.find((x) => INDIVIDUAL_PRODUKTE.includes(x.produkt)) || g[0]) || null;
+  const { beginn, ende } = lieferzeitraum(v, a);
+  return {
+    id: "B-" + a.id + "-" + uid(),
+    anfrageId: a.id,
+    partnerId: a.partnerId,
+    partnerName: a.partnerName || "",
+    status: "offen",
+    uebergeben: { am: heute(), von: user.name, vonId: user.id, rolle: user.rolle, hinweis: hinweis || "" },
+    zustaendigId: zustaendigId || "",
+    kunde: { ...(a.kunde || {}) },
+    lieferstellen: (a.lieferstellen || []).map((l) => ({
+      id: l.id, medium: l.medium, bezeichnung: l.bezeichnung, strasse: l.strasse, plz: l.plz, ort: l.ort,
+      versorger: l.versorger, zaehlernummer: l.zaehlernummer, maloId: l.maloId, verbrauch: l.verbrauch,
+      zaehlerart: l.zaehlerart, lastgang: l.lastgang || null, abrechnung: l.abrechnung || null,
+    })),
+    produkte: individuelleProdukte(a),
+    varianten: (g.length ? g : varianten(a)).map((x) => ({
+      sparte: x.sparte, produkt: x.produkt, laufzeitArt: x.laufzeitArt, laufzeit: x.laufzeit,
+      lieferbeginn: x.lieferbeginn || "", lieferende: x.lieferende || "", versorger: x.versorger || "",
+    })),
+    lieferbeginn: beginn, lieferende: ende,
+    bewertung: { jahre: lieferjahreAus(beginn, ende).map((j) => ({ jahr: j, menge: "", base: "", peak: "", q: [{}, {}, {}, {}] })),
+                 marktStand: "", stress: "20", hoechstpreis: "", tranchen: [], quellen: [] },
+    verlauf: [{ d: heute(), t: "An die Beschaffung übergeben", w: user.name }],
+  };
+}
+
+/* ---------- Karte im Vorgang: übergeben und Stand ansehen ---------- */
+function BeschaffungKarte({ a, user, mitarbeiter, beschaffung, setBeschaffung, onOeffnen }) {
+  const [hinweis, setHinweis] = useState("");
+  const [zustaendig, setZustaendig] = useState("");
+  const echt = a._echterStatus !== undefined ? a._echterStatus : a.status;
+  const auftraege = (beschaffung || []).filter((b) => b.anfrageId === a.id);
+  const produkte = individuelleProdukte(a);
+  const darfUebergeben = echt === "abgeschlossen" && (
+    ["Geschäftsführung", "Vertragsmanagement", "Leitung Vertrieb"].includes(user.rolle)
+    || (["Vertriebspartner", "Teamleiter"].includes(user.rolle) && istBeteiligt(a, user.id)));
+  const darfOeffnen = BESCHAFFUNG_ROLLEN_BEARBEITEN.includes(user.rolle) || user.rolle === "Kalkulation";
+  if (!auftraege.length && (!produkte.length || !darfUebergeben)) return null;
+  const beschaffer = mitarbeiter.filter((m) => m.rolle === "Beschaffung" && m.status === "aktiv");
+
+  const uebergeben = () => {
+    const b = beschaffungsAuftragAus(a, user, hinweis, zustaendig);
+    setBeschaffung((l) => [b, ...l]);
+    setHinweis("");
+  };
+
+  return (
+    <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+      <div className="flex items-center gap-2 mb-3">
+        <Calculator size={15} style={{ color: C.strom }} />
+        <span className="text-sm">Beschaffung</span>
+        {produkte.length > 0 && <span className="text-xs" style={{ color: C.muted }}>{produkte.join(", ")}</span>}
+      </div>
+      {auftraege.map((b) => {
+        const s = BESCHAFFUNG_STATUS[b.status] || BESCHAFFUNG_STATUS.offen;
+        const erg = (b.bewertung && b.bewertung.ergebnis) || null;
+        const z = mitarbeiter.find((m) => m.id === b.zustaendigId);
+        return (
+          <div key={b.id} className="mb-4 text-sm">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span style={{ color: s.color }}>● {s.label}</span>
+              <span className="text-xs" style={{ color: C.muted }}>
+                übergeben am {datum(b.uebergeben && b.uebergeben.am)} von {b.uebergeben && b.uebergeben.von}
+                {z ? " · zuständig " + z.name : ""}
+              </span>
+            </div>
+            {erg && erg.jahre && (
+              <div className="mt-3 space-y-1">
+                {erg.jahre.map((j) => (
+                  <div key={j.jahr} className="flex flex-wrap justify-between gap-2 text-xs"
+                    style={{ fontVariantNumeric: "tabular-nums" }}>
+                    <span>Lieferjahr {j.jahr} · {num(j.menge, 0)} MWh</span>
+                    <span>{num(j.gesichert * 100, 0)} % gesichert · aktuell {num(j.preis, 2)} €/MWh</span>
+                  </div>
+                ))}
+                <p className="text-xs" style={{ color: C.muted }}>Energiepreis ohne Netz, Abgaben und Aufschläge; Stand der Marktpreise {datum(erg.marktStand)}.</p>
+              </div>
+            )}
+            {b.bewertung && b.bewertung.empfehlung && (
+              <p className="text-xs mt-2 whitespace-pre-wrap">{b.bewertung.empfehlung}</p>
+            )}
+            {darfOeffnen && (
+              <button className="text-xs mt-2" style={{ color: C.strom }} onClick={() => onOeffnen(b.id)}>
+                Bewertung öffnen
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {darfUebergeben && !auftraege.length && (
+        <div className="space-y-3">
+          <p className="text-xs" style={{ color: C.muted }}>
+            Die Beschaffung erhält Kunde, Lieferstellen, Lastgänge und Lieferzeitraum, keine Provision und keinen Aufschlag,
+            und erstellt daraus den Beschaffungsplan für den Kunden.
+          </p>
+          {beschaffer.length > 1 && (
+            <Select label="Zuständig" value={zustaendig} onChange={setZustaendig}
+              options={[{ value: "", label: "ganze Beschaffung" }, ...beschaffer.map((m) => ({ value: m.id, label: m.name }))]} />
+          )}
+          <label className="block">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>Hinweis an die Beschaffung (optional)</span>
+            <textarea value={hinweis} onChange={(e) => setHinweis(e.target.value)} rows={3}
+              placeholder="z. B. Kunde möchte vier Tranchen, Budgetgrenze 110 €/MWh"
+              className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+          </label>
+          <Btn icon={Send} onClick={uebergeben}>An Beschaffung übergeben</Btn>
+        </div>
+      )}
+      {darfUebergeben && auftraege.length > 0 && (
+        <button className="text-xs" style={{ color: C.muted }} onClick={uebergeben}>weiteren Auftrag übergeben</button>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Lastgänge einlesen (mehrere Lieferstellen werden addiert) ---------- */
+async function lastformAusDateien(dateien, einheit) {
+  let summe = null, info = { gesamt: 0, jahresmenge: 0, spitze: 0, stunden: 0, ohneDatum: 0, dateien: [] };
+  for (const d of dateien) {
+    const stand = await lastgangAuswerten(d);
+    const faktor = einheit === "kW" ? 1 / stand.proStunde : 1;
+    const werte = stand.werte.map((w) => w * faktor);
+    const form = lastform(werte, stand.zeitpunkte, stand.proStunde, zeitLesen);
+    if (!summe) summe = form.mittel.map((mo) => mo.map((ar) => ar.slice()));
+    else form.mittel.forEach((mo, m) => mo.forEach((ar, x) => ar.forEach((v, h) => { summe[m][x][h] += v; })));
+    info.gesamt += form.gesamt; info.jahresmenge += form.jahresmenge;
+    info.spitze += stand.spitze * faktor; info.stunden = Math.max(info.stunden, form.stunden);
+    info.ohneDatum += form.ohneDatum;
+    info.dateien.push(d.name);
+  }
+  return { mittel: summe, jahresmenge: info.jahresmenge, info };
+}
+
+/* Day-Ahead-Preise: Datei (CSV/Excel mit Zeit und Preis) oder Energy-Charts im Browser */
+async function preisreiheAusDatei(d) {
+  const stand = await lastgangAuswerten(d);
+  return stundenmittel(stand.werte.map((w, i) => ({ t: zeitLesen(stand.zeitpunkte[i]), preis: w })));
+}
+async function preisreiheEnergyCharts(jahr) {
+  const r = await fetch("https://api.energy-charts.info/price?bzn=DE-LU&start=" + jahr + "-01-01&end=" + jahr + "-12-31");
+  if (!r.ok) throw new Error("Energy-Charts antwortet nicht (" + r.status + ").");
+  const j = await r.json();
+  if (!j || !Array.isArray(j.unix_seconds) || !j.unix_seconds.length) throw new Error("Keine Preise erhalten.");
+  return stundenmittel(j.unix_seconds.map((s, i) => ({ t: new Date(s * 1000), preis: +j.price[i] })));
+}
+function stundenmittel(reihe) {
+  const m = new Map();
+  reihe.forEach(({ t, preis }) => {
+    if (!t || !isFinite(preis)) return;
+    const k = new Date(t.getFullYear(), t.getMonth(), t.getDate(), t.getHours());
+    const s = k.getTime(), alt = m.get(s);
+    if (alt) { alt.summe += preis; alt.n++; } else m.set(s, { t: k, summe: preis, n: 1 });
+  });
+  return [...m.values()].map((x) => ({ t: x.t, preis: x.summe / x.n }));
+}
+
+const rundeTief = (x) => (Array.isArray(x) ? x.map(rundeTief) : Math.round(x * 1000) / 1000);
+const zahlOder = (v) => { const z = zahlLesen(v); return isNaN(z) ? null : z; };
+
+/* ---------- Ansicht der Beschaffung ---------- */
+function Beschaffung({ auftraege, setAuftraege, user, mitarbeiter, start, onStart }) {
+  const [offenId, setOffenId] = useState(start || null);
+  const [filter, setFilter] = useState("aktiv");
+  useEffect(() => { if (start) { setOffenId(start); onStart && onStart(null); } }, [start]);
+
+  const meine = user.rolle === "Beschaffung"
+    ? auftraege.filter((b) => !b.zustaendigId || b.zustaendigId === user.id) : auftraege;
+  const offen = auftraege.find((b) => b.id === offenId);
+  const aendern = (b) => setAuftraege((l) => l.map((x) => (x.id === b.id ? b : x)));
+
+  if (offen)
+    return <BeschaffungDetail b={offen} user={user} mitarbeiter={mitarbeiter} onAendern={aendern}
+              onZurueck={() => setOffenId(null)}
+              onLoeschen={["Geschäftsführung", "Vertragsmanagement"].includes(user.rolle)
+                ? () => { setAuftraege((l) => l.filter((x) => x.id !== offen.id)); setOffenId(null); } : null} />;
+
+  const liste = meine.filter((b) => filter === "alle" ? true : filter === "fertig" ? b.status === "fertig" : b.status !== "fertig")
+    .sort((x, y) => String((y.uebergeben || {}).am || "").localeCompare(String((x.uebergeben || {}).am || "")));
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg">Bewertungsaufträge</h2>
+        <p className="text-sm" style={{ color: C.muted }}>
+          Kunden mit Tranchen- oder PPA-Modell: Lastgang bewerten und den Beschaffungsplan für den Kunden erstellen.
+        </p>
+      </div>
+      <div className="flex gap-2 text-sm">
+        {[["aktiv", "Offen"], ["fertig", "Plan steht"], ["alle", "Alle"]].map(([id, t]) => (
+          <button key={id} onClick={() => setFilter(id)} className="px-3 py-1.5 rounded"
+            style={{ background: filter === id ? C.ink : "#fff", color: filter === id ? "#fff" : C.text, border: "1px solid " + C.line }}>
+            {t}
+          </button>
+        ))}
+      </div>
+      {liste.length === 0 ? (
+        <p className="text-sm" style={{ color: C.muted }}>Keine Aufträge in dieser Auswahl.</p>
+      ) : (
+        <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {liste.map((b, i) => {
+            const s = BESCHAFFUNG_STATUS[b.status] || BESCHAFFUNG_STATUS.offen;
+            const st = ((b.bewertung || {}).ergebnis || {}).ampel;
+            return (
+              <button key={b.id} onClick={() => setOffenId(b.id)} className="w-full text-left px-4 py-3 text-sm flex items-center gap-3"
+                style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+                {st != null && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: AMPEL_FARBE[st] }} />}
+                <div className="flex-1 min-w-0">
+                  <div className="truncate">{(b.kunde || {}).firma || b.anfrageId}</div>
+                  <div className="text-xs truncate" style={{ color: C.muted }}>
+                    {(b.produkte || []).join(", ") || "Beschaffungsplan"} · Lieferung ab {datum(b.lieferbeginn)} · {b.partnerName}
+                  </div>
+                </div>
+                <span className="text-xs whitespace-nowrap" style={{ color: s.color }}>{s.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const AMPEL_FARBE = ["#4A9130", "#D9A21B", "#B24328"];
+const AMPEL_TEXT = ["Im Plan", "Beobachten", "Handlungsbedarf"];
+
+const KleinFeld = ({ value, onChange, placeholder, darf }) => (
+  <input value={value ?? ""} placeholder={placeholder} inputMode="decimal" disabled={!darf}
+    onChange={(e) => onChange(e.target.value)} className="w-full px-2 py-1.5 text-sm rounded outline-none"
+    style={{ border: "1px solid " + C.line, fontVariantNumeric: "tabular-nums", background: darf ? "#fff" : "#F1F3F5" }} />
+);
+
+function Abschnitt({ titel, children, rechts }) {
+  return (
+    <div className="rounded p-4 sm:p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <span className="text-sm">{titel}</span>{rechts}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoeschen }) {
+  const darf = BESCHAFFUNG_ROLLEN_BEARBEITEN.includes(user.rolle);
+  const bw = { jahre: [], tranchen: [], ...(b.bewertung || {}) };
+  const [laedt, setLaedt] = useState("");
+  const [fehler, setFehler] = useState("");
+  const [lastInfo, setLastInfo] = useState(null);
+  const [quartale, setQuartale] = useState({});
+  const lastRef = React.useRef(null);   /* eingelesene Lastform, nur im Speicher */
+  const profilRef = React.useRef(null);
+
+  /* Kurzstand (gesichert, Preis, Ampel) in der Zusammenfassung mitführen: Vorgang und Liste lesen ihn */
+  const mitKurzstand = (n) => {
+    if (!n.ergebnis || !n.ergebnis.jahre) return n;
+    const jahre = n.ergebnis.jahre.map((j) => {
+      const st = tranchenStand(n.tranchen, j.jahr, j, n.stress, heute());
+      const a = ampel(st, j, { hoechstpreis: n.hoechstpreis }, b.lieferbeginn, heute());
+      return { ...j, gesichert: st.gekauftAnteil, preis: st.preis, ampelJahr: a.stufe };
+    });
+    return { ...n, ergebnis: { ...n.ergebnis, jahre, ampel: Math.max(0, ...jahre.map((j) => j.ampelJahr || 0)) } };
+  };
+  const setBw = (teil, t) => {
+    const neu = { ...b, bewertung: mitKurzstand({ ...bw, ...teil }) };
+    if (user.rolle === "Beschaffung" && b.status === "offen") neu.status = "arbeit";
+    if (t) neu.verlauf = [...(b.verlauf || []), { d: heute(), t, w: user.name }];
+    onAendern(neu);
+  };
+  const setJahr = (i, teil) => setBw({ jahre: bw.jahre.map((j, k) => (k === i ? { ...j, ...teil } : j)) });
+
+  /* Lastgang-Quellen: RLM-Lieferstellen Strom und eigene Uploads */
+  const quellen = [
+    ...(b.lieferstellen || []).filter((l) => l.medium === "strom" && l.lastgang)
+      .map((l) => ({ id: "ls-" + l.id, name: (l.bezeichnung || l.ort || "Lieferstelle") + " · " + l.lastgang.name, datei: l.lastgang })),
+    ...(bw.eigeneLastgaenge || []).map((d, i) => ({ id: "eig-" + i, name: d.name, datei: d })),
+  ];
+  const gewaehlt = bw.quellen && bw.quellen.length ? bw.quellen : quellen.map((q) => q.id);
+  const verbrauchStrom = (b.lieferstellen || []).filter((l) => l.medium === "strom")
+    .reduce((s, l) => s + (zahlLesen(l.verbrauch) || 0), 0);
+
+  const einlesen = async () => {
+    setFehler(""); setLaedt("Lastgang wird eingelesen …");
+    try {
+      const d = quellen.filter((q) => gewaehlt.includes(q.id)).map((q) => q.datei);
+      if (!d.length) throw new Error("Bitte mindestens einen Lastgang wählen oder hochladen.");
+      const r = await lastformAusDateien(d, bw.einheit || "kWh");
+      lastRef.current = r;
+      setLastInfo(r.info);
+      return r;
+    } catch (e) { setFehler(e.message || String(e)); return null; }
+    finally { setLaedt(""); }
+  };
+
+  const profilLaden = async (art, datei) => {
+    setFehler(""); setLaedt("Day-Ahead-Preise werden gelesen …");
+    try {
+      const jahr = new Date().getFullYear() - 1;
+      const reihe = art === "datei" ? await preisreiheAusDatei(datei) : await preisreiheEnergyCharts(jahr);
+      if (reihe.length < 24 * 60) throw new Error("Zu wenige Stundenpreise (" + reihe.length + "). Bitte ein ganzes Jahr verwenden.");
+      const profil = profilAusPreisen(reihe);
+      profilRef.current = profil;
+      setBw({ profil: rundeTief(profil), profilQuelle: (art === "datei" ? datei.name : "Energy-Charts Day-Ahead " + jahr)
+        + " · " + num(reihe.length) + " Stunden" });
+    } catch (e) {
+      setFehler((art === "datei" ? "" : "Energy-Charts ist aus dem Portal nicht erreichbar. Lade die Day-Ahead-Preise auf energy-charts.info als CSV herunter und wähle die Datei hier aus. ")
+        + (e.message || String(e)));
+    } finally { setLaedt(""); }
+  };
+
+  /* Bewerten: Lastgang × Preiskurve je Lieferjahr; gespeichert werden nur die Kennzahlen */
+  const bewerten = async () => {
+    const form = lastRef.current || (await einlesen());
+    if (!form) return;
+    setLaedt("Bewertung läuft …");
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      const jahre = bw.jahre.map((j) => {
+        const menge = zahlOder(j.menge) || form.jahresmenge || verbrauchStrom;
+        const last = jahresLast(form, j.jahr, menge);
+        const kurve = preiskurve(j.jahr, { base: zahlOder(j.base), peak: zahlOder(j.peak),
+          q: (j.q || []).map((q) => ({ base: zahlOder(q && q.base), peak: zahlOder(q && q.peak) })) }, bw.profil || null);
+        const e = jahresBewertung(last, kurve);
+        return { jahr: j.jahr, mengeKwh: menge, menge: e.menge, preis: e.preis, hedgePreis: e.hedgePreis,
+                 strukturProMWh: e.strukturProMWh, baseMW: e.baseMW, peakMW: e.peakMW, benutzung: e.benutzung,
+                 peakAnteil: e.peakAnteil, gewichtBase: e.gewichtBase, spitze: e.spitze,
+                 monate: { base: rundeTief(kurve.monate.base), peak: rundeTief(kurve.monate.peak) } };
+      });
+      setBw({ ergebnis: { ...(bw.ergebnis || {}), berechnet: heute(), marktStand: bw.marktStand || heute(),
+        profil: !!bw.profil, jahre } }, "Bewertung berechnet");
+    } catch (e) { setFehler(e.message || String(e)); }
+    finally { setLaedt(""); }
+  };
+
+  /* Stand der Tranchen je Jahr (braucht nur die gespeicherten Kennzahlen) */
+  const standVon = (j) => {
+    const st = tranchenStand(bw.tranchen, j.jahr, j, bw.stress, heute());
+    return { st, a: ampel(st, j, { hoechstpreis: bw.hoechstpreis }, b.lieferbeginn, heute()) };
+  };
+  const erg = bw.ergebnis;
+
+  const tranchenSetzen = (tranchen, t) => setBw({ tranchen }, t);
+  const setTranche = (id, teil) => tranchenSetzen(bw.tranchen.map((x) => (x.id === id ? { ...x, ...teil } : x)),
+    teil.status === "gekauft" ? "Tranche als gekauft vermerkt" : null);
+
+  const [vorschlag, setVorschlag] = useState({ anzahl: "4", von: heute(), bis: b.lieferbeginn
+    ? new Date(new Date(b.lieferbeginn).getTime() - 30 * 86400000).toISOString().slice(0, 10) : heute(), produkt: "Base/Peak" });
+  const vorschlagen = (jahr) => {
+    const neu = tranchenVorschlag(jahr, Math.max(1, Math.min(24, parseInt(vorschlag.anzahl) || 4)),
+      vorschlag.von, vorschlag.bis, vorschlag.produkt).map((t) => ({ ...t, id: uid() }));
+    tranchenSetzen([...(bw.tranchen || []).filter((t) => +t.jahr !== +jahr || t.status === "gekauft"), ...neu],
+      "Tranchenplan " + jahr + " erstellt");
+  };
+
+  const pdf = () => {
+    const d = beschaffungPdf(b, mitarbeiter, standVon);
+    if (d) PDF_ZEIGEN(d);
+  };
+
+  const k = b.kunde || {};
+  const s = BESCHAFFUNG_STATUS[b.status] || BESCHAFFUNG_STATUS.offen;
+  const tz = { fontVariantNumeric: "tabular-nums" };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <button onClick={onZurueck} className="text-xs mb-2 inline-flex items-center gap-1" style={{ color: C.muted }}>
+            <ArrowLeft size={13} /> Bewertungsaufträge
+          </button>
+          <h2 className="text-lg truncate">{k.firma || b.anfrageId}</h2>
+          <p className="text-xs" style={{ color: C.muted }}>
+            Vorgang {b.anfrageId} · {(b.produkte || []).join(", ")} · übergeben {datum((b.uebergeben || {}).am)} von {(b.uebergeben || {}).von}
+          </p>
+        </div>
+        <span className="text-xs whitespace-nowrap" style={{ color: s.color }}>● {s.label}</span>
+      </div>
+
+      {(b.uebergeben || {}).hinweis && (
+        <div className="rounded p-3 text-sm whitespace-pre-wrap" style={{ background: "#FFF8E6", border: "1px solid #F0DCA8" }}>
+          {b.uebergeben.hinweis}
+        </div>
+      )}
+
+      <Abschnitt titel="Kunde und Lieferstellen">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm mb-3">
+          <div>{k.firma}</div>
+          <div style={{ color: C.muted }}>{[k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")}</div>
+          {k.ansprechpartner && <div>{k.ansprechpartner}</div>}
+          {(k.telefon || k.email) && <div style={{ color: C.muted }}>{[k.telefon, k.email].filter(Boolean).join(" · ")}</div>}
+          {k.branche && <div style={{ color: C.muted }}>Branche: {k.branche}</div>}
+          <div style={{ color: C.muted }}>Lieferzeitraum {datum(b.lieferbeginn)} bis {datum(b.lieferende)}</div>
+          <div style={{ color: C.muted }}>Vertrieb: {b.partnerName}</div>
+        </div>
+        <div className="space-y-2">
+          {(b.lieferstellen || []).map((l) => (
+            <div key={l.id} className="rounded p-3 text-sm" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+              <div className="flex items-center gap-2">
+                <MediumIcon medium={l.medium} />
+                <span className="truncate">{l.bezeichnung || [l.strasse, l.ort].filter(Boolean).join(", ") || "Lieferstelle"}</span>
+                <span className="text-xs ml-auto" style={{ color: C.muted }}>{l.zaehlerart}</span>
+              </div>
+              <div className="text-xs mt-1" style={{ color: C.muted, ...tz }}>
+                {num(zahlLesen(l.verbrauch) || 0)} kWh · MaLo {l.maloId || "–"} · Zähler {l.zaehlernummer || "–"}
+                {l.versorger ? " · bisher " + l.versorger : ""}
+              </div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {l.lastgang && <DateiChip datei={l.lastgang} label="Lastgang" klein />}
+                {l.abrechnung && <DateiChip datei={l.abrechnung} label="Abrechnung" klein />}
+              </div>
+            </div>
+          ))}
+        </div>
+        {(b.varianten || []).length > 0 && (
+          <div className="text-xs mt-3" style={{ color: C.muted }}>
+            {(b.varianten || []).map((v, i) => (
+              <div key={i}>{v.produkt} · {v.sparte === "gas" ? "Erdgas" : v.sparte === "strom" ? "Strom" : "Strom und Erdgas"}
+                {v.versorger ? " · " + v.versorger : ""}{v.lieferbeginn ? " · ab " + datum(v.lieferbeginn) : ""}
+                {v.laufzeitArt === "ende" && v.lieferende ? " bis " + datum(v.lieferende) : v.laufzeit ? " · " + v.laufzeit + " Monate" : ""}</div>
+            ))}
+          </div>
+        )}
+      </Abschnitt>
+
+      <Abschnitt titel="1 · Lastgang">
+        {quellen.length === 0 && <p className="text-sm mb-3" style={{ color: C.warn }}>Im Vorgang liegt kein Lastgang. Bitte hier hochladen.</p>}
+        <div className="space-y-2 mb-3">
+          {quellen.map((q) => (
+            <label key={q.id} className="flex items-center gap-2 text-sm">
+              <input type="checkbox" disabled={!darf} checked={gewaehlt.includes(q.id)}
+                onChange={(e) => { lastRef.current = null; setLastInfo(null);
+                  setBw({ quellen: e.target.checked ? [...gewaehlt, q.id] : gewaehlt.filter((x) => x !== q.id) }); }} />
+              <span className="truncate">{q.name}</span>
+            </label>
+          ))}
+        </div>
+        {darf && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <Datei label="Weiteren Lastgang hochladen (CSV oder Excel)" datei={null}
+              onSet={(d) => { if (d) { lastRef.current = null; setBw({ eigeneLastgaenge: [...(bw.eigeneLastgaenge || []), d],
+                quellen: [...gewaehlt, "eig-" + (bw.eigeneLastgaenge || []).length] }, "Lastgang hochgeladen"); } }} />
+            <Select label="Werte in der Datei" value={bw.einheit || "kWh"}
+              onChange={(v) => { lastRef.current = null; setLastInfo(null); setBw({ einheit: v }); }}
+              options={[{ value: "kWh", label: "Energie je Intervall (kWh)" }, { value: "kW", label: "Leistung (kW)" }]} />
+          </div>
+        )}
+        <Btn variante="neutral" onClick={einlesen} disabled={!!laedt}>Lastgang einlesen</Btn>
+        {lastInfo && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-sm" style={tz}>
+            {[["Jahresmenge (hochgerechnet)", num(lastInfo.jahresmenge) + " kWh"],
+              ["Spitzenlast", num(lastInfo.spitze, 1) + " kW"],
+              ["Benutzungsstunden", num(lastInfo.spitze ? lastInfo.jahresmenge / lastInfo.spitze : 0) + " h"],
+              ["Erfasste Stunden", num(lastInfo.stunden)]].map(([t, v]) => (
+              <div key={t}><div className="text-xs mb-1" style={{ color: C.muted }}>{t}</div>{v}</div>
+            ))}
+            {lastInfo.ohneDatum > 0 && <p className="col-span-2 sm:col-span-4 text-xs" style={{ color: C.warn }}>
+              Ohne Zeitstempel erkannt: Die Werte wurden ab 1. Januar fortlaufend gelegt.</p>}
+          </div>
+        )}
+      </Abschnitt>
+
+      <Abschnitt titel="2 · Marktpreise (Terminmarkt)" rechts={
+        darf && <button className="text-xs" style={{ color: C.strom }}
+          onClick={() => { const n = (bw.jahre[bw.jahre.length - 1] || { jahr: new Date().getFullYear() }).jahr + 1;
+            setBw({ jahre: [...bw.jahre, { jahr: n, menge: "", base: "", peak: "", q: [{}, {}, {}, {}] }] }); }}>+ Lieferjahr</button>}>
+        <p className="text-xs mb-3" style={{ color: C.muted }}>
+          Settlementpreise in €/MWh eintragen, zum Beispiel von eex.com unter Strom, Futures, German Power.
+          Quartale sind freiwillig; ohne sie verteilt das Portal den Jahrespreis nach einer üblichen Saisonform.
+        </p>
+        <div className="mb-4 max-w-xs">
+          <Feld label="Stand der Preise" type="date" value={bw.marktStand || ""} gesperrt={!darf}
+            onChange={(v) => setBw({ marktStand: v })} />
+        </div>
+        <div className="space-y-4">
+          {bw.jahre.map((j, i) => (
+            <div key={j.jahr} className="rounded p-3" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm">Lieferjahr {j.jahr}</span>
+                {darf && bw.jahre.length > 1 && (
+                  <button className="text-xs" style={{ color: C.muted }}
+                    onClick={() => setBw({ jahre: bw.jahre.filter((_, k2) => k2 !== i) })}>entfernen</button>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="block"><span className="block text-xs mb-1" style={{ color: C.muted }}>Cal Base</span>
+                  <KleinFeld darf={darf} value={j.base} onChange={(v) => setJahr(i, { base: v })} placeholder="€/MWh" /></label>
+                <label className="block"><span className="block text-xs mb-1" style={{ color: C.muted }}>Cal Peak</span>
+                  <KleinFeld darf={darf} value={j.peak} onChange={(v) => setJahr(i, { peak: v })} placeholder="€/MWh" /></label>
+                <label className="block"><span className="block text-xs mb-1" style={{ color: C.muted }}>Menge kWh</span>
+                  <KleinFeld darf={darf} value={j.menge} onChange={(v) => setJahr(i, { menge: v })}
+                    placeholder={num((lastInfo && lastInfo.jahresmenge) || verbrauchStrom)} /></label>
+              </div>
+              <button className="text-xs mt-2" style={{ color: C.strom }}
+                onClick={() => setQuartale({ ...quartale, [j.jahr]: !quartale[j.jahr] })}>
+                {quartale[j.jahr] ? "Quartale ausblenden" : "Quartalspreise eintragen"}
+              </button>
+              {quartale[j.jahr] && (
+                <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
+                  <span /><span style={{ color: C.muted }}>Base</span><span style={{ color: C.muted }}>Peak</span>
+                  {[0, 1, 2, 3].map((q) => (
+                    <React.Fragment key={q}>
+                      <span className="self-center">Q{q + 1}</span>
+                      <KleinFeld darf={darf} value={((j.q || [])[q] || {}).base}
+                        onChange={(v) => setJahr(i, { q: [0, 1, 2, 3].map((x) => (x === q ? { ...((j.q || [])[x] || {}), base: v } : (j.q || [])[x] || {})) })} />
+                      <KleinFeld darf={darf} value={((j.q || [])[q] || {}).peak}
+                        onChange={(v) => setJahr(i, { q: [0, 1, 2, 3].map((x) => (x === q ? { ...((j.q || [])[x] || {}), peak: v } : (j.q || [])[x] || {})) })} />
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Abschnitt>
+
+      <Abschnitt titel="3 · Stundenprofil (freiwillig)">
+        <p className="text-xs mb-3" style={{ color: C.muted }}>
+          Ohne Profil rechnet das Portal mit Peak- und Offpeakpreisen je Monat. Mit den Day-Ahead-Preisen eines
+          vergangenen Jahres bekommt die Kurve ihren Tagesverlauf; die Mittelwerte bleiben genau bei den eingetragenen Preisen.
+        </p>
+        {bw.profilQuelle && (
+          <p className="text-sm mb-3 flex items-center gap-2"><Check size={14} style={{ color: C.ok }} /> {bw.profilQuelle}
+            {darf && <button className="text-xs ml-2" style={{ color: C.muted }} onClick={() => setBw({ profil: null, profilQuelle: "" })}>entfernen</button>}
+          </p>
+        )}
+        {darf && (
+          <div className="flex flex-wrap gap-3 items-end">
+            <Btn variante="neutral" onClick={() => profilLaden("api")} disabled={!!laedt}>Day-Ahead {new Date().getFullYear() - 1} laden</Btn>
+            <div className="flex-1 min-w-[200px]">
+              <Datei label="oder Datei mit Stundenpreisen" datei={null} onSet={(d) => d && profilLaden("datei", d)} />
+            </div>
+          </div>
+        )}
+      </Abschnitt>
+
+      {darf && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Btn icon={Calculator} onClick={bewerten} disabled={!!laedt}>Bewerten</Btn>
+          {laedt && <span className="text-sm" style={{ color: C.muted }}>{laedt}</span>}
+        </div>
+      )}
+      {fehler && <p className="text-sm" style={{ color: C.warn }}>{fehler}</p>}
+
+      {erg && erg.jahre && (
+        <Abschnitt titel="4 · Bewertung" rechts={<span className="text-xs" style={{ color: C.muted }}>
+          berechnet {datum(erg.berechnet)} · Preise vom {datum(erg.marktStand)}{erg.profil ? " · mit Stundenprofil" : ""}</span>}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={tz}>
+              <thead>
+                <tr className="text-xs text-left" style={{ color: C.muted }}>
+                  <th className="py-1 pr-3 font-normal">Lieferjahr</th>
+                  <th className="py-1 pr-3 font-normal text-right">Menge MWh</th>
+                  <th className="py-1 pr-3 font-normal text-right">Base MW</th>
+                  <th className="py-1 pr-3 font-normal text-right">Peak MW</th>
+                  <th className="py-1 pr-3 font-normal text-right">Base/Peak €/MWh</th>
+                  <th className="py-1 pr-3 font-normal text-right">Struktur €/MWh</th>
+                  <th className="py-1 font-normal text-right">Lastgang €/MWh</th>
+                </tr>
+              </thead>
+              <tbody>
+                {erg.jahre.map((j) => (
+                  <tr key={j.jahr} style={{ borderTop: "1px solid " + C.line }}>
+                    <td className="py-2 pr-3">{j.jahr}</td>
+                    <td className="py-2 pr-3 text-right">{num(j.menge, 0)}</td>
+                    <td className="py-2 pr-3 text-right">{num(j.baseMW, 3)}</td>
+                    <td className="py-2 pr-3 text-right">{num(j.peakMW, 3)}</td>
+                    <td className="py-2 pr-3 text-right">{num(j.hedgePreis, 2)}</td>
+                    <td className="py-2 pr-3 text-right">{num(j.strukturProMWh, 2)}</td>
+                    <td className="py-2 text-right">{num(j.hedgePreis + j.strukturProMWh, 2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs mt-3" style={{ color: C.muted }}>
+            Base und Peak: Absicherung mit Jahresprodukten (Base = mittlere Offpeaklast, Peak = Mehrlast in den Peakstunden).
+            Struktur: Wert der Abweichung zwischen Lastgang und dieser Absicherung. Benutzungsstunden {erg.jahre.map((j) => num(j.benutzung)).join(" / ")} h,
+            Peakanteil {erg.jahre.map((j) => num(j.peakAnteil * 100)).join(" / ")} %.
+          </p>
+        </Abschnitt>
+      )}
+
+      {erg && erg.jahre && (
+        <Abschnitt titel="5 · Tranchenplan">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <Feld label="Höchstpreis (Budgetgrenze) €/MWh" value={bw.hoechstpreis || ""} gesperrt={!darf}
+              onChange={(v) => setBw({ hoechstpreis: v })} />
+            <Feld label="Stresstest ± %" value={bw.stress || ""} gesperrt={!darf} onChange={(v) => setBw({ stress: v })} />
+          </div>
+          {darf && (
+            <div className="rounded p-3 mb-4" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+              <div className="text-xs mb-2" style={{ color: C.muted }}>Gleichmäßigen Plan vorschlagen (gekaufte Tranchen bleiben stehen)</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <Feld label="Anzahl Tranchen" value={vorschlag.anzahl} onChange={(v) => setVorschlag({ ...vorschlag, anzahl: v })} />
+                <Feld label="erste" type="date" value={vorschlag.von} onChange={(v) => setVorschlag({ ...vorschlag, von: v })} />
+                <Feld label="letzte" type="date" value={vorschlag.bis} onChange={(v) => setVorschlag({ ...vorschlag, bis: v })} />
+                <Select label="Produkt" value={vorschlag.produkt} onChange={(v) => setVorschlag({ ...vorschlag, produkt: v })}
+                  options={["Base/Peak", "Base", "Peak"]} />
+              </div>
+              <div className="flex flex-wrap gap-2 mt-3">
+                {erg.jahre.map((j) => (
+                  <Btn key={j.jahr} variante="neutral" onClick={() => vorschlagen(j.jahr)}>Plan für {j.jahr}</Btn>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {erg.jahre.map((j) => {
+            const { st, a } = standVon(j);
+            const tr = (bw.tranchen || []).filter((t) => +t.jahr === +j.jahr).sort((x, y) => String(x.datum).localeCompare(String(y.datum)));
+            return (
+              <div key={j.jahr} className="mb-5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
+                  <span className="text-sm">Lieferjahr {j.jahr}</span>
+                  <span className="text-xs inline-flex items-center gap-1" style={{ color: AMPEL_FARBE[a.stufe] }}>
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: AMPEL_FARBE[a.stufe] }} />{AMPEL_TEXT[a.stufe]}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2 text-sm" style={tz}>
+                  {[["Gesichert", num(st.gekauftAnteil * 100) + " %" + (st.gekauftAnteil ? " zu " + num(st.gekauftPreis, 2) : "")],
+                    ["Sollstand heute", num(st.soll * 100) + " %"],
+                    ["Energiepreis aktuell", num(st.preis, 2) + " €/MWh"],
+                    ["Band bei ± " + (bw.stress || 0) + " %", num(st.preisTief, 2) + " – " + num(st.preisHoch, 2)]].map(([t, v]) => (
+                    <div key={t}><div className="text-xs mb-1" style={{ color: C.muted }}>{t}</div>{v}</div>
+                  ))}
+                </div>
+                {a.gruende.length > 0 && <p className="text-xs mb-2" style={{ color: AMPEL_FARBE[a.stufe] }}>{a.gruende.join(" · ")}</p>}
+                <div className="space-y-2">
+                  {tr.map((t) => (
+                    <div key={t.id} className="rounded p-2" style={{ border: "1px solid " + (t.status === "gekauft" ? C.ok : C.line) }}>
+                      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+                        <Feld label="Termin" type="date" value={t.datum || ""} gesperrt={!darf} onChange={(v) => setTranche(t.id, { datum: v })} />
+                        <Feld label="Anteil %" value={t.anteil || ""} gesperrt={!darf} onChange={(v) => setTranche(t.id, { anteil: v })} />
+                        <Select label="Status" value={t.status || "geplant"} onChange={(v) => darf && setTranche(t.id, { status: v })}
+                          options={[{ value: "geplant", label: "geplant" }, { value: "gekauft", label: "gekauft" }, { value: "ausgesetzt", label: "ausgesetzt" }]} />
+                        <Feld label="Preis Base" value={t.preisBase || ""} gesperrt={!darf} onChange={(v) => setTranche(t.id, { preisBase: v })} />
+                        <Feld label="Preis Peak" value={t.preisPeak || ""} gesperrt={!darf} onChange={(v) => setTranche(t.id, { preisPeak: v })} />
+                        <Feld label="oder Mischpreis" value={t.preis || ""} gesperrt={!darf} onChange={(v) => setTranche(t.id, { preis: v })} />
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        <input value={t.notiz || ""} disabled={!darf} placeholder="Notiz, z. B. Signal oder Absprache mit dem Versorger"
+                          onChange={(e) => setTranche(t.id, { notiz: e.target.value })}
+                          className="flex-1 px-2 py-1.5 text-xs rounded outline-none" style={{ border: "1px solid " + C.line }} />
+                        {darf && <button style={{ color: C.muted }} onClick={() => tranchenSetzen(bw.tranchen.filter((x) => x.id !== t.id))}><Trash2 size={14} /></button>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {darf && (
+                  <button className="text-xs mt-2" style={{ color: C.strom }}
+                    onClick={() => tranchenSetzen([...(bw.tranchen || []), { id: uid(), jahr: j.jahr, datum: heute(), anteil: "", status: "geplant", produkt: "Base/Peak", preis: "" }])}>
+                    + Tranche
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          <p className="text-xs" style={{ color: C.muted }}>
+            Energiepreis aktuell: gekaufte Tranchen zu ihrem Preis, offener Rest zum heutigen Base/Peak-Preis, dazu die Strukturkosten.
+            Ohne Netzentgelte, Abgaben, Umlagen und Aufschläge des Versorgers.
+          </p>
+        </Abschnitt>
+      )}
+
+      <Abschnitt titel="Empfehlung an Kunde und Vertrieb">
+        <textarea value={bw.empfehlung || ""} disabled={!darf} rows={4} onChange={(e) => setBw({ empfehlung: e.target.value })}
+          placeholder="Kurze Einschätzung und nächste Schritte, sichtbar im Vorgang"
+          className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+        <div className="flex flex-wrap gap-3 mt-3 items-end">
+          {darf && (
+            <div className="w-48">
+              <Select label="Status" value={b.status} onChange={(v) => onAendern({ ...b, status: v,
+                verlauf: [...(b.verlauf || []), { d: heute(), t: "Status: " + BESCHAFFUNG_STATUS[v].label, w: user.name }] })}
+                options={Object.entries(BESCHAFFUNG_STATUS).map(([value, x]) => ({ value, label: x.label }))} />
+            </div>
+          )}
+          <Btn variante="neutral" icon={FileText} onClick={pdf} disabled={!erg}>Beschaffungsplan als PDF</Btn>
+          {onLoeschen && <Btn variante="gefahr" icon={Trash2}
+            onClick={() => { if (window.confirm("Diesen Bewertungsauftrag löschen?")) onLoeschen(); }}>Löschen</Btn>}
+        </div>
+      </Abschnitt>
+
+      <Abschnitt titel="Verlauf">
+        <div className="space-y-1 text-xs" style={{ color: C.muted }}>
+          {(b.verlauf || []).slice().reverse().map((v, i) => <div key={i}>{datum(v.d)} · {v.t} · {v.w}</div>)}
+        </div>
+      </Abschnitt>
+    </div>
+  );
+}
+
+/* Beschaffungsplan als PDF im EGC-Design */
+function beschaffungPdf(b, mitarbeiter, standVon) {
+  const bw = b.bewertung || {}, erg = bw.ergebnis || {}, k = b.kunde || {};
+  const z = [];
+  z.push({ text: "Beschaffungsplan " + (k.firma || ""), gross: true });
+  z.push([k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", "));
+  z.push("Modell: " + ((b.produkte || []).join(", ") || "Tranchen") + " · Lieferzeitraum " + datum(b.lieferbeginn) + " bis " + datum(b.lieferende));
+  z.push("Marktpreise vom " + datum(erg.marktStand) + ", Bewertung vom " + datum(erg.berechnet) + (erg.profil ? ", mit Stundenprofil" : ""));
+  z.push("");
+  (erg.jahre || []).forEach((j) => {
+    const { st, a } = standVon(j);
+    z.push({ text: "Lieferjahr " + j.jahr, gross: true });
+    z.push("Menge " + num(j.menge, 0) + " MWh · Absicherung " + num(j.baseMW, 3) + " MW Base und " + num(j.peakMW, 3) + " MW Peak");
+    z.push("Base/Peak heute " + num(j.hedgePreis, 2) + " €/MWh · Struktur " + num(j.strukturProMWh, 2) + " €/MWh · Benutzungsstunden " + num(j.benutzung) + " h");
+    z.push("Gesichert " + num(st.gekauftAnteil * 100) + " %" + (st.gekauftAnteil ? " zu " + num(st.gekauftPreis, 2) + " €/MWh" : "")
+      + " · Energiepreis aktuell " + num(st.preis, 2) + " €/MWh (± " + (bw.stress || 0) + " %: " + num(st.preisTief, 2) + " bis " + num(st.preisHoch, 2) + ")");
+    z.push("Einschätzung: " + AMPEL_TEXT[a.stufe] + (a.gruende.length ? " – " + a.gruende.join(", ") : ""));
+    const tr = (bw.tranchen || []).filter((t) => +t.jahr === +j.jahr).sort((x, y) => String(x.datum).localeCompare(String(y.datum)));
+    tr.forEach((t, i) => {
+      const preis = t.preis ? t.preis + " €/MWh" : t.preisBase ? "Base " + t.preisBase + " / Peak " + (t.preisPeak || "–") + " €/MWh" : "";
+      z.push((i + 1) + ". Tranche " + datum(t.datum) + " · " + (t.anteil || "–") + " % · " + (t.status || "geplant") + (preis ? " · " + preis : "") + (t.notiz ? " · " + t.notiz : ""));
+    });
+    z.push("");
+  });
+  if (bw.hoechstpreis) z.push("Budgetgrenze: " + bw.hoechstpreis + " €/MWh");
+  if (bw.empfehlung) { z.push({ text: "Empfehlung", gross: true }); z.push(bw.empfehlung); z.push(""); }
+  z.push("Alle Preise netto für die Energie, ohne Netzentgelte, Abgaben, Umlagen und Aufschläge des Versorgers. Die Tranchen werden beim Versorger des Kunden im vereinbarten Beschaffungsmodell abgerufen. Marktpreise sind Momentaufnahmen und können sich täglich ändern.");
+  return erzeugePdf("beschaffungsplan_" + String(k.firma || b.anfrageId).replace(/[^\wäöüÄÖÜß]+/g, "_") + ".pdf",
+    "Beschaffungsplan", z);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Übersicht für den Innendienst                                      */
 /*  Kalkulation, Vertragsmanagement, Finanzbuchhaltung und             */
 /*  Leadmanagement schließen keine Verträge ab und bekommen keine      */
@@ -14949,6 +15989,8 @@ function PortalApp() {
   const [bonusSatz, setBonusSatz] = useState("10");
   const [tippgeber, setTippgeber] = useState([]);
   const [strukturanfragen, setStrukturanfragen] = useState([]);
+  const [beschaffung, setBeschaffung] = useState([]);
+  const [beschaffungStart, setBeschaffungStart] = useState(null);
   const [firmendaten, setFirmendaten] = useState(firmendatenMit());
   const [bonusziele, setBonusziele] = useState(BONUSZIELE_START);
   const [firmenanteil, setFirmenanteil] = useState("");
@@ -14990,7 +16032,7 @@ function PortalApp() {
     anfragen: setAnfragen, mitarbeiter: setMitarbeiter, leads: setLeads, ablage: setAblage,
     versorger: setVersorger, tickets: setTickets, smartmeter: setSmartmeter, probleme: setProbleme,
     termine: setTermine, akquise: setAkquise, aufgaben: setAufgaben, protokoll: setProtokoll,
-    tippgeber: setTippgeber, strukturanfragen: setStrukturanfragen,
+    tippgeber: setTippgeber, strukturanfragen: setStrukturanfragen, beschaffung: setBeschaffung,
   };
   /* Unvollständige Datensätze (z. B. aus Tests) dürfen nie die Oberfläche lahmlegen: Listenfelder ergänzen */
   const mitListen = (felder) => (liste) => (liste || []).map((x) => {
@@ -15007,7 +16049,7 @@ function PortalApp() {
 
   const datenRef = React.useRef({});
   datenRef.current = { anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme,
-                       termine, akquise, aufgaben, protokoll, tippgeber, strukturanfragen };
+                       termine, akquise, aufgaben, protokoll, tippgeber, strukturanfragen, beschaffung };
   const zuletzt = React.useRef({});   /* zuletzt abgeglichener Stand je Sammlung */
   const zuSpeichern = React.useRef(new Set()); /* noch zu speichern */
   const nachladen = React.useRef(new Set());   /* Änderungen anderer, nach dem Speichern holen */
@@ -15104,7 +16146,7 @@ function PortalApp() {
     const t = setTimeout(speichernJetzt, 500);
     return () => clearTimeout(t);
   }, [anfragen, mitarbeiter, leads, ablage, versorger, tickets, smartmeter, probleme, termine,
-      akquise, aufgaben, protokoll, tippgeber, strukturanfragen, geladen, userId]);
+      akquise, aufgaben, protokoll, tippgeber, strukturanfragen, beschaffung, geladen, userId]);
 
   /* Einstellungen schreibt nur die Geschäftsführung */
   useEffect(() => {
@@ -15188,6 +16230,9 @@ function PortalApp() {
   const offeneTickets = user
     ? tickets.filter((t) => t.empfaenger === user.rolle && t.status !== "abgeschlossen").length : 0;
   const neueAuftraege = anfragen.filter((a) => a.status === "uebermittelt").length;
+  /* Beschaffung: neue Bewertungsaufträge (für die Beschaffung nur die eigenen und die ohne Zuständigen) */
+  const neueBeschaffung = !user ? 0 : beschaffung.filter((b) => b.status === "offen"
+    && (user.rolle !== "Beschaffung" || !b.zustaendigId || b.zustaendigId === user.id)).length;
   const provisionOffen = anfragen.filter((a) => a.status === "bestaetigt").length;
   /* Smartmeter: die Kalkulation sieht eingereichte, der Vertrieb die eigenen Klärfälle */
   const offeneSmartmeter = !user ? 0
@@ -15482,6 +16527,7 @@ function PortalApp() {
       { id: "dashboard", label: "Übersicht", icon: BarChart3 },
       { id: "vertraege", label: "Verträge", icon: FileSignature },
       { id: "kunden", label: "Bestandskunden", icon: FileSignature },
+      { id: "beschaffung", label: "Beschaffung", icon: Calculator, badge: neueBeschaffung },
       { id: "smartmeter", label: "Smartmeter", icon: Zap },
       { id: "probleme", label: "Problemfälle", icon: AlertTriangle, badge: offeneProbleme },
       { id: "stornos", label: "Stornierungen", icon: X },
@@ -15498,6 +16544,15 @@ function PortalApp() {
       { id: "leads", label: "Leads", icon: Users, badge: neueLeads },
       { id: "akquise", label: "Akquise-Tool", icon: Target },
       { id: "pruefung", label: "Kunde prüfen", icon: Check },
+      { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
+      { id: "kalender", label: "Kalender", icon: Calendar },
+      { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
+      { id: "unterlagen", label: "Unterlagen", icon: FileText },
+    ],
+
+    /* Beschaffung (extern): bewertet Lastgänge und erstellt Beschaffungspläne. Keine Provisionen, keine Vorgänge. */
+    Beschaffung: [
+      { id: "beschaffung", label: "Bewertungsaufträge", icon: Calculator, badge: neueBeschaffung },
       { id: "aufgaben", label: "Aufgaben", icon: Check, badge: offeneAufgaben },
       { id: "kalender", label: "Kalender", icon: Calendar },
       { id: "tickets", label: "Tickets", icon: Inbox, badge: offeneTickets },
@@ -15532,6 +16587,7 @@ function PortalApp() {
       { id: "partner", label: "Vertriebsmitarbeiter", icon: Users, badge: offeneStrukturanfragen },
       { id: "portal", label: "Portalsteuerung", icon: Settings },
       { id: "vertraege-gf", label: "Verträge", icon: FileSignature, badge: wartendeTippgeber },
+      { id: "beschaffung", label: "Beschaffung", icon: Calculator },
       { id: "versorgerliste", label: "Versorger", icon: Zap },
       { id: "provisionen", label: "Provisionen gesamt", icon: Wallet },
       { id: "ziele", label: "Ziele", icon: Target },
@@ -15702,6 +16758,8 @@ function PortalApp() {
   } else if (aktuell) {
     inhalt = (
       <Detail a={aktuell} user={user} mitarbeiter={mitarbeiter} versorger={versorger} tippgeber={tippgeber}
+        beschaffung={beschaffung} setBeschaffung={setBeschaffung}
+        onBeschaffung={(id) => { setOffen(null); setBeschaffungStart(id); setAnsicht("beschaffung"); }}
         alleAnfragen={anfragenSicht}
         onZurueck={zurueckGehen} onUpdate={(a) => speichern(a)}
         onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }}
@@ -15910,6 +16968,9 @@ function PortalApp() {
   } else if (ansicht === "abrechnung") {
     inhalt = <Abrechnung anfragen={anfragenSicht} mitarbeiter={mitarbeiter} user={user}
                setAnfragen={setAnfragen} notieren={notieren} onOeffnen={(id) => setOffen(id)} />;
+  } else if (ansicht === "beschaffung" && (NAV.some((n) => n.id === "beschaffung") || ["Leitung Vertrieb", "Kalkulation"].includes(user.rolle))) {
+    inhalt = <Beschaffung auftraege={beschaffung} setAuftraege={setBeschaffung} user={user} mitarbeiter={mitarbeiter}
+               start={beschaffungStart} onStart={setBeschaffungStart} />;
   } else if (ansicht === "versorgerliste") {
     inhalt = <Versorgerliste versorger={versorger} setVersorger={setVersorger} user={user}
                standard={firmenanteil}

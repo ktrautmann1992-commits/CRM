@@ -63,7 +63,7 @@ mit Zustand, Navigation und Routing.
 ## Rollen
 
 Vertriebspartner · Teamleiter · Leitung Vertrieb · Kalkulation ·
-Vertragsmanagement · Leadmanagement · Finanzbuchhaltung · Geschäftsführung
+Vertragsmanagement · Leadmanagement · Finanzbuchhaltung · Beschaffung · Geschäftsführung
 
 Die Navigation ist je Rolle zugeschnitten (`const NAV` in der Hauptkomponente).
 **Nicht-Vertriebsrollen haben keine Ziele, Provisionen oder Akquise.** Das war
@@ -87,6 +87,29 @@ Wichtig an den letzten Schritten:
    Provisionsliste und das **Vertragsmanagement** in der Vertragsbetreuung.
 
 Diese Reihenfolge nie verkürzen.
+
+## Beschaffung
+
+Externe Rolle. Abgeschlossene Kunden mit Tranchen- oder PPA-Modell übergibt
+der Vertrieb (eigene Struktur), das Vertragsmanagement oder die
+Geschäftsführung im Vorgang an die Beschaffung. Dabei entsteht ein Datensatz
+in `beschaffung` mit einer **Abschrift** der Kundendaten — ohne Aufschlag,
+Preise und Provision (die Datenbank entfernt diese Felder zusätzlich). Die
+Beschaffung sieht keine Vorgänge, nur diese Aufträge, und darf die Dateien
+des zugehörigen Vorgangs lesen (Lastgänge).
+
+Rechnung (`preiskurve`, `jahresBewertung`, `tranchenStand`, `ampel`):
+Terminmarktpreise trägt die Beschaffung je Bewertung von Hand ein
+(Cal Base/Peak, wahlweise Quartale). Daraus entsteht eine arbitragefreie
+Preiskurve Jahr → Quartal → Monat → Peak/Offpeak → Stunde, optional mit
+Tagesprofil aus Day-Ahead-Preisen. Bewertet wird der Lastgang als
+Mengen-Hedge (Base = mittlere Offpeaklast, Peak = Mehrlast) plus Struktur.
+Gespeichert werden nur Kennzahlen (`bewertung.ergebnis`), nicht die Kurve.
+Änderungen an der Rechnung wie bei der Provision in Node nachrechnen:
+Eine flache Last muss genau den Base-Preis ergeben, Struktur 0.
+
+Sprache: EGC ist kein Versorger. „Beschaffungsplan für den Kunden“,
+„Tranchen beim Versorger“, nie „wir kaufen ein“.
 
 ## Provisionsmodell
 
@@ -117,6 +140,7 @@ Node gegen ein Beispiel von 1.000 € laufen zu lassen.
 | Kalkulation | Anteil des Partners + Aufschlag | nein | nein |
 | Finanzbuchhaltung | ja | ja | nein |
 | Geschäftsführung | ja | ja | ja |
+| Beschaffung | nein | nein | nein |
 
 Das ist eine Vertrauensfrage im Vertrieb, keine Kleinigkeit.
 
