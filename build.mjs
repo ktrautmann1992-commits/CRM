@@ -60,6 +60,9 @@ await cp("unterlagen/schulungen", "dist/assets/schulungen-" + SCHULUNGEN_STAND, 
 /* Feste Dokumente (Checkliste). Bei neuer Fassung DOKUMENTE_STAND hier und in App.jsx erhöhen. */
 const DOKUMENTE_STAND = "2";
 await cp("unterlagen/dokumente", "dist/assets/dokumente-" + DOKUMENTE_STAND, { recursive: true });
+/* Feste Marketingunterlagen (Leitfaden Energieeinkauf). Bei neuer Fassung MARKETING_STAND hier und in App.jsx erhöhen. */
+const MARKETING_STAND = "1";
+await cp("unterlagen/marketing", "dist/assets/marketing-" + MARKETING_STAND, { recursive: true });
 
 /* Imagebroschüre zum Versenden: Baustein, verkleinerte Bilder und Schrift, nur bei Bedarf.
    Bei Änderungen an Bildern oder Aufbau BROSCHUERE_STAND hier und in App.jsx erhöhen (Dateien werden dauerhaft zwischengespeichert). */

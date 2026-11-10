@@ -10042,6 +10042,9 @@ const UNTERLAGEN_FEST = {
     pfad: "/assets/dokumente-2/", text: "Was du vom Kunden brauchst: Firmenname wie bei Creditreform, Lieferstelle, MaLo, Zählertyp, Verbrauch, Vertrag und Kündigungsfrist, bei RLM die Lastgang-Datei." },
     { titel: "Creditreform Firmeneintrag", url: "https://firmeneintrag.creditreform.de/", art: "Link",
       text: "Firmennamen des Kunden hier prüfen. Er muss im Auftrag genau so stehen, sonst lehnen Versorger oft ab. Nicht gefunden: bei Einzelunternehmen die Gewerbeanmeldung mitgeben." }],
+  /* Leitfaden für Interessenten, allgemeine Fassung mit Kontakt EGC (druckvorlagen/whitepaper). Bei neuer Fassung MARKETING_STAND in build.mjs und hier erhöhen. */
+  marketing: [{ datei: "EGC_Leitfaden_Energieeinkauf_2027.pdf", titel: "Leitfaden „Energieeinkauf 2027“", seiten: 22,
+    pfad: "/assets/marketing-1/", text: "Zum Weitergeben an Interessenten: Kostenfallen, Rechnung lesen, Lastgang, Beschaffungsmodelle, Entlastungen, Praxisbeispiele und Fristenkalender. Kontakt EGC, für alle Kunden gleich." }],
 };
 
 /* Schulungen, Dokumente und Marketingunterlagen */
