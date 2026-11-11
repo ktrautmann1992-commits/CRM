@@ -16,7 +16,7 @@ import nodemailer from "npm:nodemailer@6.9.16";
 
 const PORTAL = "https://egc-vertriebsportal.netlify.app";
 const ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb", "Kalkulation", "Vertragsmanagement",
-  "Leadmanagement", "Finanzbuchhaltung", "Geschäftsführung"];
+  "Leadmanagement", "Finanzbuchhaltung", "Beschaffung", "Geschäftsführung"];
 
 const KOPF = {
   "Access-Control-Allow-Origin": "*",
