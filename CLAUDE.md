@@ -98,6 +98,16 @@ Preise und Provision (die Datenbank entfernt diese Felder zusätzlich). Die
 Beschaffung sieht keine Vorgänge, nur diese Aufträge, und darf die Dateien
 des zugehörigen Vorgangs lesen (Lastgänge).
 
+**Freie Aufträge:** Beschaffung, GF, VM und Leitung Vertrieb können unter
+„Kunde ohne Vorgang planen“ einen Auftrag für einen Kunden anlegen, der im
+Portal nicht existiert (Kundendaten von Hand, Lastgang per Upload). Solche
+Aufträge haben `frei: true`, keine `anfrageId` und keinen Partner; die
+Datenbank erzwingt das (Migration `_09_beschaffung_frei`). Freie Aufträge darf
+die Beschaffung auch löschen.
+
+Zugang der Abteilung: `beschaffung@egc-energie.de` (Mitarbeiter-ID
+`beschaffung`). Das Passwort steht nicht im Code.
+
 Rechnung (`preiskurve`, `jahresBewertung`, `tranchenStand`, `ampel`):
 Terminmarktpreise trägt die Beschaffung je Bewertung von Hand ein
 (Cal Base/Peak, wahlweise Quartale). Daraus entsteht eine arbitragefreie

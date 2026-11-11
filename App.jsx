@@ -322,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.26 · 11.11.2026 · Beschaffungsplan im Vorgang ablegen";
+const VERSION = "v5.27 · 11.11.2026 · Beschaffung ohne Vorgang";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -14604,6 +14604,82 @@ function beschaffungsAuftragAus(a, user, hinweis, zustaendigId) {
   };
 }
 
+/* ---------- Freier Auftrag: Kunde ist im Portal nicht angelegt ---------- */
+/* Die Beschaffung plant auch Kunden ohne Vorgang: Kundendaten von Hand, Lastgang per Upload.
+   Ein freier Auftrag hat keinen Vorgang und keinen Vertriebspartner (die Datenbank setzt frei: true). */
+const FREI_LEER = { firma: "", ansprechpartner: "", strasse: "", plz: "", ort: "", telefon: "", email: "", branche: "",
+  modell: "Tranchenmodell", lieferbeginn: "", lieferende: "", hinweis: "", lastgang: null, einheit: "kWh" };
+
+/* Lieferjahre an einen neuen Lieferzeitraum anpassen; eingetragene Jahre bleiben erhalten */
+function jahreAnpassen(jahre, beginn, ende) {
+  return lieferjahreAus(beginn, ende).map((j) => (jahre || []).find((x) => +x.jahr === j)
+    || { jahr: j, menge: "", base: "", peak: "", q: [{}, {}, {}, {}] });
+}
+
+function freierBeschaffungsAuftrag(user, f) {
+  return {
+    id: "B-FREI-" + uid(),
+    frei: true,
+    status: "offen",
+    uebergeben: { am: heute(), von: user.name, vonId: user.id, rolle: user.rolle, hinweis: f.hinweis || "" },
+    zustaendigId: "",
+    kunde: { firma: f.firma.trim(), ansprechpartner: f.ansprechpartner, strasse: f.strasse, plz: f.plz, ort: f.ort,
+             telefon: f.telefon, email: f.email, branche: f.branche },
+    lieferstellen: [],
+    produkte: [f.modell],
+    varianten: [],
+    lieferbeginn: f.lieferbeginn, lieferende: f.lieferende,
+    bewertung: { jahre: jahreAnpassen([], f.lieferbeginn, f.lieferende), marktStand: "", stress: "20", hoechstpreis: "",
+                 tranchen: [], einheit: f.einheit || "kWh",
+                 eigeneLastgaenge: f.lastgang ? [f.lastgang] : [], quellen: f.lastgang ? ["eig-0"] : [] },
+    verlauf: [{ d: heute(), t: "Ohne Vorgang angelegt" + (f.lastgang ? ", Lastgang hochgeladen" : ""), w: user.name }],
+  };
+}
+
+/* Formular für Kundendaten und Lieferzeitraum; mit „neu“ zusätzlich Lastgang und Hinweis */
+function FreiKundeFormular({ start, neu, knopf, onSpeichern, onAbbrechen }) {
+  const [f, setF] = useState({ ...FREI_LEER, ...(start || {}) });
+  const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }));
+  const zeitraumFalsch = f.lieferbeginn && f.lieferende && f.lieferende < f.lieferbeginn;
+  const ok = f.firma.trim() && f.lieferbeginn && f.lieferende && !zeitraumFalsch;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Feld label="Firma / Kunde" value={f.firma} onChange={set("firma")} fehler={!f.firma.trim()} breit />
+        <Feld label="Ansprechpartner" value={f.ansprechpartner} onChange={set("ansprechpartner")} />
+        <Feld label="Branche" value={f.branche} onChange={set("branche")} />
+        <Feld label="Straße und Hausnummer" value={f.strasse} onChange={set("strasse")} breit />
+        <Feld label="PLZ" value={f.plz} onChange={set("plz")} />
+        <Feld label="Ort" value={f.ort} onChange={set("ort")} />
+        <Feld label="Telefon" value={f.telefon} onChange={set("telefon")} type="tel" />
+        <Feld label="E-Mail" value={f.email} onChange={set("email")} type="email" />
+        <Select label="Beschaffungsmodell" value={f.modell} onChange={set("modell")} options={INDIVIDUAL_PRODUKTE} breit />
+        <Feld label="Lieferbeginn" value={f.lieferbeginn} onChange={set("lieferbeginn")} type="date" fehler={!f.lieferbeginn} />
+        <Feld label="Lieferende" value={f.lieferende} onChange={set("lieferende")} type="date" fehler={!f.lieferende || zeitraumFalsch} />
+      </div>
+      {zeitraumFalsch && <p className="text-xs" style={{ color: C.warn }}>Das Lieferende liegt vor dem Lieferbeginn.</p>}
+      {neu && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Datei label="Lastgang des Kunden (CSV oder Excel)" datei={f.lastgang} onSet={set("lastgang")}
+            hinweis="Lastgang auswählen" />
+          <Select label="Werte in der Datei" value={f.einheit} onChange={set("einheit")}
+            options={[{ value: "kWh", label: "Energie je Intervall (kWh)" }, { value: "kW", label: "Leistung (kW)" }]} />
+          <label className="block sm:col-span-2">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>Notiz (optional)</span>
+            <textarea value={f.hinweis} onChange={(e) => set("hinweis")(e.target.value)} rows={2}
+              placeholder="z. B. Anfrage kam direkt, Kunde möchte vier Tranchen"
+              className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+          </label>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Btn onClick={() => ok && onSpeichern(f)} disabled={!ok}>{knopf}</Btn>
+        <Btn variante="neutral" onClick={onAbbrechen}>Abbrechen</Btn>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Karte im Vorgang: übergeben und Stand ansehen ---------- */
 function BeschaffungKarte({ a, user, mitarbeiter, beschaffung, setBeschaffung, onOeffnen }) {
   const [hinweis, setHinweis] = useState("");
@@ -14747,7 +14823,9 @@ const zahlOder = (v) => { const z = zahlLesen(v); return isNaN(z) ? null : z; };
 function Beschaffung({ auftraege, setAuftraege, user, mitarbeiter, start, onStart }) {
   const [offenId, setOffenId] = useState(start || null);
   const [filter, setFilter] = useState("aktiv");
+  const [neu, setNeu] = useState(false);
   useEffect(() => { if (start) { setOffenId(start); onStart && onStart(null); } }, [start]);
+  const darfFrei = BESCHAFFUNG_ROLLEN_BEARBEITEN.includes(user.rolle);
 
   const meine = user.rolle === "Beschaffung"
     ? auftraege.filter((b) => !b.zustaendigId || b.zustaendigId === user.id) : auftraege;
@@ -14757,8 +14835,29 @@ function Beschaffung({ auftraege, setAuftraege, user, mitarbeiter, start, onStar
   if (offen)
     return <BeschaffungDetail b={offen} user={user} mitarbeiter={mitarbeiter} onAendern={aendern}
               onZurueck={() => setOffenId(null)}
-              onLoeschen={["Geschäftsführung", "Vertragsmanagement"].includes(user.rolle)
+              onLoeschen={["Geschäftsführung", "Vertragsmanagement"].includes(user.rolle) || (offen.frei && darfFrei)
                 ? () => { setAuftraege((l) => l.filter((x) => x.id !== offen.id)); setOffenId(null); } : null} />;
+
+  if (neu)
+    return (
+      <div className="space-y-4">
+        <div>
+          <button onClick={() => setNeu(false)} className="text-xs mb-2 inline-flex items-center gap-1" style={{ color: C.muted }}>
+            <ArrowLeft size={13} /> Bewertungsaufträge
+          </button>
+          <h2 className="text-lg">Kunde ohne Vorgang planen</h2>
+          <p className="text-sm" style={{ color: C.muted }}>
+            Für Kunden, die im Portal nicht angelegt sind: Kundendaten eintragen und den Lastgang hochladen.
+            Danach geht es wie bei jedem Auftrag weiter mit Marktpreisen, Bewertung und Tranchenplan.
+          </p>
+        </div>
+        <div className="rounded p-4 sm:p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
+          <FreiKundeFormular neu knopf="Auftrag anlegen" onAbbrechen={() => setNeu(false)}
+            onSpeichern={(f) => { const b = freierBeschaffungsAuftrag(user, f);
+              setAuftraege((l) => [b, ...l]); setNeu(false); setOffenId(b.id); }} />
+        </div>
+      </div>
+    );
 
   const liste = meine.filter((b) => filter === "alle" ? true : filter === "fertig" ? b.status === "fertig" : b.status !== "fertig")
     .sort((x, y) => String((y.uebergeben || {}).am || "").localeCompare(String((x.uebergeben || {}).am || "")));
@@ -14771,6 +14870,9 @@ function Beschaffung({ auftraege, setAuftraege, user, mitarbeiter, start, onStar
           Kunden mit Tranchen- oder PPA-Modell: Lastgang bewerten und den Beschaffungsplan für den Kunden erstellen.
         </p>
       </div>
+      {darfFrei && (
+        <div><Btn icon={Plus} onClick={() => setNeu(true)}>Kunde ohne Vorgang planen</Btn></div>
+      )}
       <div className="flex gap-2 text-sm">
         {[["aktiv", "Offen"], ["fertig", "Plan steht"], ["alle", "Alle"]].map(([id, t]) => (
           <button key={id} onClick={() => setFilter(id)} className="px-3 py-1.5 rounded"
@@ -14793,7 +14895,7 @@ function Beschaffung({ auftraege, setAuftraege, user, mitarbeiter, start, onStar
                 <div className="flex-1 min-w-0">
                   <div className="truncate">{(b.kunde || {}).firma || b.anfrageId}</div>
                   <div className="text-xs truncate" style={{ color: C.muted }}>
-                    {(b.produkte || []).join(", ") || "Beschaffungsplan"} · Lieferung ab {datum(b.lieferbeginn)} · {b.partnerName}
+                    {(b.produkte || []).join(", ") || "Beschaffungsplan"} · Lieferung ab {datum(b.lieferbeginn)} · {b.frei ? "ohne Vorgang" : b.partnerName}
                   </div>
                 </div>
                 <span className="text-xs whitespace-nowrap" style={{ color: s.color }}>{s.label}</span>
@@ -15145,6 +15247,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
   const [fehler, setFehler] = useState("");
   const [lastInfo, setLastInfo] = useState(null);
   const [quartale, setQuartale] = useState({});
+  const [kundeAendern, setKundeAendern] = useState(false);
   const lastRef = React.useRef(null);   /* eingelesene Lastform, nur im Speicher */
   const profilRef = React.useRef(null);
 
@@ -15292,7 +15395,9 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
           </button>
           <h2 className="text-lg truncate">{k.firma || b.anfrageId}</h2>
           <p className="text-xs" style={{ color: C.muted }}>
-            Vorgang {b.anfrageId} · {(b.produkte || []).join(", ")} · übergeben {datum((b.uebergeben || {}).am)} von {(b.uebergeben || {}).von}
+            {b.frei
+              ? <>Ohne Vorgang · {(b.produkte || []).join(", ")} · angelegt {datum((b.uebergeben || {}).am)} von {(b.uebergeben || {}).von}</>
+              : <>Vorgang {b.anfrageId} · {(b.produkte || []).join(", ")} · übergeben {datum((b.uebergeben || {}).am)} von {(b.uebergeben || {}).von}</>}
           </p>
         </div>
         <span className="text-xs whitespace-nowrap" style={{ color: s.color }}>● {s.label}</span>
@@ -15304,7 +15409,20 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         </div>
       )}
 
-      <Abschnitt titel="Kunde und Lieferstellen">
+      <Abschnitt titel={b.frei ? "Kunde" : "Kunde und Lieferstellen"} rechts={
+        b.frei && darf && !kundeAendern && <button className="text-xs" style={{ color: C.strom }} onClick={() => setKundeAendern(true)}>ändern</button>}>
+        {kundeAendern ? (
+          <FreiKundeFormular knopf="Übernehmen" onAbbrechen={() => setKundeAendern(false)}
+            start={{ ...k, modell: (b.produkte || [])[0] || "Tranchenmodell", lieferbeginn: b.lieferbeginn || "", lieferende: b.lieferende || "" }}
+            onSpeichern={(f) => {
+              const { modell, lieferbeginn, lieferende, hinweis, lastgang, einheit, ...kunde } = f;
+              lastRef.current = null; setLastInfo(null);
+              onAendern({ ...b, kunde: { ...kunde, firma: kunde.firma.trim() }, produkte: [modell], lieferbeginn, lieferende,
+                bewertung: mitKurzstand({ ...bw, jahre: jahreAnpassen(bw.jahre, lieferbeginn, lieferende) }),
+                verlauf: [...(b.verlauf || []), { d: heute(), t: "Kundendaten geändert", w: user.name }] });
+              setKundeAendern(false);
+            }} />
+        ) : (<>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm mb-3">
           <div>{k.firma}</div>
           <div style={{ color: C.muted }}>{[k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")}</div>
@@ -15312,7 +15430,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
           {(k.telefon || k.email) && <div style={{ color: C.muted }}>{[k.telefon, k.email].filter(Boolean).join(" · ")}</div>}
           {k.branche && <div style={{ color: C.muted }}>Branche: {k.branche}</div>}
           <div style={{ color: C.muted }}>Lieferzeitraum {datum(b.lieferbeginn)} bis {datum(b.lieferende)}</div>
-          <div style={{ color: C.muted }}>Vertrieb: {b.partnerName}</div>
+          {!b.frei && <div style={{ color: C.muted }}>Vertrieb: {b.partnerName}</div>}
         </div>
         <div className="space-y-2">
           {(b.lieferstellen || []).map((l) => (
@@ -15342,10 +15460,11 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
             ))}
           </div>
         )}
+        </>)}
       </Abschnitt>
 
       <Abschnitt titel="1 · Lastgang">
-        {quellen.length === 0 && <p className="text-sm mb-3" style={{ color: C.warn }}>Im Vorgang liegt kein Lastgang. Bitte hier hochladen.</p>}
+        {quellen.length === 0 && <p className="text-sm mb-3" style={{ color: C.warn }}>{b.frei ? "Noch kein Lastgang. Bitte den Lastgang des Kunden hochladen." : "Im Vorgang liegt kein Lastgang. Bitte hier hochladen."}</p>}
         <div className="space-y-2 mb-3">
           {quellen.map((q) => (
             <label key={q.id} className="flex items-center gap-2 text-sm">
@@ -15358,7 +15477,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         </div>
         {darf && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-            <Datei label="Weiteren Lastgang hochladen (CSV oder Excel)" datei={null}
+            <Datei label={quellen.length ? "Weiteren Lastgang hochladen (CSV oder Excel)" : "Lastgang hochladen (CSV oder Excel)"} datei={null}
               onSet={(d) => { if (d) { lastRef.current = null; setBw({ eigeneLastgaenge: [...(bw.eigeneLastgaenge || []), d],
                 quellen: [...gewaehlt, "eig-" + (bw.eigeneLastgaenge || []).length] }, "Lastgang hochgeladen"); } }} />
             <Select label="Werte in der Datei" value={bw.einheit || "kWh"}
@@ -15622,7 +15741,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
 
       <Abschnitt titel="Empfehlung an Kunde und Vertrieb">
         <textarea value={bw.empfehlung || ""} disabled={!darf} rows={4} onChange={(e) => setBw({ empfehlung: e.target.value })}
-          placeholder="Kurze Einschätzung und nächste Schritte, sichtbar im Vorgang"
+          placeholder={b.frei ? "Kurze Einschätzung und nächste Schritte, erscheint im Beschaffungsplan" : "Kurze Einschätzung und nächste Schritte, sichtbar im Vorgang"}
           className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
         <div className="flex flex-wrap gap-3 mt-3 items-end">
           {darf && (
@@ -15639,7 +15758,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
       </Abschnitt>
 
       {(bw.plaene || []).length > 0 && (
-        <Abschnitt titel="Abgelegte Beschaffungspläne" rechts={<span className="text-xs" style={{ color: C.muted }}>im Vorgang für den Vertrieb sichtbar</span>}>
+        <Abschnitt titel="Abgelegte Beschaffungspläne" rechts={<span className="text-xs" style={{ color: C.muted }}>{b.frei ? "zum Herunterladen und Weitergeben" : "im Vorgang für den Vertrieb sichtbar"}</span>}>
           <PlanFassungen plaene={bw.plaene} />
         </Abschnitt>
       )}
