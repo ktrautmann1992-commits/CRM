@@ -322,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.24 · 10.11.2026 · Beschaffung: Lastgangbewertung und Tranchenplan";
+const VERSION = "v5.25 · 11.11.2026 · Beschaffung: Lastgang als Grafik";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -14707,6 +14707,9 @@ async function lastformAusDateien(dateien, einheit) {
     info.spitze += stand.spitze * faktor; info.stunden = Math.max(info.stunden, form.stunden);
     info.ohneDatum += form.ohneDatum;
     info.dateien.push(d.name);
+    let bilder = null;
+    try { bilder = stand.verlaeufe ? lastgangGrafiken(stand) : null; } catch (_) { bilder = null; }
+    (info.grafiken = info.grafiken || []).push({ name: d.name, bilder, profil: stand.profil, einheit: einheit === "kW" ? "kW" : "kWh" });
   }
   return { mittel: summe, jahresmenge: info.jahresmenge, info };
 }
@@ -14803,6 +14806,292 @@ function Beschaffung({ auftraege, setAuftraege, user, mitarbeiter, start, onStar
 const AMPEL_FARBE = ["#4A9130", "#D9A21B", "#B24328"];
 const AMPEL_TEXT = ["Im Plan", "Beobachten", "Handlungsbedarf"];
 
+/* Analyse wie im Excel-Werkzeug: Stundenlast des Lieferjahres, geschlossene Positionen
+   (gekaufte Tranchen), offene Short- und Long-Mengen mit Marktwert. Rechnet aus dem
+   eingelesenen Lastgang und den eingetragenen Preisen, nichts davon wird gespeichert. */
+const MONATSNAMEN_LANG = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+function analyseJahr(form, bw, jahr) {
+  const j = (bw.jahre || []).find((x) => +x.jahr === +jahr);
+  if (!form || !j) return null;
+  const menge = zahlOder(j.menge) || form.jahresmenge;
+  const last = jahresLast(form, jahr, menge);
+  const kurve = preiskurve(jahr, { base: zahlOder(j.base), peak: zahlOder(j.peak),
+    q: (j.q || []).map((q) => ({ base: zahlOder(q && q.base), peak: zahlOder(q && q.peak) })) }, bw.profil || null);
+  const e = jahresBewertung(last, kurve);
+  /* geschlossene Leistung: Anteil gekaufter Tranchen an Base- und Peakleistung */
+  const z = (v) => +String(v || "").replace(",", ".") || 0;
+  const gekauft = (bw.tranchen || []).filter((t) => +t.jahr === +jahr && t.status === "gekauft");
+  let anteil = 0, wertBaseProMWh = 0, wertPeakProMWh = 0;
+  gekauft.forEach((t) => {
+    const a = Math.max(0, z(t.anteil)) / 100;
+    const pb = z(t.preisBase) || z(t.preis), pp = z(t.preisPeak) || z(t.preis);
+    anteil += a; wertBaseProMWh += a * pb; wertPeakProMWh += a * pp;
+  });
+  anteil = Math.min(1, anteil);
+  const zu = last.stunden.map((s) => anteil * (e.baseMW + (s.peak ? e.peakMW : 0)));
+  /* Preis je Stunde der geschlossenen Menge: Base-Anteil zum Basepreis, Peak-Anteil zum Peakpreis */
+  const preisZu = last.stunden.map((s) => {
+    const b = e.baseMW * wertBaseProMWh, p = s.peak ? e.peakMW * wertPeakProMWh : 0;
+    const mw = anteil * (e.baseMW + (s.peak ? e.peakMW : 0));
+    return mw ? (b + p) / mw : 0;
+  });
+  return { j, e, stunden: last.stunden, last: last.last, preis: kurve.preis, zu, preisZu, anteil };
+}
+
+function analyseSumme(a, passt) {
+  let last = 0, lastWert = 0, zu = 0, zuWert = 0, short = 0, shortWert = 0, long = 0, longWert = 0, base = 0, n = 0;
+  a.stunden.forEach((s, i) => {
+    if (!passt(s)) return;
+    const L = a.last[i], Z = a.zu[i], P = a.preis[i];
+    last += L; lastWert += L * P; zu += Z; zuWert += Z * a.preisZu[i];
+    if (L > Z) { short += L - Z; shortWert += (L - Z) * P; } else { long += Z - L; longWert += (Z - L) * P; }
+    if (!s.peak) base += L; n++;
+  });
+  return { last, lastWert, zu, zuWert, short, shortWert, long, longWert, n };
+}
+
+function AnalyseGrafik({ form, bw }) {
+  const jahre = (bw.jahre || []).map((j) => j.jahr);
+  const [jahr, setJahr] = useState(jahre[0]);
+  /* Zeitraum: ganzes Jahr, ein Quartal, ein Monat oder ein Tag */
+  const [ansicht, setAnsicht] = useState("jahr");
+  const [quartal, setQuartal] = useState(0);
+  const [monat, setMonat] = useState(0);
+  const [tag, setTag] = useState(1);
+  const a = useMemo(() => { try { return analyseJahr(form, bw, jahr); } catch (_) { return null; } },
+    [form, jahr, JSON.stringify(bw.jahre), JSON.stringify(bw.tranchen), bw.profil ? 1 : 0]);
+  if (!form) return <p className="text-sm" style={{ color: C.muted }}>Zuerst den Lastgang einlesen.</p>;
+  if (!a) return <p className="text-sm" style={{ color: C.muted }}>Für {jahr} fehlen Base- und Peakpreis.</p>;
+  const tageImMonat = new Date(jahr, monat + 1, 0).getDate();
+  const tagOk = Math.min(tag, tageImMonat);
+  const passt = (x) => ansicht === "jahr" ? true : ansicht === "quartal" ? Math.floor(x.m / 3) === quartal
+    : ansicht === "monat" ? x.m === monat : x.m === monat && x.t === tagOk;
+  const s = analyseSumme(a, passt);
+  const idx = a.stunden.map((x, i) => i).filter((i) => passt(a.stunden[i]));
+  /* vor und zurück im gewählten Raster */
+  const schritt = (r) => {
+    if (ansicht === "quartal") setQuartal((quartal + r + 4) % 4);
+    else if (ansicht === "monat") setMonat((monat + r + 12) % 12);
+    else if (ansicht === "tag") {
+      const d = new Date(jahr, monat, tagOk + r);
+      if (d.getFullYear() !== jahr) return;
+      setMonat(d.getMonth()); setTag(d.getDate());
+    }
+  };
+  const titel = ansicht === "jahr" ? "Jahr " + jahr : ansicht === "quartal" ? "Q" + (quartal + 1) + " " + jahr
+    : ansicht === "monat" ? MONATSNAMEN_LANG[monat] + " " + jahr
+    : new Date(jahr, monat, tagOk).toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
+
+  /* Zeichnung: je Bildpunktspalte Höchst- und Mittelwerte, damit 8.760 Stunden scharf bleiben */
+  const B = 1100, H = 300, L = 52, R = 10, O = 14, U = 36, breite = B - L - R;
+  const spalten = Math.min(idx.length, breite);
+  const proSpalte = idx.length / spalten;
+  const col = Array.from({ length: spalten }, (_, c) => {
+    const ab = Math.floor(c * proSpalte), bis2 = Math.max(ab + 1, Math.floor((c + 1) * proSpalte));
+    let lmax = 0, zmin = Infinity, zmax = 0, lmin = Infinity;
+    for (let k = ab; k < bis2; k++) { const i = idx[k]; lmax = Math.max(lmax, a.last[i]); lmin = Math.min(lmin, a.last[i]);
+      zmin = Math.min(zmin, a.zu[i]); zmax = Math.max(zmax, a.zu[i]); }
+    return { lmax, lmin, zmin: isFinite(zmin) ? zmin : 0, zmax };
+  });
+  const oben = Math.max(...col.map((c) => Math.max(c.lmax, c.zmax)), 0.001) * 1.08;
+  const x = (c) => L + (c * breite) / spalten;
+  const y = (v) => O + (H - O - U) * (1 - v / oben);
+  const w = breite / spalten;
+  const raster = [0, 0.2, 0.4, 0.6, 0.8, 1].map((f) => (oben / 1.08) * f);
+  /* Teilstriche: Monate (Jahr, Quartal), Tage (Monat), Stunden (Tag) */
+  const marken = [];
+  idx.forEach((i, k) => {
+    const st = a.stunden[i], vor = k ? a.stunden[idx[k - 1]] : null;
+    if (ansicht === "jahr" || ansicht === "quartal") { if (!vor || st.m !== vor.m) marken.push({ k, text: MONATE_KURZ[st.m] }); }
+    else if (ansicht === "monat") { if ((!vor || st.t !== vor.t) && (st.t === 1 || st.t % 5 === 0)) marken.push({ k, text: st.t + "." }); }
+    else if (st.h % 3 === 0) marken.push({ k, text: String(st.h).padStart(2, "0") + ":00" });
+  });
+  const pr = (wert, menge) => (menge ? wert / menge : 0);
+  const zeile = (t, menge, wert, farbe, hell) => (
+    <tr key={t} style={{ background: farbe, color: hell ? "#fff" : C.text }}>
+      <td className="px-3 py-1.5">{t}</td>
+      <td className="px-3 py-1.5 text-right">{num(menge, 2)}</td>
+      <td className="px-3 py-1.5 text-right">{wert == null ? "" : num(wert, 0)}</td>
+      <td className="px-3 py-1.5 text-right">{wert == null ? "" : num(pr(wert, menge), 2)}</td>
+    </tr>
+  );
+  const sel = "px-2 py-1.5 text-sm rounded outline-none bg-white";
+  return (
+    <div>
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <label className="block"><span className="block text-xs mb-1" style={{ color: C.muted }}>Lieferjahr</span>
+          <select value={jahr} onChange={(e) => setJahr(+e.target.value)} className={sel} style={{ border: "1px solid " + C.line }}>
+            {jahre.map((j) => <option key={j} value={j}>{j}</option>)}</select></label>
+        <div className="flex rounded overflow-hidden" style={{ border: "1px solid " + C.line }}>
+          {[["jahr", "Jahr"], ["quartal", "Quartal"], ["monat", "Monat"], ["tag", "Tag"]].map(([id, t]) => (
+            <button key={id} onClick={() => setAnsicht(id)} className="px-3 py-1.5 text-sm"
+              style={{ background: ansicht === id ? C.ink : "#fff", color: ansicht === id ? "#fff" : C.text }}>{t}</button>
+          ))}
+        </div>
+        {ansicht === "quartal" && (
+          <select value={quartal} onChange={(e) => setQuartal(+e.target.value)} className={sel} style={{ border: "1px solid " + C.line }}>
+            {[0, 1, 2, 3].map((q) => <option key={q} value={q}>Q{q + 1}</option>)}</select>
+        )}
+        {(ansicht === "monat" || ansicht === "tag") && (
+          <select value={monat} onChange={(e) => setMonat(+e.target.value)} className={sel} style={{ border: "1px solid " + C.line }}>
+            {MONATSNAMEN_LANG.map((m, i) => <option key={m} value={i}>{m}</option>)}</select>
+        )}
+        {ansicht === "tag" && (
+          <select value={tagOk} onChange={(e) => setTag(+e.target.value)} className={sel} style={{ border: "1px solid " + C.line }}>
+            {Array.from({ length: tageImMonat }, (_, i) => <option key={i} value={i + 1}>{i + 1}.</option>)}</select>
+        )}
+        {ansicht !== "jahr" && (
+          <div className="flex gap-1">
+            <button onClick={() => schritt(-1)} className="px-2.5 py-1.5 text-sm rounded" style={{ border: "1px solid " + C.line, background: "#fff" }}>‹</button>
+            <button onClick={() => schritt(1)} className="px-2.5 py-1.5 text-sm rounded" style={{ border: "1px solid " + C.line, background: "#fff" }}>›</button>
+          </div>
+        )}
+        <span className="text-xs pb-2" style={{ color: C.muted }}>
+          Base/Peak-Verhältnis {num(a.e.gewichtBase * 100, 1)} % / {num((1 - a.e.gewichtBase) * 100, 1)} %
+        </span>
+      </div>
+
+      <div className="text-sm mb-2">{titel}</div>
+      <div className="overflow-x-auto mb-4">
+        <table className="text-sm min-w-[520px]" style={{ fontVariantNumeric: "tabular-nums" }}>
+          <thead><tr className="text-xs" style={{ color: C.muted }}>
+            <th className="px-3 py-1 font-normal text-left" /><th className="px-3 py-1 font-normal text-right">Menge MWh</th>
+            <th className="px-3 py-1 font-normal text-right">Wert €</th><th className="px-3 py-1 font-normal text-right">Preis €/MWh</th></tr></thead>
+          <tbody>
+            {zeile("Last (Marktwert)", s.last, s.lastWert, "#B24328", true)}
+            {zeile("Geschlossen (Tranchen)", s.zu, s.zuWert, "#4A9130", true)}
+            <tr style={{ background: "#E9EDF2" }}><td className="px-3 py-1.5">Abdeckung</td>
+              <td className="px-3 py-1.5 text-right">{num(s.last ? (s.zu / s.last) * 100 : 0, 1)} %</td><td /><td /></tr>
+            {zeile("Offen, nachzukaufen (Short)", s.short, s.shortWert, "#0A1626", true)}
+            {zeile("Überdeckt, zu verkaufen (Long)", s.long, -s.longWert, "#18293F", true)}
+          </tbody>
+        </table>
+      </div>
+
+      <svg viewBox={"0 0 " + B + " " + H} className="w-full rounded" style={{ background: "#fff", border: "1px solid " + C.line }}>
+        {raster.map((v, i) => (
+          <g key={i}><line x1={L} x2={B - R} y1={y(v)} y2={y(v)} stroke="#E3E8EE" />
+            <text x={L - 6} y={y(v) + 4} fontSize="11" textAnchor="end" fill="#6B7787">{num(v, 2)}</text></g>
+        ))}
+        {col.map((c, k) => (
+          <g key={k}>
+            {/* geschlossen und verbraucht */}
+            <rect x={x(k)} y={y(Math.min(c.zmax, c.lmin))} width={w + 0.4} height={y(0) - y(Math.min(c.zmax, c.lmin))} fill="#6CB43B" />
+            {/* geschlossen, aber nicht verbraucht: überdeckt (Long) */}
+            {c.zmax > c.lmin && <rect x={x(k)} y={y(c.zmax)} width={w + 0.4} height={y(c.lmin) - y(c.zmax)} fill="#6CB43B" opacity="0.35" />}
+            {/* Last über den geschlossenen Positionen: offen (Short) */}
+            {c.lmax > c.zmax && <rect x={x(k)} y={y(c.lmax)} width={w + 0.4} height={y(c.zmax) - y(c.lmax)} fill="#C0392B" />}
+          </g>
+        ))}
+        {/* Lastlinie, sobald einzelne Stunden sichtbar sind */}
+        {proSpalte <= 1.5 && (
+          <path d={col.map((c, k) => (k ? "L" : "M") + x(k) + "," + y(c.lmax) + " L" + (x(k) + w) + "," + y(c.lmax)).join(" ")}
+            fill="none" stroke="#0A1626" strokeWidth="1.8" />
+        )}
+        {marken.map(({ k, text }) => {
+          const xm = L + (k * breite) / idx.length;
+          return (
+            <g key={k}><line x1={xm} x2={xm} y1={O} y2={H - U} stroke="#D8DDE4" strokeDasharray="2 3" />
+              <text x={xm + 4} y={H - U + 16} fontSize="11" fill="#6B7787">{text}</text></g>
+          );
+        })}
+        <text x={L - 6} y={H - 6} fontSize="11" textAnchor="end" fill="#6B7787">MW</text>
+      </svg>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs mt-2" style={{ color: C.muted }}>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3" style={{ background: "#6CB43B" }} />geschlossen und verbraucht</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3" style={{ background: "#6CB43B", opacity: 0.35 }} />geschlossen, nicht verbraucht (Long)</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3" style={{ background: "#C0392B" }} />Last über den Tranchen, offen (Short)</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "2px solid #0A1626" }} />Last (in Monats- und Tagesansicht)</span>
+      </div>
+      <p className="text-xs mt-1" style={{ color: C.muted }}>
+        Stundenwerte des Lieferjahres, aus dem Lastgang auf die Jahresmenge hochgerechnet. In der Jahresansicht ist je Bildpunkt der höchste und niedrigste Wert gezeichnet. Marktwerte zur heutigen Preiskurve;
+        die Long-Menge ist als Erlös negativ ausgewiesen.
+      </p>
+    </div>
+  );
+}
+
+/* Monatsmengen als Balken */
+function MonatsBalken({ profil, einheit }) {
+  if (!profil || !profil.length) return null;
+  const max = Math.max(...profil, 1);
+  const namen = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+  return (
+    <div>
+      <div className="text-xs mb-2" style={{ color: C.muted }}>Verbrauch je Monat{einheit === "kW" ? " (aus Leistungswerten)" : " (kWh)"}</div>
+      <div className="flex items-end gap-1" style={{ height: 90 }}>
+        {profil.map((w, i) => (
+          <div key={i} className="flex-1 rounded-t" title={namen[i] + ": " + num(w) + " kWh"}
+            style={{ height: Math.max(3, (w / max) * 90) + "px", background: C.strom }} />
+        ))}
+      </div>
+      <div className="flex gap-1 text-xs mt-1" style={{ color: C.muted }}>
+        {namen.map((m) => <span key={m} className="flex-1 text-center">{m}</span>)}
+      </div>
+    </div>
+  );
+}
+
+/* Typischer Tag des Lieferjahres (MW je Stunde) mit der Base/Peak-Absicherung */
+function AbsicherungsGrafik({ jahre }) {
+  const [jahrIdx, setJahrIdx] = useState(0);
+  const [art, setArt] = useState(0);
+  const j = jahre[Math.min(jahrIdx, jahre.length - 1)];
+  const werte = (j.tagesprofil || [])[art] || [];
+  if (!werte.length) return null;
+  const B = 760, H = 230, L = 46, R = 12, O = 16, U = 30;
+  const oben = Math.max(...werte, j.baseMW + j.peakMW, 0.001) * 1.12;
+  const x = (h) => L + (h * (B - L - R)) / 24;
+  const y = (v) => O + (H - O - U) * (1 - v / oben);
+  const peakTag = art === 0; /* Peak gilt Montag bis Freitag 8 bis 20 Uhr */
+  const absich = (h) => j.baseMW + (peakTag && h >= 8 && h < 20 ? j.peakMW : 0);
+  const stufen = Array.from({ length: 24 }, (_, h) => "L" + x(h) + "," + y(absich(h)) + " L" + x(h + 1) + "," + y(absich(h))).join(" ");
+  const raster = [0, 0.25, 0.5, 0.75, 1].map((f) => (oben / 1.12) * f);
+  const Knopf = ({ an, onClick, children }) => (
+    <button onClick={onClick} className="text-xs px-2 py-1 rounded"
+      style={{ background: an ? C.ink : "#fff", color: an ? "#fff" : C.text, border: "1px solid " + C.line }}>{children}</button>
+  );
+  return (
+    <div className="mt-5">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <span className="text-xs" style={{ color: C.muted }}>Typischer Tag und Absicherung</span>
+        <span className="flex-1" />
+        {jahre.length > 1 && jahre.map((x2, i) => <Knopf key={x2.jahr} an={i === jahrIdx} onClick={() => setJahrIdx(i)}>{x2.jahr}</Knopf>)}
+        {["Werktag", "Samstag", "Sonn-/Feiertag"].map((t, i) => <Knopf key={t} an={i === art} onClick={() => setArt(i)}>{t}</Knopf>)}
+      </div>
+      <svg viewBox={"0 0 " + B + " " + H} className="w-full rounded" style={{ background: "#fff", border: "1px solid " + C.line }}>
+        {peakTag && <rect x={x(8)} y={O} width={x(20) - x(8)} height={H - O - U} fill="#F3F6FA" />}
+        {raster.map((v, i) => (
+          <g key={i}>
+            <line x1={L} x2={B - R} y1={y(v)} y2={y(v)} stroke="#E3E8EE" />
+            <text x={L - 6} y={y(v) + 4} fontSize="11" textAnchor="end" fill="#6B7787">{num(v * 1000, 0)}</text>
+          </g>
+        ))}
+        {werte.map((v, h) => (
+          <rect key={h} x={x(h) + 2} y={y(v)} width={(B - L - R) / 24 - 4} height={Math.max(0, y(0) - y(v))} rx="2" fill={C.strom} opacity="0.85">
+            <title>{String(h).padStart(2, "0") + ":00 · " + num(v * 1000, 0) + " kW"}</title>
+          </rect>
+        ))}
+        <path d={"M" + x(0) + "," + y(absich(0)) + " " + stufen} fill="none" stroke="#6CB43B" strokeWidth="3" />
+        <line x1={L} x2={B - R} y1={y(j.baseMW)} y2={y(j.baseMW)} stroke="#0A1626" strokeWidth="1.5" strokeDasharray="5 4" />
+        {[0, 4, 8, 12, 16, 20, 24].map((h) => (
+          <text key={h} x={x(h)} y={H - 10} fontSize="11" textAnchor="middle" fill="#6B7787">{String(h).padStart(2, "0") + ":00"}</text>
+        ))}
+        <text x={L - 6} y={O - 4} fontSize="11" textAnchor="end" fill="#6B7787">kW</text>
+      </svg>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs mt-2" style={{ color: C.muted }}>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: C.strom }} />mittlere Last {j.jahr}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "3px solid #6CB43B" }} />Absicherung Base + Peak</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "2px dashed #0A1626" }} />Base {num(j.baseMW * 1000, 0)} kW</span>
+        {peakTag && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3" style={{ background: "#F3F6FA", border: "1px solid " + C.line }} />Peakzeit 8–20 Uhr</span>}
+      </div>
+      <p className="text-xs mt-1" style={{ color: C.muted }}>
+        Was über der grünen Linie liegt, wird zum Marktpreis nachbeschafft, was darunter liegt, verkauft. Daraus entstehen die Strukturkosten.
+      </p>
+    </div>
+  );
+}
+
 const KleinFeld = ({ value, onChange, placeholder, darf }) => (
   <input value={value ?? ""} placeholder={placeholder} inputMode="decimal" disabled={!darf}
     onChange={(e) => onChange(e.target.value)} className="w-full px-2 py-1.5 text-sm rounded outline-none"
@@ -14863,6 +15152,11 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
   const verbrauchStrom = (b.lieferstellen || []).filter((l) => l.medium === "strom")
     .reduce((s, l) => s + (zahlLesen(l.verbrauch) || 0), 0);
 
+  /* Lastgang beim Öffnen automatisch einlesen, damit die Grafiken sofort zu sehen sind */
+  useEffect(() => {
+    if (quellen.length && !lastRef.current) einlesen();
+  }, [b.id]);
+
   const einlesen = async () => {
     setFehler(""); setLaedt("Lastgang wird eingelesen …");
     try {
@@ -14905,10 +15199,14 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         const kurve = preiskurve(j.jahr, { base: zahlOder(j.base), peak: zahlOder(j.peak),
           q: (j.q || []).map((q) => ({ base: zahlOder(q && q.base), peak: zahlOder(q && q.peak) })) }, bw.profil || null);
         const e = jahresBewertung(last, kurve);
+        /* mittlere Last je Stunde (MW) nach Tagesart, für die Grafik */
+        const tp = [0, 1, 2].map(() => Array.from({ length: 24 }, () => [0, 0]));
+        last.stunden.forEach((x, k) => { tp[x.art][x.h][0] += last.last[k]; tp[x.art][x.h][1]++; });
+        const tagesprofil = tp.map((a) => a.map(([sum, n]) => (n ? Math.round((sum / n) * 1000) / 1000 : 0)));
         return { jahr: j.jahr, mengeKwh: menge, menge: e.menge, preis: e.preis, hedgePreis: e.hedgePreis,
                  strukturProMWh: e.strukturProMWh, baseMW: e.baseMW, peakMW: e.peakMW, benutzung: e.benutzung,
                  peakAnteil: e.peakAnteil, gewichtBase: e.gewichtBase, spitze: e.spitze,
-                 monate: { base: rundeTief(kurve.monate.base), peak: rundeTief(kurve.monate.peak) } };
+                 monate: { base: rundeTief(kurve.monate.base), peak: rundeTief(kurve.monate.peak) }, tagesprofil };
       });
       setBw({ ergebnis: { ...(bw.ergebnis || {}), berechnet: heute(), marktStand: bw.marktStand || heute(),
         profil: !!bw.profil, jahre } }, "Bewertung berechnet");
@@ -15041,6 +15339,21 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
               Ohne Zeitstempel erkannt: Die Werte wurden ab 1. Januar fortlaufend gelegt.</p>}
           </div>
         )}
+        {lastInfo && (lastInfo.grafiken || []).map((g, gi) => (
+          <div key={gi} className="mt-5">
+            {(lastInfo.grafiken || []).length > 1 && <div className="text-xs mb-2" style={{ color: C.muted }}>{g.name}</div>}
+            <MonatsBalken profil={g.profil} einheit={g.einheit} />
+            {g.bilder ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
+                <img src={g.bilder.jahr} alt="Tagesspitzenlast" className="w-full rounded lg:col-span-2" style={{ border: "1px solid " + C.line }} />
+                <img src={g.bilder.woche} alt="Durchschnittliche Woche" className="w-full rounded" style={{ border: "1px solid " + C.line }} />
+                <img src={g.bilder.werktag} alt="Typischer Werktag" className="w-full rounded" style={{ border: "1px solid " + C.line }} />
+              </div>
+            ) : (
+              <p className="text-xs mt-3" style={{ color: C.muted }}>Ohne Zeitstempel lassen sich Jahres- und Wochenverlauf nicht zeichnen.</p>
+            )}
+          </div>
+        ))}
       </Abschnitt>
 
       <Abschnitt titel="2 · Marktpreise (Terminmarkt)" rechts={
@@ -15170,6 +15483,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
               </tbody>
             </table>
           </div>
+          {erg.jahre[0] && erg.jahre[0].tagesprofil && <AbsicherungsGrafik jahre={erg.jahre} />}
           <p className="text-xs mt-3" style={{ color: C.muted }}>
             Base und Peak: Absicherung mit Jahresprodukten (Base = mittlere Offpeaklast, Peak = Mehrlast in den Peakstunden).
             Struktur: Wert der Abweichung zwischen Lastgang und dieser Absicherung. Benutzungsstunden {erg.jahre.map((j) => num(j.benutzung)).join(" / ")} h,
@@ -15257,6 +15571,12 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
             Energiepreis aktuell: gekaufte Tranchen zu ihrem Preis, offener Rest zum heutigen Base/Peak-Preis, dazu die Strukturkosten.
             Ohne Netzentgelte, Abgaben, Umlagen und Aufschläge des Versorgers.
           </p>
+        </Abschnitt>
+      )}
+
+      {erg && erg.jahre && (
+        <Abschnitt titel="6 · Analyse: Last und geschlossene Positionen">
+          <AnalyseGrafik form={lastRef.current} bw={bw} />
         </Abschnitt>
       )}
 
