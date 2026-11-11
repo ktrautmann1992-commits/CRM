@@ -322,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.25 · 11.11.2026 · Beschaffung: Lastgang als Grafik";
+const VERSION = "v5.26 · 11.11.2026 · Beschaffungsplan im Vorgang ablegen";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -14659,6 +14659,9 @@ function BeschaffungKarte({ a, user, mitarbeiter, beschaffung, setBeschaffung, o
             {b.bewertung && b.bewertung.empfehlung && (
               <p className="text-xs mt-2 whitespace-pre-wrap">{b.bewertung.empfehlung}</p>
             )}
+            {b.bewertung && (b.bewertung.plaene || []).length > 0 && (
+              <div className="mt-3"><PlanFassungen plaene={b.bewertung.plaene} /></div>
+            )}
             {darfOeffnen && (
               <button className="text-xs mt-2" style={{ color: C.strom }} onClick={() => onOeffnen(b.id)}>
                 Bewertung öffnen
@@ -15011,6 +15014,32 @@ function AnalyseGrafik({ form, bw }) {
   );
 }
 
+/* Abgelegte Beschaffungspläne: neueste Fassung oben, ältere aufklappbar */
+function PlanFassungen({ plaene }) {
+  const [alle, setAlle] = useState(false);
+  const liste = [...(plaene || [])].reverse();
+  if (!liste.length) return null;
+  const zeile = (pl) => (
+    <div key={pl.fassung}>
+      <DateiChip datei={pl.datei} label={"Fassung " + pl.fassung} />
+      <div className="text-xs mt-1" style={{ color: C.muted }}>
+        {datum(pl.am)} · {pl.von}{pl.marktStand ? " · Marktpreise vom " + datum(pl.marktStand) : ""}
+      </div>
+    </div>
+  );
+  return (
+    <div className="space-y-3">
+      {zeile(liste[0])}
+      {liste.length > 1 && (
+        <button className="text-xs" style={{ color: C.strom }} onClick={() => setAlle(!alle)}>
+          {alle ? "ältere Fassungen ausblenden" : "ältere Fassungen (" + (liste.length - 1) + ")"}
+        </button>
+      )}
+      {alle && liste.slice(1).map(zeile)}
+    </div>
+  );
+}
+
 /* Monatsmengen als Balken */
 function MonatsBalken({ profil, einheit }) {
   if (!profil || !profil.length) return null;
@@ -15234,9 +15263,20 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
       "Tranchenplan " + jahr + " erstellt");
   };
 
+  /* PDF erzeugen; wer bearbeiten darf, legt es zugleich als neue Fassung im Auftrag ab.
+     Der Vertrieb lädt es dann im Vorgang herunter, ältere Fassungen bleiben erhalten. */
   const pdf = () => {
     const d = beschaffungPdf(b, mitarbeiter, standVon);
-    if (d) PDF_ZEIGEN(d);
+    if (!d) return;
+    if (darf) {
+      const n = (bw.plaene || []).length + 1;
+      const name = "Beschaffungsplan_" + String((b.kunde || {}).firma || b.anfrageId).replace(/[^\wäöüÄÖÜß]+/g, "_")
+        + "_" + heute() + "_Fassung" + n + ".pdf";
+      const datei = { ...d, name };
+      setBw({ plaene: [...(bw.plaene || []), { fassung: n, am: heute(), von: user.name,
+        marktStand: (erg && erg.marktStand) || "", datei }] }, "Beschaffungsplan Fassung " + n + " abgelegt");
+      if (PDF_ZEIGEN) PDF_ZEIGEN(datei);
+    } else if (PDF_ZEIGEN) PDF_ZEIGEN(d);
   };
 
   const k = b.kunde || {};
@@ -15592,11 +15632,17 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
                 options={Object.entries(BESCHAFFUNG_STATUS).map(([value, x]) => ({ value, label: x.label }))} />
             </div>
           )}
-          <Btn variante="neutral" icon={FileText} onClick={pdf} disabled={!erg}>Beschaffungsplan als PDF</Btn>
+          <Btn variante="neutral" icon={FileText} onClick={pdf} disabled={!erg}>{darf ? "Beschaffungsplan als PDF ablegen" : "Beschaffungsplan als PDF"}</Btn>
           {onLoeschen && <Btn variante="gefahr" icon={Trash2}
             onClick={() => { if (window.confirm("Diesen Bewertungsauftrag löschen?")) onLoeschen(); }}>Löschen</Btn>}
         </div>
       </Abschnitt>
+
+      {(bw.plaene || []).length > 0 && (
+        <Abschnitt titel="Abgelegte Beschaffungspläne" rechts={<span className="text-xs" style={{ color: C.muted }}>im Vorgang für den Vertrieb sichtbar</span>}>
+          <PlanFassungen plaene={bw.plaene} />
+        </Abschnitt>
+      )}
 
       <Abschnitt titel="Verlauf">
         <div className="space-y-1 text-xs" style={{ color: C.muted }}>
