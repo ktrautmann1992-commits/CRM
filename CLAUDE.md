@@ -128,12 +128,14 @@ Apr–Sep, Winter Jan–Mär + Okt–Dez, Quartale; Vorrang Quartal → Saison �
 Prüfung in Node: flache Last ergibt genau Cal, Saison und Struktur 0;
 überbestimmte Eingaben melden `abweichung`.
 
-**Spotpreise:** Strom-Day-Ahead holt der Browser von Energy-Charts. Erdgas
+**Spotpreise:** Strom-Day-Ahead liegt als fester Bestand in `daten/strom-de-lu.json`
+(Energy-Charts, CC BY 4.0, ab 1.1.2025; `STROM_STAND` in `build.mjs` und `App.jsx`
+gleich halten), neuere Tage holt der Browser von Energy-Charts dazu. Erdgas
 THE Day-Ahead liegt in der Tabelle `marktpreise` (`markt = 'THE-DA'`, Lesen
 nur Beschaffung und Innendienst, Pflege durch Beschaffung/GF per Datei),
 Erstbestand 1.1.2025–9.11.2026 aus der EEX-Übersicht von ENGIE. Börsendaten
 nicht ins öffentliche Repository schreiben. In den Bewertungsaufträgen unter
-„Spotpreise als Excel“ je eine eigene Datei für Strom und für Erdgas
+„Spotpreise abrufen“ mit eigenem Zeitraum je Sparte je eine eigene Datei für Strom und für Erdgas
 (`stromMappe`, `gasMappe`) — nie beides in einer Datei, ausdrücklicher Wunsch.
 
 Sprache: EGC ist kein Versorger. „Beschaffungsplan für den Kunden“,

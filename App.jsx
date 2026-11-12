@@ -322,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.29 · 12.11.2026 · Spotpreise Strom und Erdgas getrennt";
+const VERSION = "v5.30 · 12.11.2026 · Spotpreise je Zeitraum abrufen";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -14773,32 +14773,66 @@ async function gasSpotLaden(von, bis) {
   return raus;
 }
 
-/* Strom-Spotpreise (Day-Ahead DE-LU) von Energy-Charts, monatsweise im Browser */
+/* Strom-Spotpreise (Day-Ahead DE-LU): fester Bestand im Portal (Stand STROM_STAND),
+   neuere Tage holt der Browser monatsweise von Energy-Charts dazu. */
+const STROM_STAND = "2026-11-12";
+let stromBestandLaden = null;
+const stromBestand = () => {
+  if (!stromBestandLaden)
+    stromBestandLaden = fetch("/assets/strom-de-lu-" + STROM_STAND + ".json")
+      .then((r) => { if (!r.ok) throw new Error("Bestand nicht ladbar"); return r.json(); })
+      .then((d) => {
+        const reihe = [];
+        (d.segmente || []).forEach(([start, schritt, preise]) => preise.forEach((p, i) => reihe.push({ s: start + i * schritt, preis: p })));
+        return { reihe, lizenz: d.lizenz || "" };
+      })
+      .catch((e) => { stromBestandLaden = null; throw e; });
+  return stromBestandLaden;
+};
 async function stromSpotLaden(von, bis, melden) {
   const werte = new Map();
-  let lizenz = "";
-  const [j1, m1] = von.split("-").map(Number), [j2, m2] = bis.split("-").map(Number);
-  const monate = [];
-  for (let j = j1, m = m1; j < j2 || (j === j2 && m <= m2); m === 12 ? (j++, m = 1) : m++) monate.push([j, m]);
-  for (let i = 0; i < monate.length; i++) {
-    const [j, m] = monate[i];
-    const a = j + "-" + String(m).padStart(2, "0") + "-01";
-    const nj = m === 12 ? j + 1 : j, nm = m === 12 ? 1 : m + 1;
-    const e = nj + "-" + String(nm).padStart(2, "0") + "-01";
-    melden && melden("Strompreise " + MONATE_KURZ[m - 1] + " " + j + " (" + (i + 1) + " von " + monate.length + ") …");
-    let r = null;
-    for (let versuch = 0; versuch < 4; versuch++) {
-      r = await fetch("https://api.energy-charts.info/price?bzn=DE-LU&start=" + a + "&end=" + e);
-      if (r.status !== 429) break;
-      await new Promise((ok) => setTimeout(ok, 2500 * (versuch + 1)));
+  let lizenz = "", hinweis = "";
+  melden && melden("Strompreise werden gelesen …");
+  try {
+    const b = await stromBestand();
+    lizenz = b.lizenz;
+    b.reihe.forEach((x) => werte.set(x.s, x.preis));
+  } catch (e) { hinweis = "Fester Bestand nicht lesbar, alles wird von Energy-Charts geholt. "; }
+  /* letzter vollständiger Tag im Bestand (deutsche Zeit) */
+  const letzter = werte.size ? Math.max(...werte.keys()) : 0;
+  const bestandBis = letzter ? zeitTeile((letzter - 3600) * 1000).datum.split(".").reverse().join("-") : "";
+  const ab = bestandBis && bestandBis >= von ? bestandBis : von;
+  if (!bestandBis || bis > bestandBis) {
+    const [j1, m1] = ab.split("-").map(Number), [j2, m2] = bis.split("-").map(Number);
+    const monate = [];
+    for (let j = j1, m = m1; j < j2 || (j === j2 && m <= m2); m === 12 ? (j++, m = 1) : m++) monate.push([j, m]);
+    try {
+      for (let i = 0; i < monate.length; i++) {
+        const [j, m] = monate[i];
+        const a = i === 0 ? ab : j + "-" + String(m).padStart(2, "0") + "-01";
+        const nj = m === 12 ? j + 1 : j, nm = m === 12 ? 1 : m + 1;
+        const e = nj + "-" + String(nm).padStart(2, "0") + "-01";
+        melden && melden("Neue Strompreise " + MONATE_KURZ[m - 1] + " " + j + " werden geholt …");
+        let r = null;
+        for (let versuch = 0; versuch < 6; versuch++) {
+          r = await fetch("https://api.energy-charts.info/price?bzn=DE-LU&start=" + a + "&end=" + e);
+          if (r.status !== 429) break;
+          melden && melden("Energy-Charts bittet um Geduld, neuer Versuch …");
+          await new Promise((ok) => setTimeout(ok, 3000 * (versuch + 1)));
+        }
+        if (!r || !r.ok) throw new Error("Energy-Charts antwortet nicht (" + (r ? r.status : "keine Verbindung") + ")");
+        const d = await r.json();
+        if (d && d.license_info) lizenz = d.license_info;
+        (d.unix_seconds || []).forEach((s, k) => { if (d.price[k] != null && isFinite(+d.price[k])) werte.set(s, +d.price[k]); });
+        await new Promise((ok) => setTimeout(ok, 1200));
+      }
+    } catch (e) {
+      if (!werte.size) throw e;
+      const grund = /fetch|network|load failed/i.test(String((e && e.message) || e)) ? "keine Verbindung zu Energy-Charts" : (e.message || String(e));
+      hinweis += "Neuere Tage nach dem " + datum(bestandBis) + " konnten nicht geholt werden (" + grund + "). Die Datei endet dort.";
     }
-    if (!r || !r.ok) throw new Error("Energy-Charts antwortet nicht (" + (r ? r.status : "keine Verbindung") + ").");
-    const d = await r.json();
-    if (d && d.license_info) lizenz = d.license_info;
-    (d.unix_seconds || []).forEach((s, k) => { if (isFinite(+d.price[k])) werte.set(s, +d.price[k]); });
-    await new Promise((ok) => setTimeout(ok, 300));
   }
-  return { reihe: [...werte.entries()].sort((x, y) => x[0] - y[0]).map(([s, preis]) => ({ s, preis })), lizenz };
+  return { reihe: [...werte.entries()].sort((x, y) => x[0] - y[0]).map(([s, preis]) => ({ s, preis })), lizenz, hinweis };
 }
 
 /* Datum und Uhrzeit in deutscher Zeit, unabhängig von der Zeitzone des Geräts */
@@ -14932,12 +14966,13 @@ function gasMappe(von, bis, gas) {
 /* Spotpreise herunterladen; Beschaffung und GF ergänzen Erdgaspreise per Datei */
 function SpotpreiseKarte({ user }) {
   const [offen, setOffen] = useState(false);
-  const [von, setVon] = useState("2025-01-01");
-  const [bis, setBis] = useState(heute());
-  const [laedt, setLaedt] = useState("");
-  const [fehler, setFehler] = useState("");
+  const [zeit, setZeit] = useState({ strom: { von: "2025-01-01", bis: heute() }, gas: { von: "2025-01-01", bis: heute() } });
+  const [laedt, setLaedt] = useState({});
+  const [meldung, setMeldung] = useState({});
   const [stand, setStand] = useState(null);
   const darfPflegen = ["Beschaffung", "Geschäftsführung"].includes(user.rolle);
+  const setZ = (art, k) => (v) => setZeit((z) => ({ ...z, [art]: { ...z[art], [k]: v } }));
+  const melde = (art, text, fehler) => setMeldung((m) => ({ ...m, [art]: text ? { text, fehler } : null }));
   const standLaden = async () => {
     try {
       const { data } = await sb.from("marktpreise").select("tag").eq("markt", "THE-DA").order("tag", { ascending: false }).limit(1);
@@ -14946,29 +14981,34 @@ function SpotpreiseKarte({ user }) {
   };
   useEffect(() => { if (offen && stand == null) standLaden(); }, [offen]);
   const erstellen = async (art) => {
-    setFehler("");
-    if (!von || !bis || bis < von) { setFehler("Bitte einen gültigen Zeitraum wählen."); return; }
+    const { von, bis } = zeit[art];
+    melde(art, "");
+    if (!von || !bis || bis < von) { melde(art, "Bitte einen gültigen Zeitraum wählen.", true); return; }
+    const status = (t) => setLaedt((l) => ({ ...l, [art]: t }));
     try {
-      let d;
+      let d, hinweis = "";
       if (art === "gas") {
-        setLaedt("Erdgaspreise werden gelesen …");
+        status("Erdgaspreise werden gelesen …");
         const gas = await gasSpotLaden(von, bis);
         if (!gas.length) throw new Error("Für diesen Zeitraum liegen keine Erdgaspreise vor.");
+        if (gas[gas.length - 1].tag < bis) hinweis = "Erdgaspreise liegen bis " + datum(gas[gas.length - 1].tag) + " vor.";
         d = gasMappe(von, bis, gas);
       } else {
-        const strom = await stromSpotLaden(von, bis, setLaedt);
+        const strom = await stromSpotLaden(von, bis, status);
         if (!strom.reihe.length) throw new Error("Für diesen Zeitraum liegen keine Strompreise vor.");
-        setLaedt("Excel-Datei wird erstellt …");
+        hinweis = strom.hinweis;
+        status("Excel-Datei wird erstellt …");
         await new Promise((ok) => setTimeout(ok, 30));
         d = stromMappe(von, bis, strom);
       }
       dateiLaden(d);
-      setLaedt("");
-    } catch (e) { setFehler((art === "gas" ? "" : "Strompreise nicht geladen: ") + (e.message || String(e))); setLaedt(""); }
+      melde(art, (hinweis ? hinweis + " " : "") + d.name + " wurde erstellt.", !!hinweis);
+    } catch (e) { melde(art, (art === "gas" ? "" : "Strompreise nicht geladen: ") + (e.message || String(e)), true); }
+    status("");
   };
   const ergaenzen = async (datei) => {
     if (!datei) return;
-    setFehler(""); setLaedt("Erdgaspreise werden übernommen …");
+    melde("gas", ""); setLaedt((l) => ({ ...l, gas: "Erdgaspreise werden übernommen …" }));
     try {
       const s = await lastgangAuswerten(datei);
       const zeilen = [];
@@ -14982,41 +15022,48 @@ function SpotpreiseKarte({ user }) {
         const { error } = await sb.from("marktpreise").upsert(zeilen.slice(i, i + 500), { onConflict: "markt,tag" });
         if (error) throw new Error(error.message);
       }
-      setLaedt(""); setStand(null); standLaden();
-      setFehler("");
-      window.alert(zeilen.length + " Erdgaspreise übernommen.");
-    } catch (e) { setFehler("Übernahme nicht möglich: " + (e.message || e)); setLaedt(""); }
+      setStand(null); standLaden();
+      melde("gas", zeilen.length + " Erdgaspreise übernommen.");
+    } catch (e) { melde("gas", "Übernahme nicht möglich: " + (e.message || e), true); }
+    setLaedt((l) => ({ ...l, gas: "" }));
   };
+  const Block = ({ art, titel, Icon, farbe, text, children }) => (
+    <div className="rounded p-3 space-y-3" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+      <div className="flex items-center gap-2 text-sm"><Icon size={15} style={{ color: farbe }} /> {titel}</div>
+      <p className="text-xs" style={{ color: C.muted }}>{text}</p>
+      <div className="grid grid-cols-2 gap-3 max-w-md">
+        <Feld label="von" type="date" value={zeit[art].von} onChange={setZ(art, "von")} />
+        <Feld label="bis" type="date" value={zeit[art].bis} onChange={setZ(art, "bis")} />
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Btn icon={FileText} onClick={() => erstellen(art)} disabled={!!laedt[art]}>{"Excel " + titel.split(" ")[0]}</Btn>
+        {laedt[art] && <span className="text-sm" style={{ color: C.muted }}>{laedt[art]}</span>}
+      </div>
+      {meldung[art] && <p className="text-sm" style={{ color: meldung[art].fehler ? C.warn : C.ok }}>{meldung[art].text}</p>}
+      {children}
+    </div>
+  );
   return (
     <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line }}>
       <button onClick={() => setOffen(!offen)} className="w-full text-left px-4 py-3 text-sm flex items-center gap-2">
         <BarChart3 size={15} style={{ color: C.strom }} />
-        <span className="flex-1">Spotpreise als Excel: Strom und Erdgas</span>
+        <span className="flex-1">Spotpreise abrufen: Strom und Erdgas</span>
         <ChevronRight size={15} style={{ color: C.muted, transform: offen ? "rotate(90deg)" : "none" }} />
       </button>
       {offen && (
         <div className="px-4 pb-4 space-y-3">
-          <p className="text-xs" style={{ color: C.muted }}>
-            Je eine eigene Datei. Strom: Day-Ahead Deutschland-Luxemburg je Viertelstunde bzw. Stunde (Energy-Charts), mit Monatsmitteln
-            Base, Peak und Offpeak. Erdgas: THE Day-Ahead je Gastag{stand ? ", vorhanden bis " + datum(stand) : ""}, mit Monatsmitteln.
-          </p>
-          <div className="grid grid-cols-2 gap-3 max-w-md">
-            <Feld label="von" type="date" value={von} onChange={setVon} />
-            <Feld label="bis" type="date" value={bis} onChange={setBis} />
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Btn icon={Zap} onClick={() => erstellen("strom")} disabled={!!laedt}>Excel Strom</Btn>
-            <Btn icon={Flame} onClick={() => erstellen("gas")} disabled={!!laedt}>Excel Erdgas</Btn>
-            {laedt && <span className="text-sm" style={{ color: C.muted }}>{laedt}</span>}
-          </div>
-          {fehler && <p className="text-sm" style={{ color: C.warn }}>{fehler}</p>}
-          {darfPflegen && (
-            <div className="pt-2" style={{ borderTop: "1px solid " + C.line }}>
-              <Datei label="Erdgaspreise ergänzen: Datei mit Datum und Preis in €/MWh (CSV oder Excel)" datei={null} onSet={ergaenzen}
-                hinweis="Datei auswählen" />
-              <p className="text-xs mt-1" style={{ color: C.muted }}>Vorhandene Tage werden überschrieben, neue angefügt.</p>
-            </div>
-          )}
+          {Block({ art: "strom", titel: "Strom Day-Ahead", Icon: Zap, farbe: C.strom,
+            text: "Deutschland-Luxemburg je Viertelstunde (bis September 2025 je Stunde), mit Monatsmitteln Base, Peak und Offpeak. "
+              + "Ab 01.01.2025 liegen die Preise fest im Portal (Stand " + datum(STROM_STAND) + "), neuere Tage holt das Portal von Energy-Charts dazu." })}
+          {Block({ art: "gas", titel: "Erdgas THE Day-Ahead", Icon: Flame, farbe: C.gas,
+            text: "Je Gastag von 6 bis 6 Uhr, mit Monatsmitteln" + (stand ? ". Vorhanden bis " + datum(stand) : "") + ".",
+            children: darfPflegen && (
+              <div className="pt-2" style={{ borderTop: "1px solid " + C.line }}>
+                <Datei label="Neue Erdgaspreise ergänzen: Datei mit Datum und Preis in €/MWh (CSV oder Excel)" datei={null} onSet={ergaenzen}
+                  hinweis="Datei auswählen" />
+                <p className="text-xs mt-1" style={{ color: C.muted }}>Vorhandene Tage werden überschrieben, neue angefügt.</p>
+              </div>
+            ) })}
         </div>
       )}
     </div>
