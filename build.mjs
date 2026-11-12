@@ -55,13 +55,13 @@ await mkdir("dist/assets/pdfjs-3.11.174", { recursive: true });
 await cp("node_modules/pdfjs-dist/legacy/build/pdf.min.js", "dist/assets/pdfjs-3.11.174/pdf.min.js");
 await cp("node_modules/pdfjs-dist/legacy/build/pdf.worker.min.js", "dist/assets/pdfjs-3.11.174/pdf.worker.min.js");
 /* Schulungen im EGC-Design (Unterlagen → Schulungen). Bei neuen Fassungen SCHULUNGEN_STAND hier und in App.jsx erhöhen. */
-const SCHULUNGEN_STAND = "1";
+const SCHULUNGEN_STAND = "2";
 await cp("unterlagen/schulungen", "dist/assets/schulungen-" + SCHULUNGEN_STAND, { recursive: true });
 /* Feste Dokumente (Checkliste). Bei neuer Fassung DOKUMENTE_STAND hier und in App.jsx erhöhen. */
-const DOKUMENTE_STAND = "2";
+const DOKUMENTE_STAND = "3";
 await cp("unterlagen/dokumente", "dist/assets/dokumente-" + DOKUMENTE_STAND, { recursive: true });
 /* Feste Marketingunterlagen (Leitfaden Energieeinkauf). Bei neuer Fassung MARKETING_STAND hier und in App.jsx erhöhen. */
-const MARKETING_STAND = "1";
+const MARKETING_STAND = "2";
 await cp("unterlagen/marketing", "dist/assets/marketing-" + MARKETING_STAND, { recursive: true });
 
 /* Imagebroschüre zum Versenden: Baustein, verkleinerte Bilder und Schrift, nur bei Bedarf.

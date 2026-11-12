@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.31 · 12.11.2026 · Beschaffung und Bedienung für alle Rollen zusammengeführt";
+const VERSION = "v5.32 · 12.11.2026 · Flyer, Verkaufsskript und Zielpreisauftrag unter Unterlagen";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -10029,7 +10029,7 @@ function EmailSignatur({ m }) {
 }
 
 /* Schulungen im EGC-Design, fest im Portal (Ordner unterlagen/schulungen, Stand wie in build.mjs) */
-const SCHULUNGEN_PFAD = "/assets/schulungen-1/";
+const SCHULUNGEN_PFAD = "/assets/schulungen-2/";
 const SCHULUNGEN_FEST = [
   { datei: "EGC_Schulung_1_Grundlagen_Energiemarkt.pdf", titel: "Schulung 1 · Wie der Energiemarkt funktioniert", seiten: 29,
     text: "Marktlogik, Marktrollen, kW und kWh, Zählerarten und Messkonzepte." },
@@ -10039,17 +10039,23 @@ const SCHULUNGEN_FEST = [
     text: "Festpreis, Spot, Index, Tranchen, Hybrid, Cap/Floor, Zielpreis, Portfolio und PPA." },
   { datei: "EGC_Schulung_4_Energienebenkosten.pdf", titel: "Schulung 4 · Energienebenkosten verstehen und senken", seiten: 26,
     text: "Woraus sich ein Energiepreis zusammensetzt und mit welchen Hebeln sich Nebenkosten senken lassen." },
+  { datei: "EGC_Verkaufsskript_Spotmarkt.pdf", titel: "Verkaufsskript · Spotmarkt mit Festpreis-Option", seiten: 4,
+    text: "Für kleine Gewerbekunden (SLP): Gespräch in 6 Schritten, Sätze zum Vorlesen, Einwände mit Antworten, Abschluss und Erfassung im Portal." },
 ].map((x) => ({ ...x, pfad: SCHULUNGEN_PFAD }));
 /* feste Unterlagen je Bereich (Schulungen und Dokumente) */
 const UNTERLAGEN_FEST = {
   schulung: SCHULUNGEN_FEST,
   dokumente: [{ datei: "EGC_Checkliste_Kundenunterlagen.pdf", titel: "Checkliste Kundenunterlagen (SLP und RLM)", seiten: 2,
-    pfad: "/assets/dokumente-2/", text: "Was du vom Kunden brauchst: Firmenname wie bei Creditreform, Lieferstelle, MaLo, Zählertyp, Verbrauch, Vertrag und Kündigungsfrist, bei RLM die Lastgang-Datei." },
+    pfad: "/assets/dokumente-3/", text: "Was du vom Kunden brauchst: Firmenname wie bei Creditreform, Lieferstelle, MaLo, Zählertyp, Verbrauch, Vertrag und Kündigungsfrist, bei RLM die Lastgang-Datei." },
+    { datei: "EGC_Zielpreisauftrag.pdf", titel: "Zielpreisauftrag (Fixierung zum Wunschpreis)", seiten: 1, pfad: "/assets/dokumente-3/",
+      text: "Anlage zum Service- und Beratungsauftrag (Vollmacht) beim Spotmarkt mit Festpreis-Option: Wunschpreis, Lieferjahre, Teilmengen nur bei RLM, Unterschrift." },
     { titel: "Creditreform Firmeneintrag", url: "https://firmeneintrag.creditreform.de/", art: "Link",
       text: "Firmennamen des Kunden hier prüfen. Er muss im Auftrag genau so stehen, sonst lehnen Versorger oft ab. Nicht gefunden: bei Einzelunternehmen die Gewerbeanmeldung mitgeben." }],
   /* Leitfaden für Interessenten, allgemeine Fassung mit Kontakt EGC (druckvorlagen/whitepaper). Bei neuer Fassung MARKETING_STAND in build.mjs und hier erhöhen. */
   marketing: [{ datei: "EGC_Leitfaden_Energieeinkauf_2027.pdf", titel: "Leitfaden „Energieeinkauf 2027“", seiten: 22,
-    pfad: "/assets/marketing-1/", text: "Zum Weitergeben an Interessenten: Kostenfallen, Rechnung lesen, Lastgang, Beschaffungsmodelle, Entlastungen, Praxisbeispiele und Fristenkalender. Kontakt EGC, für alle Kunden gleich." }],
+    pfad: "/assets/marketing-2/", text: "Zum Weitergeben an Interessenten: Kostenfallen, Rechnung lesen, Lastgang, Beschaffungsmodelle, Entlastungen, Praxisbeispiele und Fristenkalender. Kontakt EGC, für alle Kunden gleich." },
+    { datei: "EGC_Flyer_Spotmarkt_Festpreis.pdf", titel: "Flyer · Spotmarkt mit Festpreis-Option", seiten: 1, pfad: "/assets/marketing-2/",
+      text: "One-Pager für Interessenten: Start am Börsenpreis ohne Risikoprämie, Fixierung zum Wunschpreis für alle Lieferjahre, wir kümmern uns." }],
 };
 
 /* Schulungen, Dokumente und Marketingunterlagen */
