@@ -126,7 +126,7 @@ let vy = gy + 11;
 y = gy + gh + 7;
 
 /* ---------- Wir kümmern uns ---------- */
-const bh = 39;
+const bh = 35;
 verlauf(RA, y, BR, bh, NAVY1, NAVY2, { r: 3, n: 60 });
 doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, bh, 3, 3, null); doc.clip(); doc.discardPath();
 dk(0.08); st(WEISS); doc.setLineWidth(0.6); doc.circle(RA + BR - 12, y + 6, 30, 'S'); doc.circle(RA + BR - 12, y + 6, 42, 'S'); dk(1);
@@ -136,8 +136,7 @@ schrift(15, true); fa(WEISS); doc.text('Wir handeln aktiv für Sie.', RA + 7, y 
 const leistung = ['Tägliche Marktbeobachtung', 'Kaufempfehlung zum richtigen Zeitpunkt', 'Umsetzung beim Versorger', 'Laufende Betreuung und Übersicht'];
 leistung.forEach((t, i) => { const x = RA + 7 + (i % 2) * 86, yy = y + 24 + Math.floor(i / 2) * 6.3;
   haken(x + 2, yy); schrift(9.2); fa(WEISS); doc.text(t, x + 7, yy); });
-schrift(8.6, true); fa(GRUEN2); doc.text('Ein kurzes Okay von Ihnen genügt, den Rest erledigen wir.', RA + 7, y + bh - 3.5);
-y += bh + 5;
+y += bh + 6;
 
 /* ---------- Kontakt: Inhalt senkrecht mittig im Kasten ---------- */
 const ch = H - 11 - y;
