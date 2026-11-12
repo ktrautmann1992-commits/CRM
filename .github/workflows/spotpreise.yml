@@ -2,6 +2,8 @@ name: Spotpreise abrufen (einmalig)
 on:
   push:
     branches: [spotpreise-abruf]
+permissions:
+  contents: write
 jobs:
   abruf:
     runs-on: ubuntu-latest
@@ -24,12 +26,13 @@ jobs:
               lizenz = j.get("license_info", lizenz)
               for s, p in zip(j["unix_seconds"], j["price"]):
                   if p is not None: alle[s] = p
-              print(d, len(j["unix_seconds"])); d = n; time.sleep(1)
+              print(d, len(j["unix_seconds"])); d = n; time.sleep(3)
           json.dump({"lizenz": lizenz, "reihe": sorted(alle.items())}, open("strom.json", "w"))
           print("Werte:", len(alle))
           PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: strom
-          path: strom.json
-          retention-days: 1
+      - name: Ergebnis auf den Zweig legen
+        run: |
+          git init -q && git remote add origin https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+          git checkout -q -b ergebnis && git add strom.json
+          git -c user.name=abruf -c user.email=abruf@localhost commit -q -m "Strompreise"
+          git push -q -f origin ergebnis:spotpreise-ergebnis
