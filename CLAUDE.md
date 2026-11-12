@@ -118,6 +118,23 @@ Gespeichert werden nur Kennzahlen (`bewertung.ergebnis`), nicht die Kurve.
 Änderungen an der Rechnung wie bei der Provision in Node nachrechnen:
 Eine flache Last muss genau den Base-Preis ergeben, Struktur 0.
 
+**Strom und Erdgas:** Ein Auftrag hat `sparten` (`["strom"]`, `["gas"]` oder
+beide; ältere Aufträge ohne Feld gelten als Strom). Strom liegt in
+`bewertung`, Erdgas in `bewertungGas`. Empfehlung und abgelegte Pläne
+(`plaene`) gelten für den ganzen Auftrag und liegen immer in `bewertung`.
+Erdgas rechnet je Gastag (6 bis 6 Uhr): `gaskurve` (Cal Pflicht, Sommer
+Apr–Sep, Winter Jan–Mär + Okt–Dez, Quartale; Vorrang Quartal → Saison → Jahr),
+`jahresBewertungGas` mit Monatsbändern. Preis = Cal + Saisonanteil + Struktur.
+Prüfung in Node: flache Last ergibt genau Cal, Saison und Struktur 0;
+überbestimmte Eingaben melden `abweichung`.
+
+**Spotpreise:** Strom-Day-Ahead holt der Browser von Energy-Charts. Erdgas
+THE Day-Ahead liegt in der Tabelle `marktpreise` (`markt = 'THE-DA'`, Lesen
+nur Beschaffung und Innendienst, Pflege durch Beschaffung/GF per Datei),
+Erstbestand 1.1.2025–9.11.2026 aus der EEX-Übersicht von ENGIE. Börsendaten
+nicht ins öffentliche Repository schreiben. Excel unter „Spotpreise Strom und
+Erdgas als Excel“ in den Bewertungsaufträgen.
+
 Sprache: EGC ist kein Versorger. „Beschaffungsplan für den Kunden“,
 „Tranchen beim Versorger“, nie „wir kaufen ein“.
 
