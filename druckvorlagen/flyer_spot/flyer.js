@@ -61,12 +61,12 @@ y += 5;
 const schritte = [
   ['Start am Spotmarkt', 'Ihre Belieferung beginnt sofort zu aktuellen Börsenpreisen. Kein Festlegen auf einen ungünstigen Stichtag.'],
   ['Wir beobachten den Markt', 'Täglich, für Strom und Erdgas. Wir erkennen, wann sich ein Festpreis für Sie lohnt.'],
-  ['Wechsel in den Festpreis', 'Sobald die Marktlage passt, sichern wir Ihren Preis am Terminmarkt, ganz oder in Teilmengen.'],
+  ['Wechsel in den Festpreis', 'Sobald die Marktlage passt, sichern wir Ihren Festpreis am Terminmarkt. Bei RLM auch in Teilmengen.'],
 ];
 const sw = (BR - 8) / 3;
 schritte.forEach(([t, u], i) => {
   const x = RA + i * (sw + 4);
-  fl(HELL); doc.roundedRect(x, y, sw, 41, 3, 3, 'F');
+  fl(HELL); doc.roundedRect(x, y, sw, 40, 3, 3, 'F');
   verlauf(x + 5, y + 5, 11, 11, GRUEN2, GRUEN1, { kreis: true, quer: false, n: 25 });
   schrift(12, true); fa(WEISS); doc.text(String(i + 1), x + 10.5, y + 12.6, { align: 'center' });
   if (i < 2) { st(GRUEN1); doc.setLineWidth(0.7); doc.line(x + sw - 1, y + 10.5, x + sw + 3.2, y + 10.5);
@@ -74,23 +74,38 @@ schritte.forEach(([t, u], i) => {
   schrift(10.5, true); fa(NAVY); doc.text(t, x + 5, y + 22);
   absatz(u, x + 5, y + 27.5, sw - 10, 8.2, GRAU, 1.33);
 });
-y += 48;
+y += 46;
 
 /* ---------- Schaubild: Preisverlauf und Wechselzeitpunkt ---------- */
 const gx = RA, gy = y, gw = 98, gh = 47;
 fl(WEISS); st(LINIE); doc.setLineWidth(0.3); doc.roundedRect(gx, gy, gw, gh, 3, 3, 'FD');
 schrift(8.5, true); fa(NAVY); doc.text('Der richtige Moment zählt', gx + 5, gy + 7);
 const px0 = gx + 8, py0 = gy + 14, pw = gw - 16, ph = gh - 23;
-st(LINIE); doc.setLineWidth(0.15);
+st(LINIE); doc.setLineWidth(0.12);
 for (let k = 0; k <= 3; k++) doc.line(px0, py0 + k * ph / 3, px0 + pw, py0 + k * ph / 3);
 const werte = [0.72, 0.8, 0.76, 0.86, 0.82, 0.7, 0.74, 0.62, 0.66, 0.52, 0.58, 0.46, 0.5, 0.38, 0.42, 0.33, 0.36, 0.3, 0.34, 0.31];
 const wechsel = 15;
 const pt = (i) => [px0 + i / (werte.length - 1) * pw, py0 + (1 - werte[i]) * ph];
-st(NAVY2); doc.setLineWidth(0.7);
-for (let i = 1; i <= wechsel; i++) { const [a1, b1] = pt(i - 1), [a2, b2] = pt(i); doc.line(a1, b1, a2, b2); }
-/* ab dem Wechsel: fester Preis als grüne Linie */
+/* Fläche unter dem Preisverlauf: Blau, nach unten durchsichtiger; ab dem Wechsel unter der Festpreislinie */
 const [wx, wy] = pt(wechsel);
-st(GRUEN1); doc.setLineWidth(1); doc.line(wx, wy, px0 + pw, wy);
+const umriss = [];
+for (let i = 0; i <= wechsel; i++) umriss.push(pt(i));
+umriss.push([px0 + pw, wy], [px0 + pw, py0 + ph], [px0, py0 + ph]);
+doc.saveGraphicsState();
+const rel = []; for (let i = 1; i < umriss.length; i++) rel.push([umriss[i][0] - umriss[i - 1][0], umriss[i][1] - umriss[i - 1][1]]);
+doc.lines(rel, umriss[0][0], umriss[0][1], [1, 1], null, true); doc.clip(); doc.discardPath();
+const oben = Math.min(...umriss.map((p) => p[1]));
+const stufen = 70;
+for (let k = 0; k < stufen; k++) {
+  const t = k / (stufen - 1);
+  fl(mische([38, 92, 158], WEISS, 0.15 + 0.85 * Math.pow(t, 0.9)));
+  doc.rect(px0, oben + t * (py0 + ph - oben), pw, (py0 + ph - oben) / stufen + 0.05, 'F');
+}
+doc.restoreGraphicsState();
+/* Preisverlauf und Festpreis in Grün */
+st(GRUEN1); doc.setLineWidth(0.8); doc.setLineJoin('round');
+for (let i = 1; i <= wechsel; i++) { const [a1, b1] = pt(i - 1), [a2, b2] = pt(i); doc.line(a1, b1, a2, b2); }
+st(GRUEN); doc.setLineWidth(1.3); doc.line(wx, wy, px0 + pw, wy);
 fl(GRUEN); doc.circle(wx, wy, 1.8, 'F'); fl(WEISS); doc.circle(wx, wy, 0.7, 'F');
 schrift(7, true); fa(GRUEN1); doc.text('Festpreis gesichert', wx + 2, wy - 7.5, { align: 'center' });
 st(GRUEN1); doc.setLineWidth(0.3); doc.line(wx, wy - 2.2, wx + 1.5, wy - 6.3);
@@ -103,39 +118,41 @@ schrift(8, true); fa(GRUEN1); doc.text('IHRE VORTEILE', vx, gy + 4, { charSpace:
 let vy = gy + 11;
 [['Kein Stichtagsrisiko', 'Sie starten ohne Festlegung auf einen Tag.'],
  ['Unterjährig wechseln', 'In den Festpreis, sobald die Marktlage passt.'],
- ['Ganz oder in Teilmengen', 'Festpreis für alles oder in Tranchen.'],
- ['Strom und Erdgas', 'Für alle Lieferstellen, SLP und RLM.']].forEach(([t, u]) => {
+ ['Für SLP und RLM', 'SLP: Festpreis für die ganze Menge. RLM: auf Wunsch auch in Teilmengen.'],
+ ['Strom und Erdgas', 'Für alle Lieferstellen aus einer Hand.']].forEach(([t, u]) => {
   haken(vx + 2, vy); schrift(9.5, true); fa(NAVY); doc.text(t, vx + 7, vy);
-  vy = absatz(u, vx + 7, vy + 4.4, vw - 7, 8.2, GRAU, 1.3) + 3.2;
+  vy = absatz(u, vx + 7, vy + 4.4, vw - 7, 8.2, GRAU, 1.3) + 2.6;
 });
 y = gy + gh + 7;
 
 /* ---------- Wir kümmern uns ---------- */
-const bh = 41;
+const bh = 39;
 verlauf(RA, y, BR, bh, NAVY1, NAVY2, { r: 3, n: 60 });
 doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, bh, 3, 3, null); doc.clip(); doc.discardPath();
 dk(0.08); st(WEISS); doc.setLineWidth(0.6); doc.circle(RA + BR - 12, y + 6, 30, 'S'); doc.circle(RA + BR - 12, y + 6, 42, 'S'); dk(1);
 doc.restoreGraphicsState();
 schrift(8, true); fa(GRUEN2); doc.text('SIE MÜSSEN SICH UM NICHTS KÜMMERN', RA + 7, y + 9, { charSpace: 0.8 });
-schrift(15, true); fa(WEISS); doc.text('Wir handeln aktiv für Sie.', RA + 7, y + 18);
+schrift(15, true); fa(WEISS); doc.text('Wir handeln aktiv für Sie.', RA + 7, y + 17);
 const leistung = ['Tägliche Marktbeobachtung', 'Kaufempfehlung zum richtigen Zeitpunkt', 'Umsetzung beim Versorger', 'Laufende Betreuung und Übersicht'];
-leistung.forEach((t, i) => { const x = RA + 7 + (i % 2) * 86, yy = y + 25.5 + Math.floor(i / 2) * 6.5;
+leistung.forEach((t, i) => { const x = RA + 7 + (i % 2) * 86, yy = y + 24 + Math.floor(i / 2) * 6.3;
   haken(x + 2, yy); schrift(9.2); fa(WEISS); doc.text(t, x + 7, yy); });
 schrift(8.6, true); fa(GRUEN2); doc.text('Ein kurzes Okay von Ihnen genügt, den Rest erledigen wir.', RA + 7, y + bh - 3.5);
-y += bh + 6;
+y += bh + 5;
 
-/* ---------- Kontakt ---------- */
+/* ---------- Kontakt: Inhalt senkrecht mittig im Kasten ---------- */
 const ch = H - 11 - y;
 fl(GRUENHELL); doc.roundedRect(RA, y, BR, ch, 3, 3, 'F');
-schrift(13, true); fa(NAVY); doc.text('Jetzt Marktchance nutzen.', RA + 7, y + 8.5);
-absatz('Wir prüfen Ihren Vertrag und zeigen Ihnen, wann der Festpreis für Sie passt.', RA + 7, y + 14, 125, 8.6, TEXT, 1.3);
-schrift(6.6); fa(GRAU); doc.text('TELEFON', RA + 7, y + 21); doc.text('E-MAIL', RA + 52, y + 21);
-schrift(10, true); fa(NAVY); doc.text('06373 8920114', RA + 7, y + 26); doc.text('anfrage@egc-energie.de', RA + 52, y + 26);
-doc.link(RA + 7, y + 22, 38, 5.5, { url: 'tel:063738920114' }); doc.link(RA + 52, y + 22, 50, 5.5, { url: 'mailto:anfrage@egc-energie.de?subject=Spotmarkt%20mit%20Festpreis-Option' });
-const qs = ch - 8;
-fl(WEISS); doc.roundedRect(RA + BR - qs - 8, y + 2.5, qs + 4, ch - 5, 2.5, 2.5, 'F');
-doc.addImage(qr, 'PNG', RA + BR - qs - 6, y + 4, qs, qs);
-doc.link(RA + BR - qs - 8, y + 2.5, qs + 4, ch - 5, { url: 'https://www.egc-energie.de' });
+const block = 24, oy = y + (ch - block) / 2;
+schrift(13, true); fa(NAVY); doc.text('Jetzt Marktchance nutzen.', RA + 7, oy + 4.5);
+schrift(8.6); fa(TEXT); doc.text('Wir prüfen Ihren Vertrag und zeigen Ihnen, wann der Festpreis für Sie passt.', RA + 7, oy + 10.2);
+schrift(6.6); fa(GRAU); doc.text('TELEFON', RA + 7, oy + 16.5); doc.text('E-MAIL', RA + 52, oy + 16.5);
+schrift(10, true); fa(NAVY); doc.text('06373 8920114', RA + 7, oy + 21.5); doc.text('anfrage@egc-energie.de', RA + 52, oy + 21.5);
+doc.link(RA + 7, oy + 17.5, 38, 5.5, { url: 'tel:063738920114' }); doc.link(RA + 52, oy + 17.5, 50, 5.5, { url: 'mailto:anfrage@egc-energie.de?subject=Spotmarkt%20mit%20Festpreis-Option' });
+const qs = Math.min(24, ch - 10), qb = qs + 4;
+const qx = RA + BR - 6 - qb, qy = y + (ch - qb) / 2;
+fl(WEISS); doc.roundedRect(qx, qy, qb, qb, 2.5, 2.5, 'F');
+doc.addImage(qr, 'PNG', qx + 2, qy + 2, qs, qs);
+doc.link(qx, qy, qb, qb, { url: 'https://www.egc-energie.de' });
 
 schrift(6.8); fa(GRAU);
 doc.text('EGC Energie  ·  In den Erlenwiesen 11  ·  66914 Waldmohr  ·  www.egc-energie.de', W / 2, H - 6, { align: 'center' });
