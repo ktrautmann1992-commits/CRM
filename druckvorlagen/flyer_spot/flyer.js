@@ -51,17 +51,17 @@ fl(GRUEN); doc.roundedRect(RA, 34, 76, 8, 4, 4, 'F');
 schrift(7.8, true); fa(NAVY1); doc.text('SPOTMARKT MIT FESTPREIS-OPTION', RA + 5, 39.2, { charSpace: 0.6 });
 schrift(27, true); fa(WEISS); doc.text('Heute flexibel starten.', RA, 54);
 fa(GRUEN2); doc.text('Morgen den besten', RA, 65.5); doc.text('Festpreis sichern.', RA, 77);
-absatz('Wir beliefern Sie zuerst zu aktuellen Börsenpreisen und wechseln für Sie in den Festpreis, sobald der Markt günstig ist. Auch mitten im Jahr. Sie müssen sich um nichts kümmern.',
-  RA, 85.5, 160, 10, HELLBLAU, 1.38);
+absatz('Start zu aktuellen Börsenpreisen, ohne Risikoprämie. Erreicht der Terminmarkt Ihren Wunschpreis, fixieren wir sofort für alle Lieferjahre. Sie müssen sich um nichts kümmern.',
+  RA, 85.5, 172, 9.8, HELLBLAU, 1.38);
 
 /* ---------- Drei Schritte ---------- */
 let y = kh + 9;
 schrift(8, true); fa(GRUEN1); doc.text('SO FUNKTIONIERT ES', RA, y, { charSpace: 1 });
 y += 5;
 const schritte = [
-  ['Start am Spotmarkt', 'Ihre Belieferung beginnt sofort zu aktuellen Börsenpreisen. Kein Festlegen auf einen ungünstigen Stichtag.'],
-  ['Wir beobachten den Markt', 'Täglich, für Strom und Erdgas. Wir erkennen, wann sich ein Festpreis für Sie lohnt.'],
-  ['Wechsel in den Festpreis', 'Sobald die Marktlage passt, sichern wir Ihren Festpreis am Terminmarkt. Bei RLM auch in Teilmengen.'],
+  ['Start am Spotmarkt', 'Ihre Belieferung startet zu aktuellen Börsenpreisen, ohne Risikoprämie.'],
+  ['Ihr Wunschpreis', 'Sie nennen uns Ihren Zielpreis für den reinen Energiepreis. Wir beobachten den Markt täglich.'],
+  ['Wir fixieren sofort', 'Ist Ihr Wunschpreis erreicht, fixieren wir für alle Lieferjahre. Sie erhalten unsere Bestätigung.'],
 ];
 const sw = (BR - 8) / 3;
 schritte.forEach(([t, u], i) => {
@@ -79,7 +79,7 @@ y += 46;
 /* ---------- Schaubild: Preisverlauf und Wechselzeitpunkt ---------- */
 const gx = RA, gy = y, gw = 98, gh = 47;
 fl(WEISS); st(LINIE); doc.setLineWidth(0.3); doc.roundedRect(gx, gy, gw, gh, 3, 3, 'FD');
-schrift(8.5, true); fa(NAVY); doc.text('Der richtige Moment zählt', gx + 5, gy + 7);
+schrift(8.5, true); fa(NAVY); doc.text('Ihr Preis, Ihr Moment', gx + 5, gy + 7);
 const px0 = gx + 8, py0 = gy + 14, pw = gw - 16, ph = gh - 23;
 st(LINIE); doc.setLineWidth(0.12);
 for (let k = 0; k <= 3; k++) doc.line(px0, py0 + k * ph / 3, px0 + pw, py0 + k * ph / 3);
@@ -106,8 +106,10 @@ doc.restoreGraphicsState();
 st(GRUEN1); doc.setLineWidth(0.8); doc.setLineJoin('round');
 for (let i = 1; i <= wechsel; i++) { const [a1, b1] = pt(i - 1), [a2, b2] = pt(i); doc.line(a1, b1, a2, b2); }
 st(GRUEN); doc.setLineWidth(1.3); doc.line(wx, wy, px0 + pw, wy);
+st(NAVY2); doc.setLineWidth(0.35); doc.setLineDashPattern([1.2, 1], 0); doc.line(px0, wy, wx - 2.2, wy); doc.setLineDashPattern([], 0);
+schrift(6.6, true); fa(NAVY2); doc.text('Ihr Wunschpreis', px0 + 1, wy + 3.6);
 fl(GRUEN); doc.circle(wx, wy, 1.8, 'F'); fl(WEISS); doc.circle(wx, wy, 0.7, 'F');
-schrift(7, true); fa(GRUEN1); doc.text('Festpreis gesichert', wx + 2, wy - 7.5, { align: 'center' });
+schrift(7, true); fa(GRUEN1); doc.text('Fixiert für alle Lieferjahre', wx + 1, wy - 7.5, { align: 'center' });
 st(GRUEN1); doc.setLineWidth(0.3); doc.line(wx, wy - 2.2, wx + 1.5, wy - 6.3);
 schrift(6.6); fa(GRAU); doc.text('Spotmarkt', px0, py0 + ph + 4.5); doc.text('Festpreis', px0 + pw, py0 + ph + 4.5, { align: 'right' });
 schrift(5.8); fa(GRAU); doc.text('Schematische Darstellung', gx + gw - 5, gy + 7, { align: 'right' });
@@ -116,10 +118,9 @@ schrift(5.8); fa(GRAU); doc.text('Schematische Darstellung', gx + gw - 5, gy + 7
 const vx = gx + gw + 6, vw = BR - gw - 6;
 schrift(8, true); fa(GRUEN1); doc.text('IHRE VORTEILE', vx, gy + 4, { charSpace: 1 });
 let vy = gy + 11;
-[['Kein Stichtagsrisiko', 'Sie starten ohne Festlegung auf einen Tag.'],
- ['Unterjährig wechseln', 'In den Festpreis, sobald die Marktlage passt.'],
- ['Für SLP und RLM', 'SLP: Festpreis für die ganze Menge. RLM: auf Wunsch auch in Teilmengen.'],
- ['Strom und Erdgas', 'Für alle Lieferstellen aus einer Hand.']].forEach(([t, u]) => {
+[['Keine Risikoprämie', 'Festpreise enthalten einen Risikoaufschlag. Am Spotmarkt zahlen Sie den reinen Börsenpreis.'],
+ ['Fixierung zum Wunschpreis', 'Sofort und auch unterjährig, sobald Ihr Preis erreicht ist.'],
+ ['Strom und Erdgas, SLP und RLM', 'SLP: Festpreis für die ganze Menge. RLM: auf Wunsch auch in Teilmengen.']].forEach(([t, u]) => {
   haken(vx + 2, vy); schrift(9.5, true); fa(NAVY); doc.text(t, vx + 7, vy);
   vy = absatz(u, vx + 7, vy + 4.4, vw - 7, 8.2, GRAU, 1.3) + 2.6;
 });
@@ -133,7 +134,7 @@ dk(0.08); st(WEISS); doc.setLineWidth(0.6); doc.circle(RA + BR - 12, y + 6, 30, 
 doc.restoreGraphicsState();
 schrift(8, true); fa(GRUEN2); doc.text('SIE MÜSSEN SICH UM NICHTS KÜMMERN', RA + 7, y + 9, { charSpace: 0.8 });
 schrift(15, true); fa(WEISS); doc.text('Wir handeln aktiv für Sie.', RA + 7, y + 17);
-const leistung = ['Tägliche Marktbeobachtung', 'Kaufempfehlung zum richtigen Zeitpunkt', 'Umsetzung beim Versorger', 'Laufende Betreuung und Übersicht'];
+const leistung = ['Tägliche Beobachtung des Terminmarkts', 'Sofortige Fixierung bei Ihrem Wunschpreis', 'Umsetzung beim Versorger', 'Bestätigung an Sie, sobald Ihr Preis steht'];
 leistung.forEach((t, i) => { const x = RA + 7 + (i % 2) * 86, yy = y + 24 + Math.floor(i / 2) * 6.3;
   haken(x + 2, yy); schrift(9.2); fa(WEISS); doc.text(t, x + 7, yy); });
 y += bh + 6;
@@ -143,7 +144,7 @@ const ch = H - 11 - y;
 fl(GRUENHELL); doc.roundedRect(RA, y, BR, ch, 3, 3, 'F');
 const block = 24, oy = y + (ch - block) / 2;
 schrift(13, true); fa(NAVY); doc.text('Jetzt Marktchance nutzen.', RA + 7, oy + 4.5);
-schrift(8.6); fa(TEXT); doc.text('Wir prüfen Ihren Vertrag und zeigen Ihnen, wann der Festpreis für Sie passt.', RA + 7, oy + 10.2);
+schrift(8.6); fa(TEXT); doc.text('Wir prüfen Ihren Vertrag und nennen Ihnen einen realistischen Wunschpreis.', RA + 7, oy + 10.2);
 schrift(6.6); fa(GRAU); doc.text('TELEFON', RA + 7, oy + 16.5); doc.text('E-MAIL', RA + 52, oy + 16.5);
 schrift(10, true); fa(NAVY); doc.text('06373 8920114', RA + 7, oy + 21.5); doc.text('anfrage@egc-energie.de', RA + 52, oy + 21.5);
 doc.link(RA + 7, oy + 17.5, 38, 5.5, { url: 'tel:063738920114' }); doc.link(RA + 52, oy + 17.5, 50, 5.5, { url: 'mailto:anfrage@egc-energie.de?subject=Spotmarkt%20mit%20Festpreis-Option' });
