@@ -322,7 +322,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.28 · 12.11.2026 · Beschaffung Erdgas und Spotpreise";
+const VERSION = "v5.29 · 12.11.2026 · Spotpreise Strom und Erdgas getrennt";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -14861,53 +14861,71 @@ function erzeugeXlsxMappe(dateiname, blaetter /* [{ name, zeilen, breiten, kopf 
            url: "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + btoa(roh) };
 }
 
-/* Mappe der Spotpreise: Monatsmittel, Strom je Intervall, Erdgas je Gastag, Quellen */
-function spotMappe(von, bis, strom, gas) {
-  const r2 = (x) => Math.round(x * 1000) / 1000;
-  const stromZeilen = [["Datum", "Wochentag", "von", "bis", "Zeitzone", "Auflösung", "€/MWh", "ct/kWh"]];
+/* Spotpreise als Excel: eine Mappe Strom, eine Mappe Erdgas, je mit Monatsmitteln, Werten und Quellen */
+const r3 = (x) => Math.round(x * 1000) / 1000;
+const mittelVon = ([s, n]) => (n ? Math.round((s / n) * 100) / 100 : "");
+const datumDe = (dt) => String(dt.getDate()).padStart(2, "0") + "." + String(dt.getMonth() + 1).padStart(2, "0") + "." + dt.getFullYear();
+
+function stromMappe(von, bis, strom) {
+  const zeilen = [["Datum", "Wochentag", "von", "bis", "Zeit", "Auflösung", "€/MWh", "ct/kWh"]];
   const mon = new Map();
-  const monat = (j, m) => { const k = j + "-" + String(m + 1).padStart(2, "0"); if (!mon.has(k)) mon.set(k, { base: [0, 0], peak: [0, 0], off: [0, 0], gas: [0, 0] }); return mon.get(k); };
   strom.reihe.forEach((x, i) => {
-    const naechster = strom.reihe[i + 1];
-    const dauer = naechster && naechster.s - x.s <= 3600 ? naechster.s - x.s : i ? Math.min(3600, x.s - strom.reihe[i - 1].s) : 3600;
+    const n = strom.reihe[i + 1];
+    const dauer = n && n.s - x.s <= 3600 ? n.s - x.s : i ? Math.min(3600, x.s - strom.reihe[i - 1].s) : 3600;
     const t = zeitTeile(x.s * 1000), e = zeitTeile((x.s + dauer) * 1000);
     const lt = t.datum.split(".").reverse().join("-");
     if (lt < von || lt > bis) return;
-    stromZeilen.push([t.datum, t.tag, t.zeit, e.zeit, t.zone, dauer === 900 ? "15 Min" : "60 Min", r2(x.preis), r2(x.preis / 10)]);
-    const mo = monat(t.j, t.m), g = dauer / 3600;
+    zeilen.push([t.datum, t.tag, t.zeit, e.zeit, t.zone, dauer === 900 ? "15 Min" : "60 Min", r3(x.preis), r3(x.preis / 10)]);
+    const k = t.j + "-" + String(t.m + 1).padStart(2, "0");
+    if (!mon.has(k)) mon.set(k, { base: [0, 0], peak: [0, 0], off: [0, 0], min: null, max: null, neg: 0 });
+    const mo = mon.get(k), g = dauer / 3600, pk = t.wt >= 1 && t.wt <= 5 && t.h >= 8 && t.h < 20;
     mo.base[0] += x.preis * g; mo.base[1] += g;
-    const pk = t.wt >= 1 && t.wt <= 5 && t.h >= 8 && t.h < 20;
     (pk ? mo.peak : mo.off)[0] += x.preis * g; (pk ? mo.peak : mo.off)[1] += g;
+    mo.min = mo.min == null ? x.preis : Math.min(mo.min, x.preis); mo.max = mo.max == null ? x.preis : Math.max(mo.max, x.preis);
+    if (x.preis < 0) mo.neg += g;
   });
-  const gasZeilen = [["Gastag", "Wochentag", "von", "bis", "€/MWh", "ct/kWh"]];
-  gas.forEach((x) => {
-    const [j, m, d] = x.tag.split("-").map(Number);
-    const n = new Date(j, m - 1, d + 1);
-    const f = (dt) => String(dt.getDate()).padStart(2, "0") + "." + String(dt.getMonth() + 1).padStart(2, "0") + "." + dt.getFullYear();
-    gasZeilen.push([f(new Date(j, m - 1, d)), WOCHENTAG[new Date(j, m - 1, d).getDay()], f(new Date(j, m - 1, d)) + " 06:00", f(n) + " 06:00", r2(x.preis), r2(x.preis / 10)]);
-    const mo = monat(j, m - 1); mo.gas[0] += x.preis; mo.gas[1]++;
-  });
-  const mittel = ([s, n]) => (n ? r2(s / n) : "");
-  const uebersicht = [["Monat", "Strom Base €/MWh", "Strom Peak €/MWh", "Strom Offpeak €/MWh", "Erdgas THE Day-Ahead €/MWh"]];
+  const uebersicht = [["Monat", "Base €/MWh", "Peak €/MWh", "Offpeak €/MWh", "tiefster Preis €/MWh", "höchster Preis €/MWh", "Stunden mit negativem Preis"]];
   [...mon.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([k, v]) => {
     const [j, m] = k.split("-").map(Number);
-    uebersicht.push([MONATSNAMEN_LANG[m - 1] + " " + j, mittel(v.base), mittel(v.peak), mittel(v.off), mittel(v.gas)]);
+    uebersicht.push([MONATSNAMEN_LANG[m - 1] + " " + j, mittelVon(v.base), mittelVon(v.peak), mittelVon(v.off), r3(v.min), r3(v.max), Math.round(v.neg * 100) / 100]);
   });
-  const quellen = [["Spotpreise Strom und Erdgas", ""],
-    ["Zeitraum", datum(von) + " bis " + datum(bis)],
-    ["Erstellt", datum(heute()) + " im EGC Vertriebsportal"],
-    ["", ""],
-    ["Strom", "Day-Ahead-Auktion, Gebotszone Deutschland-Luxemburg (DE-LU), €/MWh netto. Seit 1. Oktober 2025 in Viertelstunden, davor in Stunden. Uhrzeiten in deutscher Zeit (MEZ/MESZ)."],
-    ["Quelle Strom", "Energy-Charts (Fraunhofer ISE), api.energy-charts.info" + (strom.lizenz ? " · " + strom.lizenz : "")],
-    ["Erdgas", "THE Day-Ahead (Marktgebiet Trading Hub Europe) je Gastag 06:00 bis 06:00 Uhr, €/MWh netto. Samstag und Sonntag haben den Preis des Wochenendprodukts."],
-    ["Quelle Erdgas", "EEX, nach der Übersicht von ENGIE Deutschland; im Portal ergänzbar. Börsendaten nur intern verwenden."],
-    ["Peak", "Montag bis Freitag 8 bis 20 Uhr; Offpeak alle übrigen Stunden."],
-    ["Hinweis", "Ohne Netzentgelte, Steuern, Abgaben, Umlagen und Aufschläge des Versorgers."]];
-  return erzeugeXlsxMappe("Spotpreise_Strom_Erdgas_" + von + "_bis_" + bis + ".xlsx", [
-    { name: "Monatsmittel", zeilen: uebersicht, breiten: [18, 18, 18, 20, 26] },
-    { name: "Strom Day-Ahead", zeilen: stromZeilen, breiten: [12, 10, 8, 8, 10, 10, 10, 10] },
-    { name: "Erdgas THE Day-Ahead", zeilen: gasZeilen, breiten: [12, 10, 18, 18, 10, 10] },
-    { name: "Quellen", zeilen: quellen, breiten: [16, 120], kopf: 1 },
+  return erzeugeXlsxMappe("Spotpreise_Strom_" + von + "_bis_" + bis + ".xlsx", [
+    { name: "Monatsmittel", zeilen: uebersicht, breiten: [18, 13, 13, 14, 18, 18, 24] },
+    { name: "Day-Ahead", zeilen, breiten: [12, 10, 8, 8, 8, 10, 10, 10] },
+    { name: "Quellen", zeilen: [["Spotpreise Strom", ""], ["Zeitraum", datum(von) + " bis " + datum(bis)], ["Erstellt", datum(heute()) + " im EGC Vertriebsportal"],
+      ["Markt", "Day-Ahead-Auktion, Gebotszone Deutschland-Luxemburg (DE-LU), €/MWh netto. Bis 30.09.2025 je Stunde, seit 01.10.2025 je Viertelstunde. Uhrzeiten in deutscher Zeit (MEZ/MESZ)."],
+      ["Peak", "Montag bis Freitag 8 bis 20 Uhr; Offpeak alle übrigen Stunden. Monatsmittel zeitgewichtet."],
+      ["Quelle", "Energy-Charts (Fraunhofer ISE), api.energy-charts.info" + (strom.lizenz ? " · " + strom.lizenz : "")],
+      ["Hinweis", "Reine Energiepreise ohne Netzentgelte, Steuern, Abgaben, Umlagen und Aufschläge des Versorgers."]], breiten: [16, 110] },
+  ]);
+}
+
+function gasMappe(von, bis, gas) {
+  const zeilen = [["Gastag", "Wochentag", "von", "bis", "€/MWh", "ct/kWh"]];
+  const mon = new Map();
+  gas.forEach((x) => {
+    const [j, m, d] = x.tag.split("-").map(Number);
+    const t = new Date(j, m - 1, d), n = new Date(j, m - 1, d + 1);
+    zeilen.push([datumDe(t), WOCHENTAG[t.getDay()], datumDe(t) + " 06:00", datumDe(n) + " 06:00", r3(x.preis), r3(x.preis / 10)]);
+    const k = j + "-" + String(m).padStart(2, "0");
+    if (!mon.has(k)) mon.set(k, { s: [0, 0], min: null, max: null });
+    const mo = mon.get(k);
+    mo.s[0] += x.preis; mo.s[1]++;
+    mo.min = mo.min == null ? x.preis : Math.min(mo.min, x.preis); mo.max = mo.max == null ? x.preis : Math.max(mo.max, x.preis);
+  });
+  const uebersicht = [["Monat", "THE Day-Ahead €/MWh", "tiefster Preis €/MWh", "höchster Preis €/MWh", "Gastage"]];
+  [...mon.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([k, v]) => {
+    const [j, m] = k.split("-").map(Number);
+    uebersicht.push([MONATSNAMEN_LANG[m - 1] + " " + j, mittelVon(v.s), r3(v.min), r3(v.max), v.s[1]]);
+  });
+  const letzter = gas.length ? gas[gas.length - 1].tag : bis;
+  return erzeugeXlsxMappe("Spotpreise_Erdgas_" + von + "_bis_" + letzter + ".xlsx", [
+    { name: "Monatsmittel", zeilen: uebersicht, breiten: [18, 20, 18, 18, 10] },
+    { name: "Day-Ahead", zeilen, breiten: [12, 10, 18, 18, 10, 10] },
+    { name: "Quellen", zeilen: [["Spotpreise Erdgas", ""], ["Zeitraum", datum(von) + " bis " + datum(letzter)], ["Erstellt", datum(heute()) + " im EGC Vertriebsportal"],
+      ["Markt", "THE Day-Ahead, Marktgebiet Trading Hub Europe, je Gastag 06:00 bis 06:00 Uhr, €/MWh netto. Samstag und Sonntag tragen den Preis des Wochenendprodukts."],
+      ["Quelle", "EEX Spot THE Day Ahead, nach der Übersicht von ENGIE Deutschland; im Portal ergänzbar. Börsendaten nur intern verwenden."],
+      ["Hinweis", "Reine Energiepreise ohne Netzentgelte, Energiesteuer, CO2-Preis, Umlagen und Aufschläge des Versorgers."]], breiten: [16, 110] },
   ]);
 }
 
@@ -14927,21 +14945,26 @@ function SpotpreiseKarte({ user }) {
     } catch (e) { setStand(""); }
   };
   useEffect(() => { if (offen && stand == null) standLaden(); }, [offen]);
-  const erstellen = async () => {
+  const erstellen = async (art) => {
     setFehler("");
     if (!von || !bis || bis < von) { setFehler("Bitte einen gültigen Zeitraum wählen."); return; }
     try {
-      setLaedt("Erdgaspreise werden gelesen …");
-      const gas = await gasSpotLaden(von, bis);
-      let strom = { reihe: [], lizenz: "" };
-      try { strom = await stromSpotLaden(von, bis, setLaedt); }
-      catch (e) { setFehler("Strompreise nicht geladen: " + (e.message || e) + " Die Datei enthält nur Erdgas."); }
-      setLaedt("Excel-Datei wird erstellt …");
-      await new Promise((ok) => setTimeout(ok, 30));
-      const d = spotMappe(von, bis, strom, gas);
+      let d;
+      if (art === "gas") {
+        setLaedt("Erdgaspreise werden gelesen …");
+        const gas = await gasSpotLaden(von, bis);
+        if (!gas.length) throw new Error("Für diesen Zeitraum liegen keine Erdgaspreise vor.");
+        d = gasMappe(von, bis, gas);
+      } else {
+        const strom = await stromSpotLaden(von, bis, setLaedt);
+        if (!strom.reihe.length) throw new Error("Für diesen Zeitraum liegen keine Strompreise vor.");
+        setLaedt("Excel-Datei wird erstellt …");
+        await new Promise((ok) => setTimeout(ok, 30));
+        d = stromMappe(von, bis, strom);
+      }
       dateiLaden(d);
       setLaedt("");
-    } catch (e) { setFehler(e.message || String(e)); setLaedt(""); }
+    } catch (e) { setFehler((art === "gas" ? "" : "Strompreise nicht geladen: ") + (e.message || String(e))); setLaedt(""); }
   };
   const ergaenzen = async (datei) => {
     if (!datei) return;
@@ -14968,21 +14991,22 @@ function SpotpreiseKarte({ user }) {
     <div className="rounded" style={{ background: C.card, border: "1px solid " + C.line }}>
       <button onClick={() => setOffen(!offen)} className="w-full text-left px-4 py-3 text-sm flex items-center gap-2">
         <BarChart3 size={15} style={{ color: C.strom }} />
-        <span className="flex-1">Spotpreise Strom und Erdgas als Excel</span>
+        <span className="flex-1">Spotpreise als Excel: Strom und Erdgas</span>
         <ChevronRight size={15} style={{ color: C.muted, transform: offen ? "rotate(90deg)" : "none" }} />
       </button>
       {offen && (
         <div className="px-4 pb-4 space-y-3">
           <p className="text-xs" style={{ color: C.muted }}>
-            Strom: Day-Ahead Deutschland-Luxemburg je Viertelstunde bzw. Stunde (Energy-Charts). Erdgas: THE Day-Ahead je Gastag
-            {stand ? ", vorhanden bis " + datum(stand) : ""}. Dazu Monatsmittel Base, Peak und Erdgas.
+            Je eine eigene Datei. Strom: Day-Ahead Deutschland-Luxemburg je Viertelstunde bzw. Stunde (Energy-Charts), mit Monatsmitteln
+            Base, Peak und Offpeak. Erdgas: THE Day-Ahead je Gastag{stand ? ", vorhanden bis " + datum(stand) : ""}, mit Monatsmitteln.
           </p>
           <div className="grid grid-cols-2 gap-3 max-w-md">
             <Feld label="von" type="date" value={von} onChange={setVon} />
             <Feld label="bis" type="date" value={bis} onChange={setBis} />
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <Btn icon={FileText} onClick={erstellen} disabled={!!laedt}>Excel erstellen</Btn>
+            <Btn icon={Zap} onClick={() => erstellen("strom")} disabled={!!laedt}>Excel Strom</Btn>
+            <Btn icon={Flame} onClick={() => erstellen("gas")} disabled={!!laedt}>Excel Erdgas</Btn>
             {laedt && <span className="text-sm" style={{ color: C.muted }}>{laedt}</span>}
           </div>
           {fehler && <p className="text-sm" style={{ color: C.warn }}>{fehler}</p>}

@@ -132,8 +132,9 @@ Prüfung in Node: flache Last ergibt genau Cal, Saison und Struktur 0;
 THE Day-Ahead liegt in der Tabelle `marktpreise` (`markt = 'THE-DA'`, Lesen
 nur Beschaffung und Innendienst, Pflege durch Beschaffung/GF per Datei),
 Erstbestand 1.1.2025–9.11.2026 aus der EEX-Übersicht von ENGIE. Börsendaten
-nicht ins öffentliche Repository schreiben. Excel unter „Spotpreise Strom und
-Erdgas als Excel“ in den Bewertungsaufträgen.
+nicht ins öffentliche Repository schreiben. In den Bewertungsaufträgen unter
+„Spotpreise als Excel“ je eine eigene Datei für Strom und für Erdgas
+(`stromMappe`, `gasMappe`) — nie beides in einer Datei, ausdrücklicher Wunsch.
 
 Sprache: EGC ist kein Versorger. „Beschaffungsplan für den Kunden“,
 „Tranchen beim Versorger“, nie „wir kaufen ein“.
