@@ -74,6 +74,11 @@ await cp("druckvorlagen/broschuere/bilder/klein", bz, { recursive: true });
 await cp("druckvorlagen/broschuere/schrift/LiberationSans-Regular.ttf", bz + "/LiberationSans-Regular.ttf");
 await cp("druckvorlagen/broschuere/schrift/LiberationSans-Bold.ttf", bz + "/LiberationSans-Bold.ttf");
 
+/* Strom-Spotpreise (Day-Ahead DE-LU, Energy-Charts, CC BY 4.0) als fester Bestand; nur bei Bedarf geladen.
+   Bei neuem Bestand STROM_STAND hier und in App.jsx ändern. */
+const STROM_STAND = "2026-11-12";
+await cp("daten/strom-de-lu.json", "dist/assets/strom-de-lu-" + STROM_STAND + ".json");
+
 await cp("manifest.json", "dist/manifest.json");
 await cp("icon-192.png", "dist/icon-192.png");
 await cp("icon-512.png", "dist/icon-512.png");

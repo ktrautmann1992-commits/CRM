@@ -40,6 +40,8 @@ export const SAMMLUNGEN = {
   protokoll:  { tabelle: "protokoll" },
   tippgeber:  { tabelle: "tippgeber", buendeln: { tippgeber_intern: ["art", "wert", "zahlweise"] } },
   strukturanfragen: { tabelle: "strukturanfragen", neuOben: true },
+  /* Bewertungsaufträge der Beschaffung: Abschrift der Kundendaten ohne Provision */
+  beschaffung: { tabelle: "beschaffung", neuOben: true },
 };
 
 /* Mitarbeiter sind auf drei Tabellen verteilt:

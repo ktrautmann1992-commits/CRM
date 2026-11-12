@@ -64,7 +64,7 @@ mit Zustand, Navigation und Routing.
 ## Rollen
 
 Vertriebspartner · Teamleiter · Leitung Vertrieb · Kalkulation ·
-Vertragsmanagement · Leadmanagement · Finanzbuchhaltung · Geschäftsführung
+Vertragsmanagement · Leadmanagement · Finanzbuchhaltung · Beschaffung · Geschäftsführung
 
 Die Navigation ist je Rolle zugeschnitten (`const NAV` in der Hauptkomponente).
 **Nicht-Vertriebsrollen haben keine Ziele, Provisionen oder Akquise.** Das war
@@ -88,6 +88,59 @@ Wichtig an den letzten Schritten:
    Provisionsliste und das **Vertragsmanagement** in der Vertragsbetreuung.
 
 Diese Reihenfolge nie verkürzen.
+
+## Beschaffung
+
+Externe Rolle. Abgeschlossene Kunden mit Tranchen- oder PPA-Modell übergibt
+der Vertrieb (eigene Struktur), das Vertragsmanagement oder die
+Geschäftsführung im Vorgang an die Beschaffung. Dabei entsteht ein Datensatz
+in `beschaffung` mit einer **Abschrift** der Kundendaten — ohne Aufschlag,
+Preise und Provision (die Datenbank entfernt diese Felder zusätzlich). Die
+Beschaffung sieht keine Vorgänge, nur diese Aufträge, und darf die Dateien
+des zugehörigen Vorgangs lesen (Lastgänge).
+
+**Freie Aufträge:** Beschaffung, GF, VM und Leitung Vertrieb können unter
+„Kunde ohne Vorgang planen“ einen Auftrag für einen Kunden anlegen, der im
+Portal nicht existiert (Kundendaten von Hand, Lastgang per Upload). Solche
+Aufträge haben `frei: true`, keine `anfrageId` und keinen Partner; die
+Datenbank erzwingt das (Migration `_09_beschaffung_frei`). Freie Aufträge darf
+die Beschaffung auch löschen.
+
+Zugang der Abteilung: `beschaffung@egc-energie.de` (Mitarbeiter-ID
+`beschaffung`). Das Passwort steht nicht im Code.
+
+Rechnung (`preiskurve`, `jahresBewertung`, `tranchenStand`, `ampel`):
+Terminmarktpreise trägt die Beschaffung je Bewertung von Hand ein
+(Cal Base/Peak, wahlweise Quartale). Daraus entsteht eine arbitragefreie
+Preiskurve Jahr → Quartal → Monat → Peak/Offpeak → Stunde, optional mit
+Tagesprofil aus Day-Ahead-Preisen. Bewertet wird der Lastgang als
+Mengen-Hedge (Base = mittlere Offpeaklast, Peak = Mehrlast) plus Struktur.
+Gespeichert werden nur Kennzahlen (`bewertung.ergebnis`), nicht die Kurve.
+Änderungen an der Rechnung wie bei der Provision in Node nachrechnen:
+Eine flache Last muss genau den Base-Preis ergeben, Struktur 0.
+
+**Strom und Erdgas:** Ein Auftrag hat `sparten` (`["strom"]`, `["gas"]` oder
+beide; ältere Aufträge ohne Feld gelten als Strom). Strom liegt in
+`bewertung`, Erdgas in `bewertungGas`. Empfehlung und abgelegte Pläne
+(`plaene`) gelten für den ganzen Auftrag und liegen immer in `bewertung`.
+Erdgas rechnet je Gastag (6 bis 6 Uhr): `gaskurve` (Cal Pflicht, Sommer
+Apr–Sep, Winter Jan–Mär + Okt–Dez, Quartale; Vorrang Quartal → Saison → Jahr),
+`jahresBewertungGas` mit Monatsbändern. Preis = Cal + Saisonanteil + Struktur.
+Prüfung in Node: flache Last ergibt genau Cal, Saison und Struktur 0;
+überbestimmte Eingaben melden `abweichung`.
+
+**Spotpreise:** Strom-Day-Ahead liegt als fester Bestand in `daten/strom-de-lu.json`
+(Energy-Charts, CC BY 4.0, ab 1.1.2025; `STROM_STAND` in `build.mjs` und `App.jsx`
+gleich halten), neuere Tage holt der Browser von Energy-Charts dazu. Erdgas
+THE Day-Ahead liegt in der Tabelle `marktpreise` (`markt = 'THE-DA'`, Lesen
+nur Beschaffung und Innendienst, Pflege durch Beschaffung/GF per Datei),
+Erstbestand 1.1.2025–9.11.2026 aus der EEX-Übersicht von ENGIE. Börsendaten
+nicht ins öffentliche Repository schreiben. In den Bewertungsaufträgen unter
+„Spotpreise abrufen“ mit eigenem Zeitraum je Sparte je eine eigene Datei für Strom und für Erdgas
+(`stromMappe`, `gasMappe`) — nie beides in einer Datei, ausdrücklicher Wunsch.
+
+Sprache: EGC ist kein Versorger. „Beschaffungsplan für den Kunden“,
+„Tranchen beim Versorger“, nie „wir kaufen ein“.
 
 ## Provisionsmodell
 
@@ -118,6 +171,7 @@ Node gegen ein Beispiel von 1.000 € laufen zu lassen.
 | Kalkulation | Anteil des Partners + Aufschlag | nein | nein |
 | Finanzbuchhaltung | ja | ja | nein |
 | Geschäftsführung | ja | ja | ja |
+| Beschaffung | nein | nein | nein |
 
 Das ist eine Vertrauensfrage im Vertrieb, keine Kleinigkeit.
 
