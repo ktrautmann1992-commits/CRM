@@ -2,6 +2,10 @@ import { mkdir, cp, rm, writeFile, readFile } from "node:fs/promises";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
+/* Zuerst der Bautest: Wirft eine Ansicht beim Rendern einen Fehler, bricht der Bau hier ab
+   und Netlify lässt die bisherige Fassung online (statt einer weißen Seite). */
+execSync("node pruefung.mjs", { stdio: "inherit" });
+
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist/assets", { recursive: true });
 
