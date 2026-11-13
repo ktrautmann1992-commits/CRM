@@ -38,6 +38,8 @@ globalThis.matchMedia = () => ({ matches: false, addEventListener: leer, removeE
 globalThis.document = { title: "", addEventListener: leer, removeEventListener: leer, createElement: () => ({ style: {}, setAttribute: leer, appendChild: leer }), head: { appendChild: leer }, body: { appendChild: leer, style: {} }, documentElement: { style: {} } };
 globalThis.storage = { get: async () => null, set: async () => null, delete: async () => null, list: async () => ({ keys: [] }) };
 if (!globalThis.navigator) globalThis.navigator = { userAgent: "pruefung", onLine: true };
+/* Node 20 (Netlify) hat kein WebSocket; die Datenbankanbindung verlangt es schon beim Laden */
+if (!globalThis.WebSocket) globalThis.WebSocket = class { constructor() { this.readyState = 3; } send() {} close() {} addEventListener() {} removeEventListener() {} };
 
 const { rendern, PRUEFDATEN } = createRequire(import.meta.url)(ziel);
 const quelle = await readFile("App.jsx", "utf8");
