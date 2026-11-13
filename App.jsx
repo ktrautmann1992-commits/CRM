@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.33 · 13.11.2026 · Mehrere Dateien je Feld, Kontaktlisten mit Ansprechpartner, Bautest";
+const VERSION = "v5.33 · 13.11.2026 · Mehrere Dateien je Feld, Kontaktlisten mit Ansprechpartner, Abrechnung auslesen, Bautest";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -960,6 +960,77 @@ function zahlLesen(roh) {
 }
 
 const istDatum = (t) => /\d{1,4}[.\-/]\d{1,2}[.\-/]\d{1,4}/.test(String(t || ""));
+
+/* ---------- Versorgerabrechnung auslesen ----------
+   Sucht im Text einer Abrechnung (PDF-Text oder Texterkennung eines Fotos) nach Marktlokation,
+   Zählernummer, Jahresverbrauch, Kundennummer und Versorger. Das Ergebnis ist nur ein Vorschlag:
+   Der Vertriebspartner muss die Werte mit der Abrechnung vergleichen und bestätigen. */
+const ABRECHNUNG_FELDER = [
+  { k: "versorger", label: "Aktueller Versorger" },
+  { k: "kundennummer", label: "Kundennummer beim Versorger" },
+  { k: "zaehlernummer", label: "Zählernummer" },
+  { k: "maloId", label: "Marktlokations-ID (MaLo)" },
+  { k: "verbrauch", label: "Jahresverbrauch in kWh" },
+];
+function abrechnungAuswerten(roh, versorgerNamen = []) {
+  const text = String(roh || "").replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ");
+  const flach = text.replace(/\s+/g, " ");
+  const w = {};
+  /* Marktlokation: 11 Ziffern nach der Beschriftung (auch mit Leerzeichen geschrieben) */
+  const malo = flach.match(/(?:Marktlokation(?:s[- ]?(?:ID|Identifikationsnummer|nummer))?|MaLo(?:[- ]?ID)?)\s*[:.]?\s*((?:\d ?){11})(?!\d)/i);
+  if (malo) w.maloId = malo[1].replace(/\s/g, "");
+  /* Zählernummer: Ziffern und Buchstaben nach „Zählernummer“, nicht „Zählerstand“ */
+  const zn = flach.match(/Z(?:ä|ae)hler(?:-?nummer|-?nr\.?|nummer)\s*[:.]?\s*([0-9A-Z][0-9A-Z\-]{3,23}(?: [0-9A-Z]{1,8}){0,3})/i);
+  if (zn) {
+    const kandidat = zn[1].split(" ").filter((t, i) => i === 0 || /\d/.test(t)).join(" ").trim();
+    if (/\d{3}/.test(kandidat)) w.zaehlernummer = kandidat;
+  }
+  /* Kundennummer oder Vertragskonto */
+  const kn = flach.match(/(?:Kunden-?(?:nummer|nr\.?)|Vertragskonto(?:nummer)?)\s*[:.]?\s*([0-9A-Z][0-9A-Z\-\/]{2,20}(?: \d{1,8}){0,4})(?![0-9A-Za-z])/i);
+  if (kn && /\d{3}/.test(kn[1])) w.kundennummer = kn[1].trim();
+  /* Jahresverbrauch: größter kWh-Wert mit Verbrauchsbeschriftung in der Nähe */
+  const werte = [];
+  const re = /(\d{1,3}(?:[.\s]\d{3})+|\d+)(?:,\d+)?\s*kWh/gi;
+  let m;
+  while ((m = re.exec(flach))) {
+    const davor = flach.slice(Math.max(0, m.index - 90), m.index);
+    if (/verbrauch|prognose|abrechnungsmenge|menge/i.test(davor) && !/ct\s*\/|€\s*\/|preis/i.test(flach.slice(m.index, m.index + m[0].length + 4)))
+      werte.push(Math.round(zahlLesen(m[1].replace(/[.\s]/g, ""))));
+  }
+  const gross = werte.filter((x) => x > 0 && x < 1e9);
+  if (gross.length) w.verbrauch = String(Math.max(...gross));
+  /* Versorger: bekannter Name aus der Versorgerliste, sonst „Stadtwerke …“ */
+  const klein = flach.toLowerCase();
+  const bekannt = versorgerNamen.filter(Boolean)
+    .map((n) => ({ n, i: klein.indexOf(n.toLowerCase()) })).filter((x) => x.i >= 0).sort((x, y) => x.i - y.i)[0];
+  if (bekannt) w.versorger = bekannt.n;
+  else {
+    const sw = flach.match(/Stadtwerke [A-ZÄÖÜ][\wäöüß\-]+(?: (?:GmbH|AG))?/);
+    if (sw) w.versorger = sw[0];
+  }
+  return w;
+}
+
+/* Fotos: Texterkennung im Gerät ist noch nicht eingebaut (Bibliothek fehlt). Bis dahin klarer Hinweis. */
+async function fotoText() {
+  throw new Error("Fotos kann das Portal noch nicht auslesen. Bitte die Werte von Hand eintragen oder die Abrechnung als PDF hochladen; das Foto bleibt als Unterlage gespeichert.");
+}
+
+/* Text aller PDF-Seiten einer Datei (über die im Portal liegende PDF-Bibliothek) */
+async function pdfText(datei) {
+  const pdfjs = await ladePdfjs();
+  const url = datei.url || (await dateiInhalt(datei));
+  const roh = atob(String(url).split(",")[1] || "");
+  const bytes = new Uint8Array(roh.length);
+  for (let i = 0; i < roh.length; i++) bytes[i] = roh.charCodeAt(i);
+  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  let t = "";
+  for (let s = 1; s <= Math.min(pdf.numPages, 8); s++) {
+    const inhalt = await (await pdf.getPage(s)).getTextContent();
+    t += inhalt.items.map((x) => x.str + (x.hasEOL ? "\n" : " ")).join("") + "\n";
+  }
+  return t;
+}
 
 /* Lastgang auswerten: Menge, Spitzenlast, Benutzungsstunden, Monatsverlauf */
 async function lastgangAuswerten(datei) {
@@ -4147,6 +4218,82 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante, ohneHinweis
 
 /* ------------------------------------------------------------------ */
 /*  Anfrage-Assistent                                                  */
+/* Abrechnung auslesen: Vorschlag übernehmen, danach muss der Partner bestätigen.
+   Die Werte bleiben in den Feldern jederzeit änderbar. */
+function AbrechnungAuslesen({ l, setL, user }) {
+  const [laeuft, setLaeuft] = useState(false);
+  const [meldung, setMeldung] = useState("");
+  const dateien = dateienVon(l.abrechnung);
+  const au = l.auslesung;
+  if (!dateien.length && !au) return null;
+
+  const auslesen = async () => {
+    setLaeuft(true); setMeldung("");
+    try {
+      let text = "";
+      const pdfs = dateien.filter(istPdf);
+      for (const d of pdfs) text += (await pdfText(d)) + "\n";
+      if (!pdfs.length) await fotoText();
+      const werte = abrechnungAuswerten(text, VERSORGER.map((v) => v.name));
+      const gefunden = ABRECHNUNG_FELDER.filter((f) => werte[f.k]);
+      if (!gefunden.length) {
+        setMeldung("In der Abrechnung wurden keine Werte erkannt. Bitte die Felder von Hand ausfüllen.");
+      } else {
+        gefunden.forEach((f) => setL(l.id, f.k, werte[f.k]));
+        if (werte.versorger) setL(l.id, "versorgerVon", "manuell");
+        setL(l.id, "auslesung", { datum: heute(), werte, bestaetigt: false });
+        setMeldung("");
+      }
+    } catch (e) {
+      setMeldung((e && e.message) || "Die Abrechnung konnte nicht gelesen werden.");
+    }
+    setLaeuft(false);
+  };
+
+  const offen = au && !au.bestaetigt;
+  return (
+    <div className="sm:col-span-2 space-y-2">
+      {dateien.length > 0 && (!au || au.bestaetigt) && (
+        <button onClick={auslesen} disabled={laeuft}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm"
+          style={{ border: "1px solid " + C.strom, color: C.strom, background: "#fff", opacity: laeuft ? 0.6 : 1 }}>
+          <FileText size={15} /> {laeuft ? "Abrechnung wird gelesen …" : au ? "Abrechnung erneut auslesen" : "Daten aus der Abrechnung auslesen"}
+        </button>
+      )}
+      {meldung && <p className="text-xs" style={{ color: laeuft ? C.muted : C.warn }}>{meldung}</p>}
+      {offen && (
+        <div className="p-3 rounded text-sm" style={{ background: "#FBF6EE", border: "1px solid " + C.gas }}>
+          <div className="mb-2" style={{ color: C.gas }}>
+            <strong>Bitte prüfen:</strong> Diese Werte hat das Portal aus der Abrechnung gelesen und in die Felder
+            eingetragen. Vergleiche sie mit der Abrechnung und korrigiere sie bei Bedarf in den Feldern.
+          </div>
+          <ul className="space-y-1 mb-3">
+            {ABRECHNUNG_FELDER.filter((f) => au.werte[f.k]).map((f) => (
+              <li key={f.k} className="flex flex-wrap gap-x-2">
+                <span style={{ color: C.muted }}>{f.label}:</span>
+                <strong>{f.k === "verbrauch" && zahlLesen(l[f.k]) > 0 ? num(zahlLesen(l[f.k]), 0) : String(l[f.k] || "")}</strong>
+                {String(l[f.k] || "") !== String(au.werte[f.k]) && (
+                  <span className="text-xs" style={{ color: C.muted }}>(von dir geändert, gelesen: {au.werte[f.k]})</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <Btn variante="ok" icon={Check}
+            onClick={() => setL(l.id, "auslesung", { ...au, bestaetigt: true, bestaetigtVon: user ? user.name : "", bestaetigtAm: heute() })}>
+            Daten geprüft und richtig
+          </Btn>
+        </div>
+      )}
+      {au && au.bestaetigt && (
+        <p className="text-xs" style={{ color: C.muted }}>
+          Aus der Abrechnung gelesen und bestätigt{au.bestaetigtVon ? " von " + au.bestaetigtVon : ""}
+          {au.bestaetigtAm ? " am " + datum(au.bestaetigtAm) : ""}. Die Werte kannst du oben jederzeit ändern.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpeichern, onSenden, onAbbrechen }) {
   const [a, setA] = useState(entwurf || leereAnfrage(user));
@@ -4212,6 +4359,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
       if (!l.maloId) f.push(n + "Marktlokations-ID");
       if (!l.verbrauch) f.push(n + "Jahresverbrauch");
       if (l.zaehlerart === "RLM" && !l.lastgang) f.push(n + "Lastgang");
+      if (l.auslesung && !l.auslesung.bestaetigt) f.push(n + "aus der Abrechnung gelesene Daten bestätigen");
     });
     return f;
   }, [a]);
@@ -4537,6 +4685,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                           onChange={(v) => setL(l.id, "zaehlerart", v)} options={["SLP", "RLM"]} />
                         <Datei mehrere label="Versorgerabrechnung (PDF oder Foto)" datei={l.abrechnung} annehmen="application/pdf,image/*"
                           onSet={(f) => setL(l.id, "abrechnung", f)} hinweis="PDF oder Foto hochladen" />
+                        <AbrechnungAuslesen l={l} setL={setL} user={user} />
                         <div className="sm:col-span-2 p-3 rounded"
                              style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
                           <label className="flex items-center gap-3 text-sm">
