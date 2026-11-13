@@ -892,6 +892,8 @@ const leereLieferstelle = (medium) => ({
   adresseVon: "kunde",
   kundennummer: "",
   versorgerVon: "manuell",
+  vertragsendeAlt: "", /* Vertrag beim bisherigen Versorger läuft bis (ISO-Datum) */
+  kuendigungsfrist: "",
   neueinzug: false,
   gewerbeanmeldung: null,
   pachtvertrag: null,
@@ -971,6 +973,8 @@ const ABRECHNUNG_FELDER = [
   { k: "zaehlernummer", label: "Zählernummer" },
   { k: "maloId", label: "Marktlokations-ID (MaLo)" },
   { k: "verbrauch", label: "Jahresverbrauch in kWh" },
+  { k: "vertragsendeAlt", label: "Vertrag läuft bis" },
+  { k: "kuendigungsfrist", label: "Kündigungsfrist" },
 ];
 function abrechnungAuswerten(roh, versorgerNamen = []) {
   const text = String(roh || "").replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ");
@@ -999,6 +1003,14 @@ function abrechnungAuswerten(roh, versorgerNamen = []) {
   }
   const gross = werte.filter((x) => x > 0 && x < 1e9);
   if (gross.length) w.verbrauch = String(Math.max(...gross));
+  /* Vertragsende: Datum nach „Vertragslaufzeit/Vertragsende/Mindestlaufzeit … bis“, nicht Preisgarantie */
+  const ende = flach.match(/(?:Vertrags(?:laufzeit|ende)|Mindest(?:vertrags)?laufzeit|Erstlaufzeit|Vertrag läuft|vertraglich gebunden|Laufzeit)(?:(?!Preisgarantie|Preisbindung)[^.]){0,60}?(?:bis(?: zum| einschließlich)?|:|endet am)\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/i);
+  if (ende) {
+    const jahr = ende[3].length === 2 ? "20" + ende[3] : ende[3];
+    w.vertragsendeAlt = jahr + "-" + ende[2].padStart(2, "0") + "-" + ende[1].padStart(2, "0");
+  }
+  const frist = flach.match(/K(?:ü|ue|u)ndigungsfrist\s*[:.]?\s*(?:von\s*|beträgt\s*)?(\d+\s*(?:Monat(?:e|en)?|Woche(?:n)?|Tag(?:e|en)?)(?:\s*(?:zum|vor)\s*(?:Vertragsende|Monatsende|Ende der (?:Vertrags)?laufzeit|Laufzeitende|Ablauf))?)/i);
+  if (frist) w.kuendigungsfrist = frist[1].replace(/\s+/g, " ");
   /* Versorger: bekannter Name aus der Versorgerliste, sonst „Stadtwerke …“ */
   const klein = flach.toLowerCase();
   const bekannt = versorgerNamen.filter(Boolean)
@@ -2972,6 +2984,8 @@ async function individualAnfragePdf(a, mitarbeiter, anlagen) {
       ["Jahresverbrauch", num(zahlLesen(l.verbrauch) || 0) + " kWh"],
       ["Zählerart", l.zaehlerart], ["Zählernummer", l.zaehlernummer], ["Marktlokations-ID", l.maloId],
       ["Aktueller Versorger", l.neueinzug ? "Neueinzug, kein Vorversorger" : l.versorger],
+      ...(l.vertragsendeAlt ? [["Vertrag läuft bis", datum(l.vertragsendeAlt)]] : []),
+      ...(l.kuendigungsfrist ? [["Kündigungsfrist", l.kuendigungsfrist]] : []),
       ["Lastgang", anl.length ? "Anlage: " + anl.map((x) => x.name).join(", ") : (l.zaehlerart === "RLM" ? "liegt nicht vor" : "–")],
     ], y);
   });
@@ -4271,7 +4285,8 @@ function AbrechnungAuslesen({ l, setL, user }) {
             {ABRECHNUNG_FELDER.filter((f) => au.werte[f.k]).map((f) => (
               <li key={f.k} className="flex flex-wrap gap-x-2">
                 <span style={{ color: C.muted }}>{f.label}:</span>
-                <strong>{f.k === "verbrauch" && zahlLesen(l[f.k]) > 0 ? num(zahlLesen(l[f.k]), 0) : String(l[f.k] || "")}</strong>
+                <strong>{f.k === "verbrauch" && zahlLesen(l[f.k]) > 0 ? num(zahlLesen(l[f.k]), 0)
+                  : f.k === "vertragsendeAlt" && l[f.k] ? datum(l[f.k]) : String(l[f.k] || "")}</strong>
                 {String(l[f.k] || "") !== String(au.werte[f.k]) && (
                   <span className="text-xs" style={{ color: C.muted }}>(von dir geändert, gelesen: {au.werte[f.k]})</span>
                 )}
@@ -4673,6 +4688,14 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                           onChange={(v) => { setL(l.id, "kundennummer", v); setL(l.id, "versorgerVon", "manuell"); }}
                           gesperrt={!!l.neueinzug}
                           placeholder={l.neueinzug ? "entfällt bei Neueinzug" : ""} />
+                        {!l.neueinzug && (
+                          <>
+                            <Feld label="Vertrag beim aktuellen Versorger läuft bis" type="date" value={l.vertragsendeAlt || ""}
+                              onChange={(v) => setL(l.id, "vertragsendeAlt", v)} />
+                            <Feld label="Kündigungsfrist" value={l.kuendigungsfrist || ""}
+                              onChange={(v) => setL(l.id, "kuendigungsfrist", v)} placeholder="z. B. 3 Monate zum Vertragsende" />
+                          </>
+                        )}
                         <Feld label="Zählernummer *" value={l.zaehlernummer}
                           onChange={(v) => setL(l.id, "zaehlernummer", v)} fehler={geprueft && !l.zaehlernummer} />
                         <Feld label="Marktlokations-ID (MaLo) *" value={l.maloId}
@@ -5919,6 +5942,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     v={[l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ")} />
                   <Zeile k="Versorger" v={l.versorger} />
                   <Zeile k="Kundennummer" v={l.kundennummer} />
+                  {l.vertragsendeAlt && <Zeile k="Vertrag läuft bis" v={datum(l.vertragsendeAlt)} />}
+                  {l.kuendigungsfrist && <Zeile k="Kündigungsfrist" v={l.kuendigungsfrist} />}
                   <Zeile k="Jahresverbrauch" v={num(parseFloat(l.verbrauch) || 0) + " kWh"} />
                   <Zeile k="Zählernummer" v={l.zaehlernummer} />
                   <Zeile k="Marktlokations-ID" v={l.maloId} />
