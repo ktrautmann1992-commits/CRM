@@ -457,6 +457,20 @@ const ROLLENFARBE = {
   "Geschäftsführung": "#0A1626",
 };
 /* frühestmöglicher Lieferbeginn: 14 Tage Vorlauf */
+/* Tag nach einem ISO-Datum (ohne Zeitzonenfehler) */
+const tagDanach = (iso) => {
+  const [j, m, t] = String(iso).split("-").map(Number);
+  return new Date(Date.UTC(j, m - 1, t + 1)).toISOString().slice(0, 10);
+};
+/* Automatischer Lieferbeginn: Tag nach dem frühesten Vertragsende beim bisherigen Versorger */
+const lieferbeginnAusVertrag = (a) => {
+  const enden = (a.lieferstellen || []).filter((l) => !l.neueinzug && /^\d{4}-\d{2}-\d{2}$/.test(l.vertragsendeAlt || ""))
+    .map((l) => l.vertragsendeAlt).sort();
+  if (!enden.length) return null;
+  const ziel = tagDanach(enden[0]);
+  return { beginn: ziel < fruehesterBeginn() ? fruehesterBeginn() : ziel, ende: enden[0], verschieden: new Set(enden).size > 1 };
+};
+
 const fruehesterBeginn = () => {
   const d = new Date();
   d.setDate(d.getDate() + 14);
@@ -1003,14 +1017,52 @@ function abrechnungAuswerten(roh, versorgerNamen = []) {
   }
   const gross = werte.filter((x) => x > 0 && x < 1e9);
   if (gross.length) w.verbrauch = String(Math.max(...gross));
-  /* Vertragsende: Datum nach „Vertragslaufzeit/Vertragsende/Mindestlaufzeit … bis“, nicht Preisgarantie */
-  const ende = flach.match(/(?:Vertrags(?:laufzeit|ende)|Mindest(?:vertrags)?laufzeit|Erstlaufzeit|Vertrag läuft|vertraglich gebunden|Laufzeit)(?:(?!Preisgarantie|Preisbindung)[^.]){0,60}?(?:bis(?: zum| einschließlich)?|:|endet am)\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})/i);
-  if (ende) {
-    const jahr = ende[3].length === 2 ? "20" + ende[3] : ende[3];
-    w.vertragsendeAlt = jahr + "-" + ende[2].padStart(2, "0") + "-" + ende[1].padStart(2, "0");
+  /* Vertragsende: Versorger schreiben es sehr unterschiedlich. Gesucht wird ein Datum nach einer
+     Laufzeit-Beschriftung, nicht nach Preisgarantie oder Preisbindung. */
+  const iso = (t, m, j) => (j.length === 2 ? "20" + j : j) + "-" + m.padStart(2, "0") + "-" + t.padStart(2, "0");
+  const DATUM = "(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2,4})";
+  const ENDE_WORT = "Vertragsende|Vertragsablauf|Vertragslaufzeit|Vertragsdauer|Vertragsbindung|Laufzeitende|Erstlaufzeit"
+    + "|Mindest(?:vertrags)?laufzeit|Festlaufzeit|Grundlaufzeit|Laufzeit|Lieferende|Belieferung|Liefervertrag|Vertrag endet"
+    + "|Vertrag läuft|Ende der (?:Vertrags)?laufzeit|gebunden|Ablauf|(?:nächst(?:möglich)?er |frühestmöglicher )?Kündigungstermin"
+    + "|(?:frühestens |erstmals )?kündbar|Kündigung (?:ist )?(?:frühestens )?möglich";
+  const endeRe = new RegExp("(?:" + ENDE_WORT + ")(?:(?!Preisgarantie|Preisbindung|Preisfixierung|Preisgarantiezeit)(?:[^.;]|\\.(?=\\d))){0,60}?"
+    + "(?:bis(?: zum| einschließlich| einschl\\.)?|zum|am|endet am|:)\\s*" + DATUM, "i");
+  /* Datum direkt hinter der Beschriftung („Lieferende 31.03.2027“), bei Zeiträumen das Enddatum */
+  const direktRe = new RegExp("(?:" + ENDE_WORT + ")\\s*[:\\-]?\\s*(?:vom\\s*)?" + DATUM + "(?:\\s*(?:-|–|bis)\\s*" + DATUM + ")?", "i");
+  const ende = flach.match(endeRe);
+  const direkt = flach.match(direktRe);
+  if (direkt && (!ende || direkt.index <= ende.index))
+    w.vertragsendeAlt = direkt[4] ? iso(direkt[4], direkt[5], direkt[6]) : iso(direkt[1], direkt[2], direkt[3]);
+  else if (ende) w.vertragsendeAlt = iso(ende[1], ende[2], ende[3]);
+  else {
+    /* Laufzeit in Monaten ab Vertrags- oder Lieferbeginn */
+    const monate = flach.match(/(?:Vertrags)?(?:laufzeit|dauer)|Erstlaufzeit|Mindestlaufzeit/i)
+      && flach.match(/(?:Vertragslaufzeit|Laufzeit|Erstlaufzeit|Mindest(?:vertrags)?laufzeit|Vertragsdauer)\s*[:.]?\s*(?:von\s*|beträgt\s*)?(\d{1,2})\s*Monat/i);
+    const beginn = flach.match(new RegExp("(?:Vertragsbeginn|Lieferbeginn|Beginn der Belieferung|Belieferung seit|Lieferung ab|beliefert seit)\\s*(?:am|ab|:)?\\s*" + DATUM, "i"));
+    const ab = flach.match(new RegExp("(\\d{1,2})\\s*Monat(?:e|en)?\\s*(?:ab|beginnend am|seit)\\s*(?:dem\\s*)?" + DATUM, "i"));
+    const [anzahl, t0, m0, j0] = ab ? [ab[1], ab[2], ab[3], ab[4]] : monate && beginn ? [monate[1], beginn[1], beginn[2], beginn[3]] : [];
+    if (anzahl) {
+      const j = Number(j0.length === 2 ? "20" + j0 : j0);
+      const d = new Date(Date.UTC(j, Number(m0) - 1 + Number(anzahl), Number(t0) - 1));
+      w.vertragsendeAlt = d.toISOString().slice(0, 10);
+    }
   }
-  const frist = flach.match(/K(?:ü|ue|u)ndigungsfrist\s*[:.]?\s*(?:von\s*|beträgt\s*)?(\d+\s*(?:Monat(?:e|en)?|Woche(?:n)?|Tag(?:e|en)?)(?:\s*(?:zum|vor)\s*(?:Vertragsende|Monatsende|Ende der (?:Vertrags)?laufzeit|Laufzeitende|Ablauf))?)/i);
-  if (frist) w.kuendigungsfrist = frist[1].replace(/\s+/g, " ");
+  /* Kündigungsfrist in ihren üblichen Formulierungen, Zahlwörter werden zu Ziffern */
+  const ZAHL = { ein: 1, einem: 1, einen: 1, einer: 1, eines: 1, zwei: 2, drei: 3, vier: 4, fünf: 5, sechs: 6, acht: 8, zwölf: 12 };
+  const frist = flach.match(/(?:K(?:ü|ue|u)ndigungsfrist|Einhaltung einer Frist von|mit einer Frist von|Frist von|K(?:ü|ue|u)ndigung[^.;]{0,50}?spätestens|Frist)\s*[:.]?\s*(?:von\s*|beträgt\s*|jeweils\s*)?(\d{1,2}|ein(?:em|en|er|es)?|zwei|drei|vier|fünf|sechs|acht|zwölf)\s*(Monat(?:e|en)?|Woche(?:n)?|Tag(?:e|en)?)((?:\s*(?:zum|vor(?: dem| Ablauf(?: der)?)?)\s*(?:Vertragsende|Monatsende|Ende der (?:Vertrags|Erst)?laufzeit|Laufzeitende|Ablauf(?: der (?:Vertrags)?laufzeit)?|Lieferende|Vertragsablauf|jeweiligen Vertragsende))?)/i);
+  if (frist) {
+    const n = /^\d+$/.test(frist[1]) ? Number(frist[1]) : ZAHL[frist[1].toLowerCase()] || frist[1];
+    let einheit = frist[2].toLowerCase().startsWith("monat") ? (n === 1 ? "Monat" : "Monate")
+      : frist[2].toLowerCase().startsWith("woche") ? (n === 1 ? "Woche" : "Wochen") : (n === 1 ? "Tag" : "Tage");
+    w.kuendigungsfrist = (n + " " + einheit + (frist[3] ? " " + frist[3].trim() : "")).replace(/\s+/g, " ");
+  }
+  /* Automatische Verlängerung gehört zur Frist dazu */
+  const verl = flach.match(/verlängert sich[^.;]{0,40}?um (?:jeweils )?(?:weitere )?(\d{1,2}|ein(?:en)?|zwölf) (Monat(?:e)?|Jahr(?:e)?)/i)
+    || flach.match(/verlängert sich[^.;]{0,40}?(auf unbestimmte Zeit)/i);
+  if (verl) {
+    const txt = verl[2] ? "verlängert sich um " + (/^\d+$/.test(verl[1]) ? verl[1] : ZAHL[verl[1].toLowerCase()] || verl[1]) + " " + verl[2] : "verlängert sich auf unbestimmte Zeit";
+    w.kuendigungsfrist = w.kuendigungsfrist ? w.kuendigungsfrist + "; " + txt : txt;
+  }
   /* Versorger: bekannter Name aus der Versorgerliste, sonst „Stadtwerke …“ */
   const klein = flach.toLowerCase();
   const bekannt = versorgerNamen.filter(Boolean)
@@ -4326,6 +4378,12 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
     });
   const setL = (id, k, v) =>
     setA((z) => ({ ...z, lieferstellen: z.lieferstellen.map((l) => (l.id === id ? { ...l, [k]: v } : l)) }));
+  /* Lieferbeginn folgt dem Vertragsende, solange er nicht von Hand geändert wurde */
+  const autoBeginn = lieferbeginnAusVertrag(a);
+  useEffect(() => {
+    if (autoBeginn && a.lieferbeginnVon !== "manuell" && a.wunschLieferbeginn !== autoBeginn.beginn)
+      setA((z) => ({ ...z, wunschLieferbeginn: autoBeginn.beginn }));
+  }, [autoBeginn && autoBeginn.beginn, a.lieferbeginnVon]);
   const adresseSetzen = (id, quelle) => {
     setA((v) => ({
       ...v,
@@ -4813,7 +4871,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                 <Feld label="Gewünschter Lieferbeginn" type="date" value={a.wunschLieferbeginn || ""}
                   min={fruehesterBeginn()}
                   fehler={!!a.wunschLieferbeginn && a.wunschLieferbeginn < fruehesterBeginn()}
-                  onChange={(v) => setA({ ...a, wunschLieferbeginn: v })} />
+                  onChange={(v) => setA({ ...a, wunschLieferbeginn: v, lieferbeginnVon: "manuell" })} />
                 {a.laufzeitArt === "ende" ? (
                   <Feld label="Gewünschtes Lieferende" type="date" value={a.wunschLieferende || ""}
                     onChange={(v) => setA({ ...a, wunschLieferende: v })} />
@@ -4833,6 +4891,20 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                   ? " Ergibt " + num(monateZwischen(a.wunschLieferbeginn, a.wunschLieferende) || 0) + " Monate."
                   : ""}
               </p>
+              {autoBeginn && (
+                <p className="text-xs mt-2" style={{ color: autoBeginn.verschieden ? C.gas : C.muted }}>
+                  {a.lieferbeginnVon === "manuell" && a.wunschLieferbeginn !== autoBeginn.beginn ? (
+                    <>
+                      Von dir geändert. Nach dem Vertragsende ({datum(autoBeginn.ende)}) wäre der Lieferbeginn der {datum(autoBeginn.beginn)}.{" "}
+                      <button className="underline" style={{ color: C.strom }}
+                        onClick={() => setA({ ...a, wunschLieferbeginn: autoBeginn.beginn, lieferbeginnVon: "" })}>Wieder automatisch</button>
+                    </>
+                  ) : (
+                    <>Automatisch gesetzt: ein Tag nach dem Vertragsende beim aktuellen Versorger ({datum(autoBeginn.ende)}).</>
+                  )}
+                  {autoBeginn.verschieden && " Achtung: Die Lieferstellen haben unterschiedliche Vertragsenden; maßgeblich ist hier das früheste. Bitte bei der Anfrage vermerken."}
+                </p>
+              )}
             </div>
 
             <div>
@@ -10973,6 +11045,26 @@ function Glocke({ meldungen, gelesen, aufGelesen, aufSpringen }) {
   );
 }
 
+/* Umkreissuche: Mittelpunkte aller deutschen Postleitzahlen (GeoNames, CC BY 4.0), erst bei Bedarf geladen.
+   PLZ_STAND hier und in build.mjs gleich halten. */
+const PLZ_STAND = "1";
+let plzLaden = null;
+const ladePlz = () => {
+  if (!plzLaden)
+    plzLaden = fetch("/assets/plz-de-" + PLZ_STAND + ".json").then((r) => {
+      if (!r.ok) throw new Error("Die Postleitzahlen konnten nicht geladen werden.");
+      return r.json();
+    }).then((j) => j.plz).catch((e) => { plzLaden = null; throw e; });
+  return plzLaden;
+};
+const plzVon = (e) => String(e.plz || (String(e.adresse || "").match(/\b\d{5}\b/) || [""])[0]).trim();
+/* Luftlinie in km zwischen zwei Punkten [Breite, Länge] */
+const luftlinie = (a, b) => {
+  const r = Math.PI / 180, dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+};
+
 /* Akquise-Tool: Kontaktlisten je Branche abtelefonieren */
 /* Listen können mehreren Partnern zugewiesen sein.
    Ältere Listen mit einer einzelnen Zuweisung werden mitgelesen. */
@@ -11017,8 +11109,42 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin, lead
     l.eintraege.map((e) => ({ ...e, listeId: l.id, branche: e.branche || l.branche })))
     .filter((e) => !branche || e.branche === branche);
   const uebernommen = alleEintraege.filter((e) => e.status === "kunde");
-  const eintraege = zeigeUebernommene ? alleEintraege
+  const eintraegeOhneUmkreis = zeigeUebernommene ? alleEintraege
     : alleEintraege.filter((e) => e.status !== "kunde");
+
+  /* Umkreis: Mittelpunkt aus PLZ oder Handy-Standort, Entfernung je Kontakt über dessen PLZ */
+  const umkreisSchluessel = "egc-umkreis:" + user.id;
+  const [umkreis, setUmkreisRoh] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(umkreisSchluessel)) || null; } catch (e) { return null; }
+  });
+  const setUmkreis = (u) => {
+    setUmkreisRoh(u);
+    try { localStorage.setItem(umkreisSchluessel, JSON.stringify(u)); } catch (e) { /* ohne Speicher weiter */ }
+  };
+  const [plzDaten, setPlzDaten] = useState(null);
+  const [umkreisMeldung, setUmkreisMeldung] = useState("");
+  const umkreisAn = !!(umkreis && umkreis.aktiv);
+  useEffect(() => {
+    if (umkreisAn && !plzDaten) ladePlz().then(setPlzDaten).catch((e) => setUmkreisMeldung(e.message));
+  }, [umkreisAn, plzDaten]);
+  const mitte = !umkreisAn || !plzDaten ? null
+    : umkreis.quelle === "standort" && umkreis.lat ? [umkreis.lat, umkreis.lon]
+    : plzDaten[String(umkreis.plz || "").trim()] || null;
+  const ohneOrt = mitte ? eintraegeOhneUmkreis.filter((e) => !plzDaten[plzVon(e)]).length : 0;
+  const eintraege = !mitte ? eintraegeOhneUmkreis
+    : eintraegeOhneUmkreis
+      .map((e) => ({ ...e, km: plzDaten[plzVon(e)] ? luftlinie(mitte, plzDaten[plzVon(e)]) : null }))
+      .filter((e) => e.km !== null && e.km <= (umkreis.km || 50))
+      .sort((x, y) => x.km - y.km);
+  const standortHolen = () => {
+    setUmkreisMeldung("");
+    if (!navigator.geolocation) { setUmkreisMeldung("Dieses Gerät gibt keinen Standort heraus. Bitte die PLZ eingeben."); return; }
+    setUmkreisMeldung("Standort wird ermittelt …");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setUmkreis({ ...umkreis, aktiv: true, quelle: "standort", lat: pos.coords.latitude, lon: pos.coords.longitude }); setUmkreisMeldung(""); },
+      () => setUmkreisMeldung("Der Standort wurde nicht freigegeben. Bitte die PLZ eingeben oder die Standortfreigabe für den Browser erlauben."),
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 });
+  };
   const empfaenger = mitarbeiter.filter((m) =>
     ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb"].includes(m.rolle) && m.status === "aktiv");
 
@@ -11302,6 +11428,47 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin, lead
            style={{ background: C.card, border: "1px solid " + C.line }}>
         <Select label="Branche" value={branche} onChange={setBranche}
           options={[{ value: "", label: "Alle Branchen" }, ...branchen]} />
+        <div className="sm:col-span-2 rounded p-3" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={umkreisAn} style={{ accentColor: C.strom }}
+              onChange={(e) => setUmkreis({ km: 50, quelle: "plz", plz: (user.stammdaten && user.stammdaten.plz) || "", ...(umkreis || {}), aktiv: e.target.checked })} />
+            Nur Kontakte im Umkreis anzeigen
+          </label>
+          {umkreisAn && (
+            <div className="mt-3 space-y-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="block">
+                  <span className="block text-xs mb-1" style={{ color: C.muted }}>Postleitzahl</span>
+                  <input value={umkreis.quelle === "standort" ? "" : (umkreis.plz || "")} inputMode="numeric" maxLength={5}
+                    placeholder={umkreis.quelle === "standort" ? "Standort" : "z. B. 76870"}
+                    onChange={(e) => setUmkreis({ ...umkreis, quelle: "plz", plz: e.target.value.replace(/\D/g, "").slice(0, 5) })}
+                    className="w-28 px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line, background: "#fff" }} />
+                </label>
+                <button onClick={standortHolen} className="px-3 py-2 rounded text-sm"
+                  style={{ border: "1px solid " + (umkreis.quelle === "standort" ? C.strom : C.line), background: "#fff",
+                           color: umkreis.quelle === "standort" ? C.strom : C.text }}>
+                  Mein Standort
+                </button>
+              </div>
+              <label className="block">
+                <span className="block text-xs mb-1" style={{ color: C.muted }}>Umkreis: <strong style={{ color: C.text }}>{umkreis.km || 50} km</strong></span>
+                <input type="range" min={5} max={150} step={5} value={umkreis.km || 50} className="w-full"
+                  onChange={(e) => setUmkreis({ ...umkreis, km: Number(e.target.value) })} style={{ accentColor: C.strom }} />
+              </label>
+              <p className="text-xs" style={{ color: umkreisMeldung ? C.warn : C.muted }}>
+                {umkreisMeldung
+                  || (!plzDaten ? "Postleitzahlen werden geladen …"
+                    : !mitte ? "Diese Postleitzahl ist nicht bekannt. Bitte prüfen."
+                    : eintraege.length + " Kontakte im Umkreis von " + (umkreis.km || 50) + " km"
+                      + (umkreis.quelle === "standort" ? " um deinen Standort" : " um " + umkreis.plz)
+                      + ", nach Entfernung sortiert" + (ohneOrt ? "; " + ohneOrt + " ohne erkennbare PLZ ausgeblendet" : "") + ".")}
+              </p>
+              <p className="text-xs" style={{ color: C.muted }}>
+                Luftlinie zum Mittelpunkt der Postleitzahl, auf wenige Kilometer genau. Postleitzahlen: GeoNames (geonames.org), CC BY 4.0.
+              </p>
+            </div>
+          )}
+        </div>
         <div className="flex flex-wrap items-end gap-x-4 gap-y-2 text-xs" style={{ color: C.muted }}>
           <span>{eintraege.length} Kontakte</span>
           <span style={{ color: C.strom }}>{zahl("kontakt")} in Kontakt</span>
@@ -11346,7 +11513,7 @@ function Akquise({ listen, setListen, user, mitarbeiter, onKunde, onTermin, lead
                       <span className="text-sm" style={{ color: C.strom }}>{e.firma}</span>
                     </button>
                     <div className="text-xs mt-1" style={{ color: C.muted }}>
-                      {[e.ansprechpartner && (e.ansprechpartner + (e.position ? " (" + e.position + ")" : "")), e.adresse, e.branche].filter(Boolean).join(" · ")}
+                      {[e.km != null && (e.km < 2 ? "unter 2 km" : Math.round(e.km) + " km"), e.ansprechpartner && (e.ansprechpartner + (e.position ? " (" + e.position + ")" : "")), e.adresse, e.branche].filter(Boolean).join(" · ")}
                     </div>
                     <div className="flex flex-wrap gap-3 mt-2">
                       {e.telefon && (

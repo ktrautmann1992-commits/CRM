@@ -82,6 +82,9 @@ await cp("druckvorlagen/broschuere/schrift/LiberationSans-Bold.ttf", bz + "/Libe
    Bei neuem Bestand STROM_STAND hier und in App.jsx ändern. */
 const STROM_STAND = "2026-11-12";
 await cp("daten/strom-de-lu.json", "dist/assets/strom-de-lu-" + STROM_STAND + ".json");
+/* Postleitzahl-Mittelpunkte für die Umkreissuche (GeoNames, CC BY 4.0). Bei neuem Bestand PLZ_STAND hier und in App.jsx erhöhen. */
+const PLZ_STAND = "1";
+await cp("daten/plz-de.json", "dist/assets/plz-de-" + PLZ_STAND + ".json");
 
 await cp("manifest.json", "dist/manifest.json");
 await cp("icon-192.png", "dist/icon-192.png");
