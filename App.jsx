@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.33 · 13.11.2026 · Mehrere Dateien je Feld, Kontaktlisten mit Ansprechpartner, Abrechnung auslesen, Bautest";
+const VERSION = "v5.34 · 14.11.2026 · Hinweis an den Vertriebspartner, Umlagen-Ausgleich bei älteren Abrechnungen";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -908,6 +908,7 @@ const leereLieferstelle = (medium) => ({
   versorgerVon: "manuell",
   vertragsendeAlt: "", /* Vertrag beim bisherigen Versorger läuft bis (ISO-Datum) */
   kuendigungsfrist: "",
+  abrechnungJahr: "", /* Jahr der hochgeladenen Abrechnung, für den Umlagen-Ausgleich im Vergleich */
   neueinzug: false,
   gewerbeanmeldung: null,
   pachtvertrag: null,
@@ -989,6 +990,7 @@ const ABRECHNUNG_FELDER = [
   { k: "verbrauch", label: "Jahresverbrauch in kWh" },
   { k: "vertragsendeAlt", label: "Vertrag läuft bis" },
   { k: "kuendigungsfrist", label: "Kündigungsfrist" },
+  { k: "abrechnungJahr", label: "Abrechnung aus dem Jahr" },
 ];
 function abrechnungAuswerten(roh, versorgerNamen = []) {
   const text = String(roh || "").replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ");
@@ -1056,6 +1058,9 @@ function abrechnungAuswerten(roh, versorgerNamen = []) {
       : frist[2].toLowerCase().startsWith("woche") ? (n === 1 ? "Woche" : "Wochen") : (n === 1 ? "Tag" : "Tage");
     w.kuendigungsfrist = (n + " " + einheit + (frist[3] ? " " + frist[3].trim() : "")).replace(/\s+/g, " ");
   }
+  /* Jahr der Abrechnung: Ende des Abrechnungszeitraums (bestimmt die darin enthaltenen Umlagen) */
+  const zr = flach.match(/(?:Abrechnungszeitraum|Abrechnungsperiode|Rechnungszeitraum|Verbrauchszeitraum|Abrechnung für den Zeitraum)\s*[:.]?\s*(?:vom\s*)?\d{1,2}\.\d{1,2}\.(\d{2,4})\s*(?:-|–|bis)\s*\d{1,2}\.\d{1,2}\.(\d{2,4})/i);
+  if (zr) { const j = zr[2].length === 2 ? "20" + zr[2] : zr[2]; if (Number(j) >= 2020 && Number(j) <= 2040) w.abrechnungJahr = j; }
   /* Automatische Verlängerung gehört zur Frist dazu */
   const verl = flach.match(/verlängert sich[^.;]{0,40}?um (?:jeweils )?(?:weitere )?(\d{1,2}|ein(?:en)?|zwölf) (Monat(?:e)?|Jahr(?:e)?)/i)
     || flach.match(/verlängert sich[^.;]{0,40}?(auf unbestimmte Zeit)/i);
@@ -2505,6 +2510,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const sparten = (v.sparte && v.sparte !== "beide") ? [v.sparte]
     : ["strom", "gas"].filter((s) => a.lieferstellen.some((l) => l.medium === s));
   let summeAlt = 0, summeNeu = 0, mitVergleich = false;
+  const ausgleiche = []; /* je Lieferstelle mit älterer Abrechnung: Umlagen-Ausgleich für den Hinweis */
 
   for (const sparte of sparten) {
     const stellen = a.lieferstellen.filter((l) => l.medium === sparte);
@@ -2569,7 +2575,11 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       const pr = (v.preise || {})[l.id] || {};
       const neuA = zahlLesen(pr.arbeit), neuE = zahlLesen(pr.energie), neuG = zahlLesen(pr.grundpreis);
       const vv = vorversorger[l.id] || {};
-      const alt = altPreis(vv);
+      const altRoh = altPreis(vv);
+      /* Ältere Abrechnung: bisherigen Arbeitspreis um die gestiegenen Umlagen erhöhen, damit der Vergleich fair ist */
+      const aus = altRoh ? umlagenAusgleich(vv, l, v.umlagen) : null;
+      const alt = altRoh && aus ? { ...altRoh, arbeitAbrechnung: altRoh.arbeit, arbeit: altRoh.arbeit + aus.diff } : altRoh;
+      if (aus) ausgleiche.push(aus);
       const menge = zahlLesen(l.verbrauch) || 0;
       /* ohne neuen Arbeitspreis keine Kosten und keine Ersparnis für diese Lieferstelle */
       const kostenNeu = isNaN(neuA) ? null : (isNaN(neuG) ? 0 : neuG) + neuA / 100 * menge;
@@ -2582,6 +2592,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       const zeilen = [
         ["Versorger", vv.versorger || l.versorger || "–", v.versorger || "–", "–"],
         ["Arbeitspreis (ct/kWh)", alt ? ct(alt.arbeit) : "–", ct(neuA), alt && !isNaN(neuA) ? ct(alt.arbeit - neuA) : "–"],
+        ...(aus ? [["      laut Abrechnung " + aus.jahr, ct(alt.arbeitAbrechnung), "–", "–"],
+          ["      + Umlagen " + aus.ziel + " statt " + aus.jahr, (aus.diff >= 0 ? "+" : "") + ct3(aus.diff), "–", "–"]] : []),
         ...(!isNaN(neuE) ? [["davon Energiepreis (ct/kWh)", "–", ct(neuE), "–"]] : []),
         ...(!isNaN(neuE) && !isNaN(teile.umlage) ? [["davon staatl. Umlagen und Abgaben (ct/kWh)", "–", ct3(teile.umlage), "–"],
           ...(teile.umlagenTeile.length > 1 ? teile.umlagenTeile.map((x) => ["      " + x.name, "–", ct3(zahlLesen(x.wert)), "–"]) : [])] : []),
@@ -2662,8 +2674,27 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     y += bh + 7;
     summeAlt = 0; summeNeu = 0; mitVergleich = false;
 
-    if (v.bemerkung) {
-      y = ueberschrift("Hinweise zum Angebot", RA, y + 2); farbe(TEXT); y = absatz(v.bemerkung, RA, y, BR) + 2;
+    /* Hinweis zu den staatlichen Umlagen: immer, sobald das Angebot im Jahr der hinterlegten Umlagen liefert */
+    const qU = v.umlagen || UMLAGEN, zielJ = umlagenJahr(qU);
+    const ausSp = ausgleiche.filter((x) => x.sparte === sparte);
+    const lieferJ = v.lieferbeginn ? Number(String(v.lieferbeginn).slice(0, 4)) : Number(zielJ);
+    const uSumme = umlageSumme(qU, sparte);
+    const umlagenText = (ausSp.length || lieferJ >= Number(zielJ)) && !isNaN(uSumme)
+      ? "Dieses Angebot berücksichtigt bereits die ab dem 01.01." + zielJ + " geltenden staatlichen Umlagen und Abgaben für " + name
+        + " von zusammen " + ct3(uSumme) + " netto."
+        + (ausSp.length
+          ? " Ihre Abrechnung aus " + [...new Set(ausSp.map((x) => x.jahr))].join(" bzw. ") + " enthält noch die damals gültigen Umlagen und Abgaben ("
+            + [...new Set(ausSp.map((x) => ct3(x.alt)))].join(" bzw. ") + "). Für einen fairen Vergleich haben wir Ihren bisherigen Arbeitspreis um die Differenz von "
+            + [...new Set(ausSp.map((x) => (x.diff >= 0 ? "+" : "") + ct3(x.diff)))].join(" bzw. ") + " angepasst."
+          : "")
+        + " Der Gesamtjahresbetrag kann deshalb von Ihrer aktuellen Abrechnung abweichen, da "
+        + (ausSp.length && ausSp.every((x) => x.diff > 0) ? "die staatlichen Umlagen und Abgaben gestiegen sind." : "sich die staatlichen Umlagen und Abgaben geändert haben.")
+      : "";
+    const hinweise = [v.bemerkung, umlagenText].filter(Boolean);
+    if (hinweise.length) {
+      if (y + 20 > H - 22) y = seite();
+      y = ueberschrift("Hinweise zum Angebot", RA, y + 2); farbe(TEXT);
+      hinweise.forEach((h) => { y = absatz(h, RA, y, BR) + 2; });
     }
 
     /* Leistungen, Hinweis, Ansprechpartner, Annahme */
@@ -3484,6 +3515,28 @@ const UMLAGEN_VORGABE = {
           ["Stromsteuer", "2,05"], ["Konzessionsabgabe", "0,11"]],
   gas: [["Energiesteuer", "0,55"], ["Konvertierungsumlage", "0,018"], ["Konzessionsabgabe", "0,03"]],
 };
+/* Umlagen früherer Jahre, damit eine alte Abrechnung fair mit dem Angebot verglichen werden kann.
+   Vorgabewerte (Summen ct/kWh netto); die Kalkulation prüft und pflegt sie unter „Staatliche Umlagen“.
+   Strom 2025: KWKG 0,277 + Offshore 0,816 + bes. Netznutzung 1,558 + Stromsteuer 2,05 + KA 0,11
+   Strom 2026: KWKG 0,446 + Offshore 0,941 + bes. Netznutzung 1,559 + Stromsteuer 2,05 + KA 0,11
+   Erdgas 2025: Energiesteuer 0,55 + Gasspeicherumlage 0,299 + KA 0,03; Erdgas 2026: ohne Gasspeicherumlage */
+const UMLAGEN_JAHR_VORGABE = "2027";
+const UMLAGEN_VORJAHRE_VORGABE = { "2025": { strom: "4,811", gas: "0,879" }, "2026": { strom: "5,106", gas: "0,58" } };
+const umlagenJahr = (q) => String((q && q.jahr) || UMLAGEN_JAHR_VORGABE);
+const umlagenVorjahre = (q) => ({ ...UMLAGEN_VORJAHRE_VORGABE, ...((q && q.vorjahre) || {}) });
+/* Jahr der Abrechnung einer Lieferstelle: von der Kalkulation gesetzt, sonst vom Vertriebspartner angegeben */
+const abrechnungsJahrVon = (vv, l) => (vv && vv.jahr !== undefined ? vv.jahr : (l && l.abrechnungJahr) || "");
+/* Ausgleich: Umlagen des Angebotsjahres minus Umlagen des Abrechnungsjahres (ct/kWh) */
+function umlagenAusgleich(vv, l, umlagen) {
+  const q = umlagen || UMLAGEN;
+  const jahr = abrechnungsJahrVon(vv, l), ziel = umlagenJahr(q);
+  if (!jahr || Number(jahr) >= Number(ziel)) return null;
+  const sparte = l.medium === "gas" ? "gas" : "strom";
+  const neu = umlageSumme(q, sparte), alt = zahlLesen((umlagenVorjahre(q)[jahr] || {})[sparte]);
+  if (isNaN(neu) || isNaN(alt)) return null;
+  return { jahr, ziel, alt, neu, diff: neu - alt, sparte };
+}
+
 /* Bestandteile einer Sparte: einzeln hinterlegt, sonst ein Sammelwert, sonst leer */
 const umlageTeile = (quelle, sparte) => {
   const q = quelle || {};
@@ -3946,6 +3999,12 @@ function PdfBetrachter({ datei, onSchliessen }) {
   const flaeche = React.useRef(null);
   const [stand, setStand] = useState("Wird geladen …");
   const [seiten, setSeiten] = useState(0);
+  const [fehler, setFehler] = useState(false);
+  /* Ausweg, wenn die Anzeige im Portal scheitert: mit dem PDF-Programm des Geräts öffnen */
+  const imGeraetOeffnen = () => {
+    if (!datei.url && datei.pfad) { abgelegteOeffnen(datei); return; }
+    try { const u = URL.createObjectURL(blobVon(datei)); if (!window.open(u, "_blank")) location.href = u; } catch (e) { dateiLaden(datei); }
+  };
   useEffect(() => {
     let abbruch = false;
     (async () => {
@@ -3971,7 +4030,13 @@ function PdfBetrachter({ datei, onSchliessen }) {
           ziel.appendChild(c);
           await seite.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
         }
-      } catch (e) { if (!abbruch) setStand("Die PDF konnte nicht angezeigt werden: " + ((e && e.message) || e)); }
+      } catch (e) {
+        if (!abbruch) {
+          setFehler(true);
+          setStand("Die PDF konnte im Portal nicht angezeigt werden (" + ((e && (e.name || e.message)) || e) + ")."
+            + " Die Datei ist trotzdem gespeichert. Öffne sie mit dem PDF-Programm des Geräts oder lade sie herunter.");
+        }
+      }
     })();
     return () => { abbruch = true; };
   }, [datei]);
@@ -3989,7 +4054,17 @@ function PdfBetrachter({ datei, onSchliessen }) {
         </button>
       </div>
       <div ref={flaeche} style={{ flex: 1, overflowY: "auto", padding: "12px 8px", WebkitOverflowScrolling: "touch" }}>
-        {stand && <p className="text-sm text-center mt-10" style={{ color: "#fff" }}>{stand}</p>}
+        {stand && <p className="text-sm text-center mt-10 mx-auto" style={{ color: "#fff", maxWidth: "46ch" }}>{stand}</p>}
+        {fehler && (
+          <div className="flex flex-wrap justify-center gap-2 mt-4">
+            <button onClick={imGeraetOeffnen} className="px-4 py-2 rounded text-sm" style={{ background: "#fff", color: C.ink }}>
+              Mit dem Gerät öffnen
+            </button>
+            <button onClick={() => dateiLaden(datei)} className="px-4 py-2 rounded text-sm" style={{ background: C.inkSoft, color: "#fff" }}>
+              Herunterladen
+            </button>
+          </div>
+        )}
       </div>
     </div>,
     document.body
@@ -4767,6 +4842,12 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                         <Datei mehrere label="Versorgerabrechnung (PDF oder Foto)" datei={l.abrechnung} annehmen="application/pdf,image/*"
                           onSet={(f) => setL(l.id, "abrechnung", f)} hinweis="PDF oder Foto hochladen" />
                         <AbrechnungAuslesen l={l} setL={setL} user={user} />
+                        {!l.neueinzug && (
+                          <Select label="Abrechnung aus dem Jahr" value={l.abrechnungJahr || ""}
+                            onChange={(v) => setL(l.id, "abrechnungJahr", v)}
+                            options={[{ value: "", label: "bitte wählen" }, { value: "2025", label: "2025" },
+                                      { value: "2026", label: "2026" }, { value: "2027", label: "2027" }]} />
+                        )}
                         <div className="sm:col-span-2 p-3 rounded"
                              style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
                           <label className="flex items-center gap-3 text-sm">
@@ -5146,13 +5227,16 @@ function UmlagenPflege({ user }) {
     strom: (umlageTeile(UMLAGEN, "strom").length && UMLAGEN.teile ? umlageTeile(UMLAGEN, "strom") : UMLAGEN_VORGABE.strom.map(([name, wert]) => ({ name, wert }))).map((t) => ({ ...t, id: uid() })),
     gas: (umlageTeile(UMLAGEN, "gas").length && UMLAGEN.teile ? umlageTeile(UMLAGEN, "gas") : UMLAGEN_VORGABE.gas.map(([name, wert]) => ({ name, wert }))).map((t) => ({ ...t, id: uid() })),
     notiz: UMLAGEN.notiz || "",
+    jahr: umlagenJahr(UMLAGEN),
+    vorjahre: JSON.parse(JSON.stringify(umlagenVorjahre(UMLAGEN))),
   });
   const [w, setW] = useState(start);
   const [offen, setOffen] = useState(false);
   const [hinweis, setHinweis] = useState("");
   const [laeuft, setLaeuft] = useState(false);
   const ok = (x) => !isNaN(zahlLesen(x));
-  const alleOk = ["strom", "gas"].every((sp) => w[sp].every((t) => t.name.trim() && ok(t.wert)));
+  const alleOk = ["strom", "gas"].every((sp) => w[sp].every((t) => t.name.trim() && ok(t.wert)))
+    && /^\d{4}$/.test(String(w.jahr)) && Object.values(w.vorjahre || {}).every((x) => ok(x.strom) && ok(x.gas));
   const summe = (sp) => w[sp].reduce((t, x) => t + (zahlLesen(x.wert) || 0), 0);
   const setTeil = (sp, id, k, v) => setW({ ...w, [sp]: w[sp].map((t) => (t.id === id ? { ...t, [k]: v } : t)) });
   const speichern = async () => {
@@ -5160,7 +5244,7 @@ function UmlagenPflege({ user }) {
     const teile = { strom: w.strom.map(({ name, wert }) => ({ name: name.trim(), wert: String(wert).trim() })),
                     gas: w.gas.map(({ name, wert }) => ({ name: name.trim(), wert: String(wert).trim() })) };
     const wert = { teile, strom: num(summe("strom"), 3), gas: num(summe("gas"), 3), notiz: String(w.notiz || "").trim(),
-                   stand: heute(), von: user.name };
+                   jahr: String(w.jahr), vorjahre: w.vorjahre, stand: heute(), von: user.name };
     const f = await einstellungSpeichern("umlagen", wert);
     if (f) setHinweis("Nicht gespeichert: " + f);
     else { setzeUmlagen(wert); setHinweis("Gespeichert. Gilt ab jetzt für jede neue Kalkulation."); }
@@ -5203,13 +5287,41 @@ function UmlagenPflege({ user }) {
                 onClick={() => setW({ ...w, [sp]: [...w[sp], { id: uid(), name: "", wert: "" }] })}>+ Bestandteil hinzufügen</button>
             </div>
           ))}
+          <div>
+            <div className="text-xs mb-1" style={{ color: C.muted }}>
+              Diese Umlagen gelten ab dem Lieferjahr
+            </div>
+            <input value={w.jahr} inputMode="numeric" maxLength={4} onChange={(e) => setW({ ...w, jahr: e.target.value.replace(/\D/g, "") })}
+              className="w-24 px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line, background: "#fff" }} />
+          </div>
+          <div>
+            <div className="text-xs mb-1" style={{ color: C.muted }}>
+              Umlagen früherer Jahre (Summe ct/kWh) für den Vergleich mit älteren Abrechnungen. Vorgabewerte bitte prüfen.
+            </div>
+            <div className="space-y-2">
+              {Object.keys(w.vorjahre || {}).sort().map((j) => (
+                <div key={j} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="w-12">{j}</span>
+                  {[["strom", "Strom"], ["gas", "Erdgas"]].map(([sp, t]) => (
+                    <label key={sp} className="flex items-center gap-1">
+                      <span className="text-xs" style={{ color: C.muted }}>{t}</span>
+                      <input value={w.vorjahre[j][sp]} inputMode="decimal"
+                        onChange={(e) => setW({ ...w, vorjahre: { ...w.vorjahre, [j]: { ...w.vorjahre[j], [sp]: e.target.value } } })}
+                        className="w-20 px-2 py-1.5 text-sm rounded outline-none text-right"
+                        style={{ border: "1px solid " + (ok(w.vorjahre[j][sp]) ? C.line : C.warn), background: "#fff" }} />
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
           <label className="block">
             <span className="block text-xs mb-1" style={{ color: C.muted }}>Hinweise (für die Kalkulation, nicht im Angebot)</span>
             <textarea rows={3} value={w.notiz} onChange={(e) => setW({ ...w, notiz: e.target.value })}
               className="w-full px-3 py-2 text-xs rounded outline-none" style={{ border: "1px solid " + C.line, background: "#fff" }} />
           </label>
           <Btn icon={Check} onClick={speichern} disabled={!alleOk || laeuft}>{laeuft ? "Einen Moment …" : "Speichern"}</Btn>
-          {!alleOk && <p className="text-xs" style={{ color: C.warn }}>Jeder Bestandteil braucht eine Bezeichnung und eine Zahl.</p>}
+          {!alleOk && <p className="text-xs" style={{ color: C.warn }}>Jeder Bestandteil braucht eine Bezeichnung und eine Zahl, das Lieferjahr vier Ziffern.</p>}
         </div>
       )}
       {hinweis && <p className="text-xs mt-2" style={{ color: /^Nicht/.test(hinweis) ? C.warn : C.ok }}>{hinweis}</p>}
@@ -5338,6 +5450,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const [vorv, setVorv] = useState((a.kalkulation && a.kalkulation.vorversorger) || {});
   const setVorvFeld = (lid, k, w) => setVorv((alt) => ({ ...alt, [lid]: { ...(alt[lid] || {}), [k]: w } }));
   const [vmBemerkung, setVmBemerkung] = useState((a.kalkulation && a.kalkulation.vollmachtBemerkung) || "");
+  const [hinweisPartner, setHinweisPartner] = useState((a.kalkulation && a.kalkulation.hinweisPartner) || "");
   const [erzeugt, setErzeugt] = useState(null);
   const [kurz, setKurz] = useState(false);
   const [paketLaeuft, setPaketLaeuft] = useState(false);
@@ -5350,7 +5463,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const angebotErzeugen = async (v, mitVergleich = true) => {
     setErzeugt(v.id + (mitVergleich ? ":mit" : ":ohne"));
     try {
-      const vu = v.umlagen || JSON.parse(JSON.stringify({ strom: UMLAGEN.strom, gas: UMLAGEN.gas, teile: UMLAGEN.teile || null }));
+      const vu = v.umlagen || JSON.parse(JSON.stringify({ strom: UMLAGEN.strom, gas: UMLAGEN.gas, teile: UMLAGEN.teile || null,
+        jahr: umlagenJahr(UMLAGEN), vorjahre: umlagenVorjahre(UMLAGEN) }));
       if (!v.umlagen) setVar(v.id, "umlagen", vu);
       const pdf = await egcAngebotPdf(a, { ...v, umlagen: vu },
         { mitarbeiter, vorversorger: mitVergleich ? vorv : {}, vollmachtBemerkung: vmBemerkung });
@@ -5385,6 +5499,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         dienstleistungsHonorar: dlvNoetig ? dlvHonorar : null,
         vorversorger: vorv,
         vollmachtBemerkung: vmBemerkung,
+        hinweisPartner: hinweisPartner.trim(),
         gewaehlt: null,
         varianten: vars.map((v) => ({
           ...v,
@@ -6016,6 +6131,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   <Zeile k="Kundennummer" v={l.kundennummer} />
                   {l.vertragsendeAlt && <Zeile k="Vertrag läuft bis" v={datum(l.vertragsendeAlt)} />}
                   {l.kuendigungsfrist && <Zeile k="Kündigungsfrist" v={l.kuendigungsfrist} />}
+                  {l.abrechnungJahr && <Zeile k="Abrechnung aus" v={l.abrechnungJahr} />}
                   <Zeile k="Jahresverbrauch" v={num(parseFloat(l.verbrauch) || 0) + " kWh"} />
                   <Zeile k="Zählernummer" v={l.zaehlernummer} />
                   <Zeile k="Marktlokations-ID" v={l.maloId} />
@@ -6137,6 +6253,10 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                             <div className="grid sm:grid-cols-2 gap-3 mb-2">
                               <Feld label="Bisheriger Versorger" value={vv.versorger ?? (l.versorger || "")}
                                 onChange={(x) => setVorvFeld(l.id, "versorger", x)} />
+                              <Select label="Abrechnung aus dem Jahr" value={abrechnungsJahrVon(vv, l)}
+                                onChange={(x) => setVorvFeld(l.id, "jahr", x)}
+                                options={[{ value: "", label: "unbekannt, kein Ausgleich" }, { value: "2025", label: "2025" },
+                                          { value: "2026", label: "2026" }, { value: umlagenJahr(UMLAGEN), label: umlagenJahr(UMLAGEN) + " (schon neue Umlagen)" }]} />
                               <Select label="Preis ermitteln" value={modus}
                                 onChange={(x) => setVorvFeld(l.id, "modus", x)}
                                 options={[{ value: "preis", label: "Arbeitspreis eintragen" },
@@ -6164,6 +6284,16 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                   onChange={(x) => setVorvFeld(l.id, "grundpreis", x)} breit />
                               </div>
                             )}
+                            {ergebnis && umlagenAusgleich(vv, l) && (() => {
+                              const au = umlagenAusgleich(vv, l);
+                              return (
+                                <p className="text-xs mt-2" style={{ color: C.strom }}>
+                                  Umlagen {au.jahr}: {num(au.alt, 3)} ct/kWh, {au.ziel}: {num(au.neu, 3)} ct/kWh.
+                                  Im Vergleich wird der Arbeitspreis um {(au.diff >= 0 ? "+" : "") + num(au.diff, 3)} ct/kWh
+                                  auf {num(ergebnis.arbeit + au.diff, 2)} ct/kWh angepasst, mit Hinweis im Angebot.
+                                </p>
+                              );
+                            })()}
                             {ergebnis && (
                               <p className="text-xs mt-2" style={{ color: C.ok }}>
                                 Arbeitspreis bisher: {num(ergebnis.arbeit, 2)} ct/kWh
@@ -6194,6 +6324,19 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                     <span className="block text-xs mt-1" style={{ color: C.muted }}>
                       Erscheint im PDF in einem eigenen Feld. Darunter bleiben Linien frei, damit der Kunde
                       von Hand ergänzen kann.
+                    </span>
+                  </label>
+
+                  <label className="block">
+                    <span className="block text-xs mb-1" style={{ color: C.muted }}>
+                      Hinweis an den Vertriebspartner (nur intern, steht nicht im Angebot)
+                    </span>
+                    <textarea rows={3} value={hinweisPartner} onChange={(e) => setHinweisPartner(e.target.value)}
+                      placeholder="z. B. Preise nur bis Freitag haltbar, Kunde vorher auf die Vollmacht ansprechen"
+                      className="w-full px-3 py-2 text-sm rounded outline-none"
+                      style={{ border: "1px solid " + C.line }} />
+                    <span className="block text-xs mt-1" style={{ color: C.muted }}>
+                      Erscheint beim Vertriebspartner gut sichtbar über den Angeboten.
                     </span>
                   </label>
 
@@ -6312,7 +6455,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                           variante={{ ...v, aufschlag: parseFloat(String(v.aufschlag).replace(",", ".")) || 0 }} />
 
                         <label className="block">
-                          <span className="block text-xs mb-1" style={{ color: C.muted }}>Bemerkung zu dieser Variante</span>
+                          <span className="block text-xs mb-1" style={{ color: C.muted }}>Hinweis im Angebot (steht im PDF, sieht der Kunde)</span>
                           <textarea rows={2} value={v.bemerkung}
                             onChange={(e) => setVar(v.id, "bemerkung", e.target.value)}
                             className="w-full px-3 py-2 text-sm rounded outline-none"
@@ -7138,6 +7281,14 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                 </span>
                 <span className="text-xs" style={{ color: C.muted }}>{a.kalkulation.bearbeiter}</span>
               </div>
+              {a.kalkulation.hinweisPartner && (
+                <div className="p-3 rounded text-sm mt-3 mb-1" style={{ background: "#FBF6EE", border: "1px solid " + C.gas }}>
+                  <div className="text-xs mb-1" style={{ color: C.gas }}>
+                    Hinweis der Kalkulation an dich{a.kalkulation.bearbeiter ? " (" + a.kalkulation.bearbeiter + ")" : ""}
+                  </div>
+                  <p className="whitespace-pre-line">{a.kalkulation.hinweisPartner}</p>
+                </div>
+              )}
               {varianten(a).length > 1 && a.status === "angebot" && (
                 <p className="text-sm mb-4" style={{ color: C.muted }}>
                   Der Kunde wählt aus. Je Sparte wird eine Variante angenommen, bei Strom und Erdgas
