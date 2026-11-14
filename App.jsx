@@ -6,7 +6,7 @@ import {
   AlertTriangle, Users, Calculator, FileSignature, BarChart3,
   Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw, Menu, Bell, Target, Calendar,
   Search, ClipboardList, Contact, Briefcase, Lightbulb, UserPlus, Network, Trophy, Ban,
-  MessageSquare, FolderOpen, CircleUser, Gauge, Settings,
+  MessageSquare, FolderOpen, CircleUser, Gauge, Settings, Copy, Save, Pencil, Layers,
 } from "lucide-react";
 import {
   sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
@@ -4033,6 +4033,8 @@ const Btn = ({ children, onClick, variante = "primär", icon: Icon, disabled }) 
       ? { background: "#fff", color: C.warn, border: "1px solid " + C.warn }
       : variante === "ok"
       ? { background: C.ok, color: "#fff", border: "1px solid " + C.ok }
+      : variante === "blau"
+      ? { background: C.strom, color: "#fff", border: "1px solid " + C.strom }
       : { background: "#fff", color: C.text, border: "1px solid " + C.line };
   return (
     <button
@@ -4605,9 +4607,10 @@ function SmartmeterKalk({ a, sm, setSm, user }) {
   const darfVorlage = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
   if (!sm) {
     return (
-      <div className="p-4 rounded flex flex-wrap items-center justify-between gap-3" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
-        <span className="text-sm">Smartmeter{a.smartmeter ? " gewünscht" : ""}: noch kein Smartmeter-Angebot</span>
-        <Btn variante="hell" icon={Plus} onClick={() => setSm(smartmeterStart(a))}>Smartmeter-Angebot hinzufügen</Btn>
+      <div className="p-4 rounded flex flex-wrap items-center justify-between gap-3" style={{ background: C.card, border: "1px solid " + C.line }}>
+        <span className="flex items-center gap-2 text-sm"><Gauge size={18} style={{ color: C.ok }} />
+          {a.smartmeter ? "Smartmeter gewünscht, noch kein Smartmeter-Angebot" : "Kein Smartmeter-Angebot"}</span>
+        <Btn variante="ok" icon={Plus} onClick={() => setSm(smartmeterStart(a))}>Smartmeter-Angebot hinzufügen</Btn>
       </div>
     );
   }
@@ -4637,86 +4640,112 @@ function SmartmeterKalk({ a, sm, setSm, user }) {
     else { setzeSmartmeter(wert); setMeldung(teil === "vorlagen" ? "Positionen als Vorlage gespeichert." : "Texte als Standard gespeichert."); }
   };
   const eur2 = (x) => num(x, 2) + " €";
+  const leiste = { border: "1px solid " + C.line, background: "#fff" };
   return (
-    <div className="p-4 rounded space-y-4" style={{ background: "#F7FAF5", border: "1px solid " + C.ok }}>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-sm">Smartmeter-Angebot <span className="text-xs" style={{ color: C.muted }}>zwei Seiten im Angebots-PDF, alle Preise netto</span></span>
-        <button className="text-xs underline" style={{ color: C.warn }} onClick={() => setSm(null)}>Smartmeter-Angebot entfernen</button>
-      </div>
-      {a.lieferstellen.map((l, i) => (
-        <div key={l.id} className="p-3 rounded" style={{ background: "#fff", border: "1px solid " + C.line }}>
-          <div className="text-sm mb-2">{l.bezeichnung || "Lieferstelle " + (i + 1)}
-            <span className="text-xs ml-2" style={{ color: l.meloId ? C.muted : C.warn }}>{l.meloId ? "MeLo " + l.meloId : "MeLo-ID fehlt"}</span>
-          </div>
-          <div className="space-y-2">
-            {pos.filter((p) => p.lieferstelle === l.id).map((p) => (
-              <div key={p.id} className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-12 sm:col-span-6">
-                  <Feld label="Position" value={p.bezeichnung} onChange={(w) => setPos(p.id, "bezeichnung", w)} />
-                </div>
-                <div className="col-span-5 sm:col-span-3">
-                  <Select label="Abrechnung" value={p.art} onChange={(w) => setPos(p.id, "art", w)}
-                    options={[{ value: "einmalig", label: "einmalig" }, { value: "monatlich", label: "monatlich" }]} />
-                </div>
-                <div className="col-span-5 sm:col-span-2">
-                  <Feld label="Preis netto in €" value={p.preis} onChange={(w) => setPos(p.id, "preis", w)} />
-                </div>
-                <button className="col-span-2 sm:col-span-1 pb-2" title="Position entfernen" style={{ color: C.muted }}
-                  onClick={() => setSm({ ...sm, positionen: pos.filter((x) => x.id !== p.id) })}><X size={16} /></button>
-              </div>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-3 mt-2 text-xs">
-            <button className="underline" style={{ color: C.strom }} onClick={() => neuPos(l.id)}>+ Position</button>
-            {(SMARTMETER.vorlagen || []).length > 0 && (
-              <select className="text-xs px-2 py-1 rounded max-w-full" style={{ border: "1px solid " + C.line }} value=""
-                onChange={(e) => { const v = SMARTMETER.vorlagen[Number(e.target.value)]; if (v) neuPos(l.id, { ...v }); }}>
-                <option value="">+ aus Vorlage</option>
-                {SMARTMETER.vorlagen.map((v, j) => <option key={j} value={j}>{v.bezeichnung} ({v.art})</option>)}
-              </select>
-            )}
-            {a.lieferstellen.length > 1 && (
-              <button className="underline" style={{ color: C.strom }} onClick={() => aufAlle(l.id)}>Diese Positionen auf alle Lieferstellen übertragen</button>
-            )}
+    <div className="rounded overflow-hidden" style={{ border: "1px solid " + C.line, background: C.card }}>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ background: C.ink, color: "#fff" }}>
+        <div className="flex items-center gap-3">
+          <span className="flex items-center justify-center rounded" style={{ width: 34, height: 34, background: C.ok }}><Gauge size={18} /></span>
+          <div>
+            <div className="text-sm">Smartmeter-Angebot</div>
+            <div className="text-xs" style={{ opacity: 0.7 }}>zwei Seiten im Angebots-PDF · alle Preise netto</div>
           </div>
         </div>
-      ))}
-      <div className="text-sm">
-        Einmalig {eur2(sum.einmalig)} · monatlich {eur2(sum.monatlich)} · pro Jahr {eur2(sum.jahr)}
+        <button onClick={() => setSm(null)} className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded"
+          style={{ background: "rgba(255,255,255,0.12)", color: "#fff" }}><Trash2 size={14} /> Entfernen</button>
       </div>
-      <div className="flex flex-wrap gap-3 text-xs">
-        <button className="underline" style={{ color: C.strom }} onClick={() => setTextOffen(!textOffen)}>
-          {textOffen ? "Texte zuklappen" : "Texte im Angebot ansehen und ändern"}
-        </button>
-        {darfVorlage && <button className="underline" style={{ color: C.strom }} onClick={() => speichernAlsStandard("vorlagen")}>Positionen als Vorlage speichern</button>}
-      </div>
-      {textOffen && (
-        <div className="space-y-3">
-          <div className="grid sm:grid-cols-2 gap-3">
-            <Feld label="Titel Zeile 1" value={t.titel1 || ""} onChange={(w) => setT("titel1", w)} />
-            <Feld label="Titel Zeile 2 (grün)" value={t.titel2 || ""} onChange={(w) => setT("titel2", w)} />
+      <div className="p-4 space-y-4">
+        {a.lieferstellen.map((l, i) => (
+          <div key={l.id} className="rounded overflow-hidden" style={{ border: "1px solid " + C.line, background: "#fff" }}>
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5" style={{ background: "#F6F8FA", borderBottom: "1px solid " + C.line }}>
+              <span className="flex items-center gap-2 text-sm"><MediumIcon medium={l.medium} />{l.bezeichnung || "Lieferstelle " + (i + 1)}</span>
+              <span className="text-xs px-2.5 py-1 rounded-full"
+                style={{ background: l.meloId ? "#EAF4E4" : "#FCF3F0", color: l.meloId ? C.ok : C.warn }}>
+                {l.meloId ? "MeLo " + l.meloId : "MeLo-ID fehlt"}
+              </span>
+            </div>
+            <div className="p-3 space-y-3">
+              {pos.filter((p) => p.lieferstelle === l.id).map((p) => (
+                <div key={p.id} className="grid grid-cols-12 gap-2 items-end pb-3" style={{ borderBottom: "1px dashed " + C.line }}>
+                  <div className="col-span-12 sm:col-span-6">
+                    <Feld label="Position" value={p.bezeichnung} onChange={(w) => setPos(p.id, "bezeichnung", w)} />
+                  </div>
+                  <div className="col-span-6 sm:col-span-3">
+                    <Select label="Abrechnung" value={p.art} onChange={(w) => setPos(p.id, "art", w)}
+                      options={[{ value: "einmalig", label: "einmalig" }, { value: "monatlich", label: "monatlich" }]} />
+                  </div>
+                  <div className="col-span-4 sm:col-span-2">
+                    <Feld label="Preis netto €" value={p.preis} onChange={(w) => setPos(p.id, "preis", w)} />
+                  </div>
+                  <div className="col-span-2 sm:col-span-1 flex justify-end">
+                    <button title="Position entfernen" aria-label="Position entfernen" className="flex items-center justify-center rounded"
+                      style={{ width: 40, height: 40, border: "1px solid " + C.line, color: C.warn, background: "#fff" }}
+                      onClick={() => setSm({ ...sm, positionen: pos.filter((x) => x.id !== p.id) })}><Trash2 size={16} /></button>
+                  </div>
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-2">
+                <Btn variante="ok" icon={Plus} onClick={() => neuPos(l.id)}>Position</Btn>
+                {(SMARTMETER.vorlagen || []).length > 0 && (
+                  <label className="inline-flex items-center gap-2 pl-3.5 pr-2 py-2 text-sm rounded cursor-pointer max-w-full" style={{ background: C.strom, color: "#fff", border: "1px solid " + C.strom }}>
+                    <Copy size={15} />
+                    <select className="bg-transparent outline-none text-sm max-w-full" style={{ color: "#fff" }} value=""
+                      onChange={(e) => { const v = SMARTMETER.vorlagen[Number(e.target.value)]; if (v) neuPos(l.id, { ...v }); }}>
+                      <option value="" style={{ color: C.text }}>Aus Vorlage</option>
+                      {SMARTMETER.vorlagen.map((v, j) => <option key={j} value={j} style={{ color: C.text }}>{v.bezeichnung} ({v.art})</option>)}
+                    </select>
+                  </label>
+                )}
+                {a.lieferstellen.length > 1 && (
+                  <Btn variante="primär" icon={Layers} onClick={() => aufAlle(l.id)}>Auf alle Lieferstellen übertragen</Btn>
+                )}
+              </div>
+            </div>
           </div>
-          <Feld label="Unterzeile" value={t.unterzeile || ""} onChange={(w) => setT("unterzeile", w)} />
-          {(t.kacheln || []).map((k, i) => (
-            <div key={i} className="grid sm:grid-cols-3 gap-3">
-              <Feld label={"Vorteil " + (i + 1) + ": Überschrift"} value={k.t} onChange={(w) => setKachel(i, "t", w)} />
-              <div className="sm:col-span-2"><Feld label="Text" value={k.s} onChange={(w) => setKachel(i, "s", w)} /></div>
+        ))}
+        <div className="grid grid-cols-3 gap-2">
+          {[["Einmalig", sum.einmalig, false], ["Monatlich", sum.monatlich, false], ["Pro Jahr", sum.jahr, true]].map(([k, w, gruen]) => (
+            <div key={k} className="rounded px-3 py-2.5"
+              style={{ background: gruen ? "linear-gradient(90deg, #4A8C26, #6CB43B)" : "#ECF6E4", color: gruen ? "#fff" : C.ink }}>
+              <div className="text-xs" style={{ color: gruen ? "rgba(255,255,255,0.85)" : C.ok }}>{k}</div>
+              <div className="text-sm sm:text-base whitespace-nowrap">{eur2(w)}</div>
             </div>
           ))}
-          <label className="block">
-            <span className="block text-xs mb-1" style={{ color: C.muted }}>Kasten „Einbau und Betrieb durch den Messstellenbetreiber“</span>
-            <textarea rows={3} value={t.einbau || ""} onChange={(e) => setT("einbau", e.target.value)}
-              className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
-          </label>
-          <label className="block">
-            <span className="block text-xs mb-1" style={{ color: C.muted }}>Hinweis unter den Preisen</span>
-            <textarea rows={3} value={t.hinweis || ""} onChange={(e) => setT("hinweis", e.target.value)}
-              className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
-          </label>
-          {darfVorlage && <Btn variante="hell" icon={Check} onClick={() => speichernAlsStandard("texte")}>Texte als Standard speichern</Btn>}
         </div>
-      )}
-      {meldung && <p className="text-xs" style={{ color: /^Nicht/.test(meldung) ? C.warn : C.ok }}>{meldung}</p>}
+        <div className="flex flex-wrap gap-2">
+          <Btn variante="blau" icon={Pencil} onClick={() => setTextOffen(!textOffen)}>
+            {textOffen ? "Texte schließen" : "Texte im Angebot bearbeiten"}
+          </Btn>
+          {darfVorlage && <Btn variante="ok" icon={Save} onClick={() => speichernAlsStandard("vorlagen")}>Positionen als Vorlage speichern</Btn>}
+        </div>
+        {textOffen && (
+          <div className="space-y-3 p-3 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Feld label="Titel Zeile 1" value={t.titel1 || ""} onChange={(w) => setT("titel1", w)} />
+              <Feld label="Titel Zeile 2 (grün)" value={t.titel2 || ""} onChange={(w) => setT("titel2", w)} />
+            </div>
+            <Feld label="Unterzeile" value={t.unterzeile || ""} onChange={(w) => setT("unterzeile", w)} />
+            {(t.kacheln || []).map((k, i) => (
+              <div key={i} className="grid sm:grid-cols-3 gap-3">
+                <Feld label={"Vorteil " + (i + 1) + ": Überschrift"} value={k.t} onChange={(w) => setKachel(i, "t", w)} />
+                <div className="sm:col-span-2"><Feld label="Text" value={k.s} onChange={(w) => setKachel(i, "s", w)} /></div>
+              </div>
+            ))}
+            <label className="block">
+              <span className="block text-xs mb-1" style={{ color: C.muted }}>Kasten „Einbau und Betrieb durch den Messstellenbetreiber“</span>
+              <textarea rows={3} value={t.einbau || ""} onChange={(e) => setT("einbau", e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+            </label>
+            <label className="block">
+              <span className="block text-xs mb-1" style={{ color: C.muted }}>Hinweis unter den Preisen</span>
+              <textarea rows={3} value={t.hinweis || ""} onChange={(e) => setT("hinweis", e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+            </label>
+            {darfVorlage && <Btn variante="ok" icon={Save} onClick={() => speichernAlsStandard("texte")}>Texte als Standard speichern</Btn>}
+          </div>
+        )}
+        {meldung && <p className="text-xs" style={{ color: /^Nicht/.test(meldung) ? C.warn : C.ok }}>{meldung}</p>}
+      </div>
     </div>
   );
 }
