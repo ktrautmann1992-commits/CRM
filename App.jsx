@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.34 · 14.11.2026 · Hinweis an den Vertriebspartner, Umlagen-Ausgleich bei älteren Abrechnungen";
+const VERSION = "v5.34 · 14.11.2026 · Hinweis an den Partner, Umlagen-Ausgleich, Kalkulation korrigiert Kundendaten und überarbeitet Angebote";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -5396,6 +5396,8 @@ function Kurzinfo({ a, onSchliessen }) {
 
 function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
                  onBearbeiten, onVerlaengern, onNotieren, tippgeber, beschaffung, setBeschaffung, onBeschaffung }) {
+  /* Kalkulation: gesendetes Angebot wieder öffnen und neu senden */
+  const [ueberarbeiten, setUeberarbeiten] = useState(false);
   const [vars, setVars] = useState(
     a.kalkulation && a.kalkulation.varianten && a.kalkulation.varianten.length
       ? a.kalkulation.varianten
@@ -5512,11 +5514,14 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       verlauf: [...a.verlauf, {
         d: heute(),
         t: vars.length > 1
-          ? vars.length + " Angebotsvarianten kalkuliert und zurückgesendet"
-          : "Angebot kalkuliert und zurückgesendet",
+          ? vars.length + " Angebotsvarianten " + (a.status === "angebot" ? "überarbeitet und erneut gesendet" : "kalkuliert und zurückgesendet")
+          : a.status === "angebot" ? "Angebot überarbeitet und erneut gesendet" : "Angebot kalkuliert und zurückgesendet",
         w: user.name,
       }],
+      /* überarbeitetes Angebot muss der Partner erneut an den Kunden schicken */
+      ...(a.status === "angebot" ? { angebotVersendet: null } : {}),
     });
+    setUeberarbeiten(false);
     /* im Vorgang bleiben: oben erscheint der Hinweis, dass das Angebot beim Vertriebspartner liegt */
     try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { /* egal */ }
   };
@@ -6176,8 +6181,16 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           </div>
 
           {/* Kalkulationsbereich */}
-          {istKalk && ["eingereicht", "angefragt", "ruecksprache"].includes(a.status) && (
+          {istKalk && (["eingereicht", "angefragt", "ruecksprache"].includes(a.status) || (a.status === "angebot" && ueberarbeiten)) && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line, ...reihe(-2) }}>
+              {a.status === "angebot" && (
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4 p-3 rounded text-sm"
+                     style={{ background: "#FBF6EE", border: "1px solid " + C.gas }}>
+                  <span>Du überarbeitest das gesendete Angebot. Erst mit „An Vertriebspartner senden“ sieht der Partner die neue Fassung.</span>
+                  <Btn variante="hell" onClick={() => setUeberarbeiten(false)}>Abbrechen</Btn>
+                </div>
+              )}
+              {a.status !== "angebot" && (
               <label className="flex items-center gap-3 text-sm mb-4 p-3 rounded"
                      style={{ background: a.status === "angefragt" ? "#FDF6EE" : "#F6F8FA",
                               border: "1px solid " + (a.status === "angefragt" ? C.gas : C.line) }}>
@@ -6192,6 +6205,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   style={{ accentColor: C.gas }} />
                 Angebot in Bearbeitung, beim Versorger angefragt
               </label>
+              )}
 
               <div className="flex flex-wrap gap-2 mb-5">
                 <Btn variante={modus === "kalk" ? "primär" : "hell"} onClick={() => setModus("kalk")} icon={Calculator}>
@@ -7238,7 +7252,25 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   {a.angebotVersendet ? "Der Vertriebspartner hat es am " + datum(a.angebotVersendet.datum) + " an den Kunden versendet."
                     : "In der Übersicht steht der Vorgang jetzt unter „Angebote beim Vertriebspartner“."}
                 </span>
+                {!ueberarbeiten && (
+                  <div className="mt-3">
+                    <Btn variante="hell" icon={Calculator} onClick={() => { setUeberarbeiten(true); setModus("kalk"); }}>
+                      Angebot überarbeiten
+                    </Btn>
+                  </div>
+                )}
               </div>
+            </div>
+          )}
+
+          {/* Kalkulation: Kundendaten, Lieferstellen, MaLo, Zähler und Verbrauch jederzeit korrigieren */}
+          {istKalk && a.status !== "entwurf" && (
+            <div className="rounded p-4 flex flex-wrap items-center justify-between gap-3"
+                 style={{ background: C.card, border: "1px solid " + C.line, ...reihe(-2) }}>
+              <span className="text-sm" style={{ color: C.muted, maxWidth: "52ch" }}>
+                Firmenname (wie bei Creditreform), Anschrift, Lieferstellen, MaLo, Zählernummer oder Verbrauch korrigieren.
+              </span>
+              <Btn variante="hell" onClick={() => onBearbeiten && onBearbeiten(a)}>Kunden- und Lieferstellendaten bearbeiten</Btn>
             </div>
           )}
 
@@ -19235,7 +19267,15 @@ export function PortalApp({ pruefung } = {}) {
     inhalt = (
       <Assistent user={user} mitarbeiter={mitarbeiter} alleAnfragen={anfragenSicht}
         tippgeber={tippgeber} entwurf={entwurf}
-        onSpeichern={(a) => { speichern(a); setEntwurf(null); setAnsicht("anfragen"); setTab("offen"); setTabGewaehlt("offen"); }}
+        onSpeichern={(a) => {
+          /* Laufender Vorgang (z. B. Korrektur durch die Kalkulation): Änderung vermerken und zurück in den Vorgang */
+          if (a.status && !["entwurf", "klaerfall"].includes(a.status)) {
+            speichern({ ...a, verlauf: [...(a.verlauf || []), { d: heute(), t: "Kunden- und Lieferstellendaten geändert", w: user.name }] });
+            setEntwurf(null); setOffen(a.id);
+            return;
+          }
+          speichern(a); setEntwurf(null); setAnsicht("anfragen"); setTab("offen"); setTabGewaehlt("offen");
+        }}
         onSenden={einreichen}
         onAbbrechen={() => { setEntwurf(null); setAnsicht("anfragen"); }} />
     );
