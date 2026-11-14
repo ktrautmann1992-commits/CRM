@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.34 · 14.11.2026 · Smartmeter-Angebot, Hinweis an den Partner, Umlagen-Ausgleich, Kalkulation korrigiert und überarbeitet";
+const VERSION = "v5.34 · 14.11.2026 · Smartmeter-Angebot mit Börsenpreisen, Hinweis an den Partner, Umlagen-Ausgleich, Kalkulation korrigiert und überarbeitet";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2841,17 +2841,21 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     schrift(8, true); farbe(GRUEN1); text("IHRE VORTEILE", RA, ys, { charSpace: 1 }); ys += 4;
     const kach = (tx.kacheln || []).filter((k) => String(k.t || "").trim()).slice(0, 6);
     const eng = kach.length > 4, khh = eng ? 25 : 34, abst = eng ? 4 : 5;
+    /* Bei ungerader Anzahl steht die erste Kachel hervorgehoben über die volle Breite (Vorgabe: Live-Börsenpreise) */
+    const ungerade = kach.length % 2 === 1;
     kach.forEach((k, i) => {
-      const voll = i === kach.length - 1 && kach.length % 2 === 1;
+      const voll = ungerade && i === 0;
+      const pos = ungerade ? i + 1 : i;
       const kb = voll ? BR : (BR - 5) / 2;
-      const x = RA + (voll ? 0 : (i % 2) * (kb + 5)), yy = ys + Math.floor(i / 2) * (khh + abst);
-      verlauf(x, yy, kb, khh, i % 3 ? NAVY1 : NAVY2, i % 3 ? NAVY2 : [38, 74, 116], { r: 2, stufen: 50 });
+      const x = RA + (voll ? 0 : (pos % 2) * (kb + 5)), yy = ys + Math.floor(pos / 2) * (khh + abst);
+      if (voll) verlauf(x, yy, kb, khh, GRUEN1, GRUEN, { r: 2, stufen: 60 });
+      else verlauf(x, yy, kb, khh, i % 3 ? NAVY1 : NAVY2, i % 3 ? NAVY2 : [38, 74, 116], { r: 2, stufen: 50 });
       const oy = eng ? -2 : 0, tg = eng ? 11.5 : 13;
-      flaeche(GRUEN); doc.circle(x + 9, yy + 10 + oy, 4.2, "F"); strich(WEISS); doc.setLineWidth(0.9);
+      flaeche(voll ? WEISS : GRUEN); doc.circle(x + 9, yy + 10 + oy, 4.2, "F"); strich(voll ? GRUEN1 : WEISS); doc.setLineWidth(0.9);
       doc.line(x + 7.1, yy + 10 + oy, x + 8.5, yy + 11.5 + oy); doc.line(x + 8.5, yy + 11.5 + oy, x + 11.1, yy + 8.4 + oy);
       schrift(tg, true); farbe(WEISS); const tz = doc.splitTextToSize(String(k.t || ""), kb - 22);
       doc.text(tz, x + 17, yy + 11.5 + oy, { lineHeightFactor: 1.15 });
-      zeilen(k.s, x + 6, yy + 11.5 + oy + tz.length * tg * 0.4 + (eng ? 2 : 3), kb - 12, eng ? 8 : 8.6, HELLBLAU, 1.3);
+      zeilen(k.s, x + 6, yy + 11.5 + oy + tz.length * tg * 0.4 + (eng ? 2 : 3), kb - 12, eng ? 8 : 8.6, voll ? WEISS : HELLBLAU, 1.3);
     });
     ys += Math.ceil(kach.length / 2) * (khh + abst) + 1;
     /* Klarstellung: EGC baut nicht selbst ein */
@@ -2860,7 +2864,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       const eh = 11 + ez.length * 8.4 * 0.3528 * 1.35;
       flaeche(GRUENHELL); doc.roundedRect(RA, ys, BR, eh, 2, 2, "F");
       verlauf(RA, ys, 1.8, eh, GRUEN2, GRUEN1, { quer: false, stufen: 20 });
-      schrift(8.6, true); farbe(NAVY); text("Einbau und Betrieb durch den Messstellenbetreiber", RA + 6, ys + 5.5);
+      schrift(8.6, true); farbe(NAVY); text("Einbau und Betrieb durch den Smartmeter-Messstellenbetreiber", RA + 6, ys + 5.5);
       zeilen(tx.einbau, RA + 6, ys + 10, BR - 12, 8.4, TEXT, 1.35);
       ys += eh + 6;
     } else ys += 5;
@@ -2905,8 +2909,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     ys = zeilen(tx.hinweis, RA, ys, BR, 7.8, GRAU, 1.35) + 6;
     if (ys + 38 < H - 18) {
       schrift(8, true); farbe(GRUEN1); text("SO GEHT ES WEITER", RA, ys, { charSpace: 1 }); ys += 5;
-      const schritte = [["1", "Auftrag", "Sie bestätigen das Angebot."], ["2", "Termin", "Der Messstellenbetreiber oder sein zugelassener Partner meldet sich."],
-        ["3", "Einbau", "Einbau und Inbetriebnahme durch den Messstellenbetreiber."], ["4", "Portal", "Sie erhalten Ihren Zugang zur Verbrauchsanalyse."]];
+      const schritte = [["1", "Auftrag", "Sie bestätigen das Angebot."], ["2", "Termin", "Der Smartmeter-Messstellenbetreiber meldet sich bei Ihnen."],
+        ["3", "Einbau", "Einbau, Inbetriebnahme und Wechsel vom bisherigen Messstellenbetreiber."], ["4", "Portal", "Sie erhalten Ihren Zugang zur Verbrauchsanalyse."]];
       const sw = (BR - 9) / 4;
       schritte.forEach(([n2, t2, s2], i) => {
         const x = RA + i * (sw + 3);
@@ -3649,17 +3653,17 @@ const SMARTMETER_VORGABE = {
   titel1: "Ihre Energie.", titel2: "Jederzeit im Blick.",
   unterzeile: "Intelligente Messsysteme für Ihre Lieferstellen, mit digitalem Portal zur Verbrauchsanalyse.",
   kacheln: [
+    { t: "Zugang zu Live-Börsenpreisen", s: "Mit dem Smartmeter ist eine Belieferung zu aktuellen Spotmarktpreisen möglich. Sie zahlen den Börsenpreis, ohne die Risikoaufschläge, die Versorger für Festpreise am Terminmarkt einrechnen." },
     { t: "Kein Ablesen mehr", s: "Zählerstände werden automatisch übermittelt. Sie müssen nichts mehr ablesen und nichts mehr melden." },
-    { t: "Bisherige Messkosten entfallen", s: "Die bisherigen Kosten für den Messstellenbetrieb bei Ihrem aktuellen Versorger entfallen." },
+    { t: "Bisherige Messkosten entfallen", s: "Ihr bisheriger Messstellenbetreiber wird abgelöst, seine Kosten für den Messstellenbetrieb entfallen." },
     { t: "Digitales Portal", s: "Verbrauchsanalyse online: Verläufe, Spitzen und Auffälligkeiten jederzeit im Blick." },
     { t: "Alle Verbrauchsstellen", s: "Auswertung aller Lieferstellen gebündelt in einem Portal, übersichtlich und vergleichbar." },
-    { t: "Zugang zu Live-Börsenpreisen", s: "Mit dem Smartmeter ist eine Belieferung zu aktuellen Spotmarktpreisen möglich. Sie zahlen den Börsenpreis, ohne die Risikoaufschläge, die Versorger für Festpreise am Terminmarkt einrechnen." },
   ],
-  einbau: "EGC Energie baut keine Smartmeter ein und betreibt sie nicht. Einbau und Messstellenbetrieb übernimmt der Messstellenbetreiber bzw. ein von ihm beauftragtes, zugelassenes Unternehmen. EGC Energie berät Sie und koordiniert den Auftrag.",
+  einbau: "EGC Energie baut keine Smartmeter ein und betreibt sie nicht. Einbau und Betrieb übernimmt ein zugelassener Smartmeter-Messstellenbetreiber. Er löst Ihren bisherigen Messstellenbetreiber ab und regelt den Wechsel direkt mit ihm, für Sie ist dabei nichts zu tun. EGC Energie berät Sie und koordiniert den Auftrag.",
   hinweis: "Alle Preise netto zuzüglich der gesetzlichen Umsatzsteuer. Der Einbau erfolgt nach Terminabsprache. Voraussetzung ist die Angabe der Messlokation (MeLo-ID) je Lieferstelle.",
   vorlagen: [
-    { bezeichnung: "Einbau und Inbetriebnahme intelligentes Messsystem (durch den Messstellenbetreiber)", art: "einmalig", preis: "" },
-    { bezeichnung: "Messstellenbetrieb inklusive Portalzugang", art: "monatlich", preis: "" },
+    { bezeichnung: "Einbau und Inbetriebnahme intelligentes Messsystem (durch den Smartmeter-Messstellenbetreiber)", art: "einmalig", preis: "" },
+    { bezeichnung: "Messstellenbetrieb durch den Smartmeter-Messstellenbetreiber inklusive Portalzugang", art: "monatlich", preis: "" },
   ],
 };
 let SMARTMETER = SMARTMETER_VORGABE;
@@ -4732,7 +4736,7 @@ function SmartmeterKalk({ a, sm, setSm, user }) {
               </div>
             ))}
             <label className="block">
-              <span className="block text-xs mb-1" style={{ color: C.muted }}>Kasten „Einbau und Betrieb durch den Messstellenbetreiber“</span>
+              <span className="block text-xs mb-1" style={{ color: C.muted }}>Kasten „Einbau und Betrieb durch den Smartmeter-Messstellenbetreiber“</span>
               <textarea rows={3} value={t.einbau || ""} onChange={(e) => setT("einbau", e.target.value)}
                 className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
             </label>
@@ -4992,7 +4996,8 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                     Die Kalkulation legt dem Angebot ein Smartmeter-Angebot bei. Dafür brauchst du zu jeder
                     Lieferstelle die Messlokations-ID (MeLo-ID), sie steht auf der Abrechnung des Kunden.
                     Wichtig für das Kundengespräch: EGC Energie baut keine Smartmeter ein. Einbau und Betrieb
-                    übernimmt der Messstellenbetreiber bzw. ein von ihm beauftragtes, zugelassenes Unternehmen.
+                    übernimmt ein zugelassener Smartmeter-Messstellenbetreiber. Er ersetzt den bisherigen
+                    Messstellenbetreiber des Kunden und regelt den Wechsel selbst.
                   </span>
                 </span>
               </label>
