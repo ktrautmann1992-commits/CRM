@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.34 · 14.11.2026 · Hinweis an den Partner, Umlagen-Ausgleich, Kalkulation korrigiert Kundendaten und überarbeitet Angebote";
+const VERSION = "v5.34 · 14.11.2026 · Smartmeter-Angebot, Hinweis an den Partner, Umlagen-Ausgleich, Kalkulation korrigiert und überarbeitet";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -897,6 +897,7 @@ const leereLieferstelle = (medium) => ({
   versorger: "",
   zaehlernummer: "",
   maloId: "",
+  meloId: "", /* Messlokation, Pflicht wenn ein Smartmeter gewünscht ist */
   verbrauch: "",
   zaehlerart: "SLP",
   abrechnung: null,
@@ -2326,7 +2327,7 @@ const blankoAuftragPdf = () => egcAngebotPdf(
   {}, { mitarbeiter: [], blanko: true });
 
 /* Erzeugt das Angebot als PDF. Gibt ein Dateiobjekt zurück wie ein Upload. */
-async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBemerkung = "", blanko = false }) {
+async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBemerkung = "", blanko = false, smartmeter = null }) {
   const jsPDF = await ladeJsPdf();
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const W = 210, H = 297, RA = 16, BR = W - 2 * RA;
@@ -2344,6 +2345,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const ct3 = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 3) + " ct/kWh");
   const eurx = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " €");
   const logo = "data:image/jpeg;base64," + LOGO_PDF;
+  let smTitel = 0; /* Seitennummer der Smartmeter-Titelseite: ohne Seitenzahl */
 
   const farbe = (f) => doc.setTextColor(f[0], f[1], f[2]);
   const flaeche = (f) => doc.setFillColor(f[0], f[1], f[2]);
@@ -2791,6 +2793,117 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     doc.addImage(bilder.werktag, "PNG", RA, y, BR, gh);
   }
 
+  /* ---------- Smartmeter-Angebot: Titelseite mit Bild und Seite mit Vorteilen und Preisen ---------- */
+  const smPos = ((smartmeter && smartmeter.positionen) || []).filter((p) => String(p.bezeichnung || "").trim());
+  if (smPos.length) {
+    const tx = { ...SMARTMETER, ...(smartmeter.texte || {}) };
+    const HELLBLAU = [196, 208, 222], HELLGRAU = [244, 247, 250];
+    const zeilen = (t, x, yy, b, gr, f, zl = 1.38, fett = false) => {
+      schrift(gr, fett); farbe(f); const z = doc.splitTextToSize(String(t || ""), b);
+      doc.text(z, x, yy, { lineHeightFactor: zl }); return yy + z.length * gr * 0.3528 * zl;
+    };
+    /* Titelseite */
+    doc.addPage(); smTitel = doc.getNumberOfPages();
+    let bild = null;
+    try {
+      const r = await fetch("/assets/smartmeter-1/titel.jpg");
+      if (r.ok) {
+        const blob = await r.blob();
+        bild = await new Promise((ok, f) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = f; fr.readAsDataURL(blob); });
+      }
+    } catch (e) { bild = null; }
+    flaeche(NAVY1); doc.rect(0, 0, W, H, "F");
+    if (bild && /^data:image\/jpe?g/.test(bild)) {
+      const bw = H * 880 / 1168;
+      doc.addImage(bild, "JPEG", (W - bw) / 2, 0, bw, H);
+    } else verlauf(0, 0, W, H, NAVY1, NAVY2, { quer: false });
+    doc.saveGraphicsState();
+    for (let i = 0; i < 100; i++) { deckkraft(0.92 * Math.pow(1 - i / 99, 1.6)); flaeche(NAVY1); doc.rect(0, i * 1.2, W, 1.25, "F"); }
+    doc.restoreGraphicsState(); deckkraft(1);
+    doc.addImage(logo, "JPEG", RA, 16, (420 / 196) * 15, 15);
+    flaeche(GRUEN); doc.roundedRect(RA, 40, 44, 8, 4, 4, "F");
+    schrift(7.8, true); farbe(NAVY1); text("SMARTMETER", RA + 5.5, 45.2, { charSpace: 0.8 });
+    schrift(30, true); farbe(WEISS); text(tx.titel1, RA, 63); farbe(GRUEN2); text(tx.titel2, RA, 76);
+    zeilen(tx.unterzeile, RA, 87, 120, 11, HELLBLAU, 1.4);
+    doc.saveGraphicsState(); deckkraft(0.9); flaeche(NAVY1); doc.rect(0, H - 34, W, 34, "F"); doc.restoreGraphicsState(); deckkraft(1);
+    flaeche(GRUEN); doc.rect(0, H - 34, W, 1.2, "F");
+    const anzahlSm = new Set(smPos.map((p) => p.lieferstelle)).size;
+    schrift(7, true); farbe(GRUEN2); text("ANGEBOT FÜR", RA, H - 24, { charSpace: 0.5 });
+    schrift(13, true); farbe(WEISS); passend(kunde.firma || "–", 110, 13); text(kunde.firma || "–", RA, H - 17.5);
+    schrift(8.5); farbe(HELLBLAU); text(anzahlSm + (anzahlSm === 1 ? " Lieferstelle" : " Lieferstellen") + " · Angebot vom " + heuteD, RA, H - 12);
+    schrift(7, true); farbe(GRUEN2); text("IHR ANSPRECHPARTNER", W - RA, H - 24, { align: "right", charSpace: 0.5 });
+    schrift(10, true); farbe(WEISS); text(berater.name || "EGC Energie", W - RA, H - 17.5, { align: "right" });
+    schrift(8.5); farbe(HELLBLAU); text(berater.email || F.email || "", W - RA, H - 12, { align: "right" });
+    schrift(6.5); farbe([170, 182, 198]); text("Abbildung ähnlich", W - RA, H - 37, { align: "right" });
+
+    /* Vorteile und Preise */
+    let ys = neueSeite("SMARTMETER-ANGEBOT");
+    schrift(8, true); farbe(GRUEN1); text("IHRE VORTEILE", RA, ys, { charSpace: 1 }); ys += 4;
+    const kb = (BR - 5) / 2, khh = 34;
+    (tx.kacheln || []).slice(0, 4).forEach((k, i) => {
+      const x = RA + (i % 2) * (kb + 5), yy = ys + Math.floor(i / 2) * (khh + 5);
+      verlauf(x, yy, kb, khh, i % 3 ? NAVY1 : NAVY2, i % 3 ? NAVY2 : [38, 74, 116], { r: 2, stufen: 50 });
+      flaeche(GRUEN); doc.circle(x + 9, yy + 10, 4.2, "F"); strich(WEISS); doc.setLineWidth(0.9);
+      doc.line(x + 7.1, yy + 10, x + 8.5, yy + 11.5); doc.line(x + 8.5, yy + 11.5, x + 11.1, yy + 8.4);
+      schrift(13, true); farbe(WEISS); const tz = doc.splitTextToSize(String(k.t || ""), kb - 22);
+      doc.text(tz, x + 17, yy + 11.5, { lineHeightFactor: 1.15 });
+      zeilen(k.s, x + 6, yy + 11.5 + tz.length * 5.2 + 3, kb - 12, 8.6, HELLBLAU, 1.35);
+    });
+    ys += 2 * (khh + 5) + 6;
+    schrift(8, true); farbe(GRUEN1); text("IHRE PREISE", RA, ys, { charSpace: 1 }); ys += 4;
+    const sp1 = RA + 3, sp2 = RA + 112;
+    const tabKopf = () => {
+      flaeche(NAVY); doc.roundedRect(RA, ys, BR, 8, 1.5, 1.5, "F");
+      schrift(7.5, true); farbe(WEISS); text("Leistung", sp1, ys + 5.3); text("Abrechnung", sp2, ys + 5.3);
+      text("Preis netto", RA + BR - 3, ys + 5.3, { align: "right" }); ys += 8;
+    };
+    tabKopf();
+    let zeile = 0;
+    a.lieferstellen.forEach((l, i) => {
+      const lp = smPos.filter((p) => p.lieferstelle === l.id);
+      lp.forEach((p, j) => {
+        const h = j === 0 ? 12 : 7.5;
+        if (ys + h > H - 40) { ys = neueSeite("SMARTMETER-ANGEBOT"); tabKopf(); }
+        flaeche(zeile++ % 2 ? WEISS : HELLGRAU); doc.rect(RA, ys, BR, h, "F");
+        let yy = ys + 5;
+        if (j === 0) {
+          schrift(7, true); farbe(GRUEN1);
+          text((l.bezeichnung || "Lieferstelle " + (i + 1)) + (l.meloId ? " · MeLo " + l.meloId : ""), sp1, ys + 4.2); yy = ys + 9.2;
+        }
+        schrift(8.6); farbe(TEXT); passend(p.bezeichnung, sp2 - sp1 - 4, 8.6); text(p.bezeichnung, sp1, yy);
+        schrift(8.6); text(p.art === "monatlich" ? "monatlich" : "einmalig", sp2, yy);
+        const pr = zahlLesen(p.preis);
+        schrift(8.6, true); text(isNaN(pr) ? "auf Anfrage" : eurx(pr) + (p.art === "monatlich" ? " / Monat" : ""), RA + BR - 3, yy, { align: "right" });
+        ys += h;
+      });
+    });
+    const su = smartmeterSummen({ positionen: smPos });
+    ys += 4;
+    if (ys + 50 > H - 22) ys = neueSeite("SMARTMETER-ANGEBOT");
+    const sb = (BR - 8) / 3;
+    [["EINMALIG GESAMT", eurx(su.einmalig)], ["MONATLICH GESAMT", eurx(su.monatlich)], ["PRO JAHR (12 × MONATLICH)", eurx(su.jahr)]].forEach(([k, w], i) => {
+      const x = RA + i * (sb + 4);
+      if (i === 2) verlauf(x, ys, sb, 17, GRUEN1, GRUEN, { r: 2, stufen: 40 }); else { flaeche(GRUENHELL); doc.roundedRect(x, ys, sb, 17, 2, 2, "F"); }
+      schrift(6.6, true); farbe(i === 2 ? WEISS : GRUEN1); text(k, x + 4, ys + 6, { charSpace: 0.3 });
+      schrift(14, true); farbe(i === 2 ? WEISS : NAVY); text(w, x + 4, ys + 13.5);
+    });
+    ys += 24;
+    ys = zeilen(tx.hinweis, RA, ys, BR, 7.8, GRAU, 1.35) + 6;
+    if (ys + 38 < H - 18) {
+      schrift(8, true); farbe(GRUEN1); text("SO GEHT ES WEITER", RA, ys, { charSpace: 1 }); ys += 5;
+      const schritte = [["1", "Auftrag", "Sie bestätigen das Angebot."], ["2", "Termin", "Der Messstellenbetreiber meldet sich zur Terminabsprache."],
+        ["3", "Einbau", "Einbau und Inbetriebnahme vor Ort."], ["4", "Portal", "Sie erhalten Ihren Zugang zur Verbrauchsanalyse."]];
+      const sw = (BR - 9) / 4;
+      schritte.forEach(([n2, t2, s2], i) => {
+        const x = RA + i * (sw + 3);
+        flaeche(HELLGRAU); doc.roundedRect(x, ys, sw, 27, 2, 2, "F");
+        flaeche(NAVY); doc.circle(x + 7, ys + 7.5, 3.6, "F"); schrift(8.5, true); farbe(WEISS); text(n2, x + 7, ys + 8.8, { align: "center" });
+        schrift(9.5, true); farbe(NAVY); text(t2, x + 13, ys + 8.8);
+        zeilen(s2, x + 4, ys + 16, sw - 8, 7.6, TEXT, 1.3);
+      });
+    }
+  }
+
   } /* Ende: nicht blanko */
 
   /* ---------- Service- & Beratungsauftrag (nur wenn der Vertriebspartner ihn angehängt haben will) ---------- */
@@ -2928,6 +3041,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   /* Seitenzahlen (beim Angebot ohne Deckblatt und Schlussseite) */
   const n = doc.getNumberOfPages();
   for (let i = blanko ? 1 : 2; i <= (blanko ? n : n - 1); i++) {
+    if (i === smTitel) continue;
     doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 6.4, { align: "right" });
   }
 
@@ -3515,6 +3629,33 @@ const UMLAGEN_VORGABE = {
           ["Stromsteuer", "2,05"], ["Konzessionsabgabe", "0,11"]],
   gas: [["Energiesteuer", "0,55"], ["Konvertierungsumlage", "0,018"], ["Konzessionsabgabe", "0,03"]],
 };
+/* Smartmeter-Angebot: Texte und Positionsvorlagen. Pflegen Kalkulation und GF (Einstellung „smartmeter“),
+   je Angebot änderbar. Titelbild liegt unter /assets/smartmeter-1/titel.jpg (Abbildung ähnlich). */
+const SMARTMETER_VORGABE = {
+  titel1: "Ihre Energie.", titel2: "Jederzeit im Blick.",
+  unterzeile: "Intelligente Messsysteme für Ihre Lieferstellen, mit digitalem Portal zur Verbrauchsanalyse.",
+  kacheln: [
+    { t: "Kein Ablesen mehr", s: "Zählerstände werden automatisch übermittelt. Sie müssen nichts mehr ablesen und nichts mehr melden." },
+    { t: "Bisherige Messkosten entfallen", s: "Die bisherigen Kosten für den Messstellenbetrieb bei Ihrem aktuellen Versorger entfallen." },
+    { t: "Digitales Portal", s: "Verbrauchsanalyse online: Verläufe, Spitzen und Auffälligkeiten jederzeit im Blick." },
+    { t: "Alle Verbrauchsstellen", s: "Auswertung aller Lieferstellen gebündelt in einem Portal, übersichtlich und vergleichbar." },
+  ],
+  hinweis: "Alle Preise netto zuzüglich der gesetzlichen Umsatzsteuer. Der Einbau erfolgt durch den Messstellenbetreiber nach Terminabsprache. Voraussetzung ist die Angabe der Messlokation (MeLo-ID) je Lieferstelle.",
+  vorlagen: [
+    { bezeichnung: "Einbau und Inbetriebnahme intelligentes Messsystem", art: "einmalig", preis: "" },
+    { bezeichnung: "Messstellenbetrieb inklusive Portalzugang", art: "monatlich", preis: "" },
+  ],
+};
+let SMARTMETER = SMARTMETER_VORGABE;
+const setzeSmartmeter = (w) => { SMARTMETER = { ...SMARTMETER_VORGABE, ...(w || {}) }; };
+/* Summen der Positionen: einmalig, monatlich, je Jahr */
+const smartmeterSummen = (sm) => {
+  const p = ((sm && sm.positionen) || []).filter((x) => !isNaN(zahlLesen(x.preis)));
+  const einmalig = p.filter((x) => x.art !== "monatlich").reduce((t, x) => t + zahlLesen(x.preis), 0);
+  const monatlich = p.filter((x) => x.art === "monatlich").reduce((t, x) => t + zahlLesen(x.preis), 0);
+  return { einmalig, monatlich, jahr: monatlich * 12, anzahl: p.length };
+};
+
 /* Umlagen früherer Jahre, damit eine alte Abrechnung fair mit dem Angebot verglichen werden kann.
    Vorgabewerte (Summen ct/kWh netto); die Kalkulation prüft und pflegt sie unter „Staatliche Umlagen“.
    Strom 2025: KWKG 0,277 + Offshore 0,816 + bes. Netznutzung 1,558 + Stromsteuer 2,05 + KA 0,11
@@ -4436,6 +4577,129 @@ function AbrechnungAuslesen({ l, setL, user }) {
   );
 }
 
+/* Kalkulation: Smartmeter-Angebot mit Positionen je Lieferstelle, Vorlagen und Texten */
+const smartmeterStart = (a) => ({
+  positionen: (a.lieferstellen || []).flatMap((l) => (SMARTMETER.vorlagen || []).map((v) => ({ id: uid(), lieferstelle: l.id, ...v }))),
+  texte: { titel1: SMARTMETER.titel1, titel2: SMARTMETER.titel2, unterzeile: SMARTMETER.unterzeile,
+           kacheln: (SMARTMETER.kacheln || []).map((k) => ({ ...k })), hinweis: SMARTMETER.hinweis },
+});
+function SmartmeterKalk({ a, sm, setSm, user }) {
+  const [textOffen, setTextOffen] = useState(false);
+  const [meldung, setMeldung] = useState("");
+  const darfVorlage = ["Kalkulation", "Geschäftsführung"].includes(user.rolle);
+  if (!sm) {
+    return (
+      <div className="p-4 rounded flex flex-wrap items-center justify-between gap-3" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+        <span className="text-sm">Smartmeter{a.smartmeter ? " gewünscht" : ""}: noch kein Smartmeter-Angebot</span>
+        <Btn variante="hell" icon={Plus} onClick={() => setSm(smartmeterStart(a))}>Smartmeter-Angebot hinzufügen</Btn>
+      </div>
+    );
+  }
+  const pos = sm.positionen || [];
+  const setPos = (id, k, w) => setSm({ ...sm, positionen: pos.map((p) => (p.id === id ? { ...p, [k]: w } : p)) });
+  const neuPos = (lid, v = { bezeichnung: "", art: "einmalig", preis: "" }) =>
+    setSm({ ...sm, positionen: [...pos, { id: uid(), lieferstelle: lid, ...v }] });
+  const aufAlle = (lid) => {
+    const quelle = pos.filter((p) => p.lieferstelle === lid);
+    setSm({ ...sm, positionen: [...quelle, ...a.lieferstellen.filter((l) => l.id !== lid)
+      .flatMap((l) => quelle.map((p) => ({ ...p, id: uid(), lieferstelle: l.id })))] });
+  };
+  const t = sm.texte || {};
+  const setT = (k, w) => setSm({ ...sm, texte: { ...t, [k]: w } });
+  const setKachel = (i, k, w) => setT("kacheln", (t.kacheln || []).map((x, j) => (j === i ? { ...x, [k]: w } : x)));
+  const sum = smartmeterSummen(sm);
+  const speichernAlsStandard = async (teil) => {
+    setMeldung("");
+    const wert = { ...SMARTMETER };
+    if (teil === "vorlagen") {
+      const gesehen = new Set();
+      wert.vorlagen = pos.filter((p) => p.bezeichnung.trim()).map(({ bezeichnung, art, preis }) => ({ bezeichnung: bezeichnung.trim(), art, preis }))
+        .filter((p) => { const k = p.bezeichnung + "|" + p.art; if (gesehen.has(k)) return false; gesehen.add(k); return true; });
+    } else Object.assign(wert, { titel1: t.titel1, titel2: t.titel2, unterzeile: t.unterzeile, kacheln: t.kacheln, hinweis: t.hinweis });
+    const f = await einstellungSpeichern("smartmeter", wert);
+    if (f) setMeldung("Nicht gespeichert: " + f);
+    else { setzeSmartmeter(wert); setMeldung(teil === "vorlagen" ? "Positionen als Vorlage gespeichert." : "Texte als Standard gespeichert."); }
+  };
+  const eur2 = (x) => num(x, 2) + " €";
+  return (
+    <div className="p-4 rounded space-y-4" style={{ background: "#F7FAF5", border: "1px solid " + C.ok }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm">Smartmeter-Angebot <span className="text-xs" style={{ color: C.muted }}>zwei Seiten im Angebots-PDF, alle Preise netto</span></span>
+        <button className="text-xs underline" style={{ color: C.warn }} onClick={() => setSm(null)}>Smartmeter-Angebot entfernen</button>
+      </div>
+      {a.lieferstellen.map((l, i) => (
+        <div key={l.id} className="p-3 rounded" style={{ background: "#fff", border: "1px solid " + C.line }}>
+          <div className="text-sm mb-2">{l.bezeichnung || "Lieferstelle " + (i + 1)}
+            <span className="text-xs ml-2" style={{ color: l.meloId ? C.muted : C.warn }}>{l.meloId ? "MeLo " + l.meloId : "MeLo-ID fehlt"}</span>
+          </div>
+          <div className="space-y-2">
+            {pos.filter((p) => p.lieferstelle === l.id).map((p) => (
+              <div key={p.id} className="grid grid-cols-12 gap-2 items-end">
+                <div className="col-span-12 sm:col-span-6">
+                  <Feld label="Position" value={p.bezeichnung} onChange={(w) => setPos(p.id, "bezeichnung", w)} />
+                </div>
+                <div className="col-span-5 sm:col-span-3">
+                  <Select label="Abrechnung" value={p.art} onChange={(w) => setPos(p.id, "art", w)}
+                    options={[{ value: "einmalig", label: "einmalig" }, { value: "monatlich", label: "monatlich" }]} />
+                </div>
+                <div className="col-span-5 sm:col-span-2">
+                  <Feld label="Preis netto in €" value={p.preis} onChange={(w) => setPos(p.id, "preis", w)} />
+                </div>
+                <button className="col-span-2 sm:col-span-1 pb-2" title="Position entfernen" style={{ color: C.muted }}
+                  onClick={() => setSm({ ...sm, positionen: pos.filter((x) => x.id !== p.id) })}><X size={16} /></button>
+              </div>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-3 mt-2 text-xs">
+            <button className="underline" style={{ color: C.strom }} onClick={() => neuPos(l.id)}>+ Position</button>
+            {(SMARTMETER.vorlagen || []).length > 0 && (
+              <select className="text-xs px-2 py-1 rounded max-w-full" style={{ border: "1px solid " + C.line }} value=""
+                onChange={(e) => { const v = SMARTMETER.vorlagen[Number(e.target.value)]; if (v) neuPos(l.id, { ...v }); }}>
+                <option value="">+ aus Vorlage</option>
+                {SMARTMETER.vorlagen.map((v, j) => <option key={j} value={j}>{v.bezeichnung} ({v.art})</option>)}
+              </select>
+            )}
+            {a.lieferstellen.length > 1 && (
+              <button className="underline" style={{ color: C.strom }} onClick={() => aufAlle(l.id)}>Diese Positionen auf alle Lieferstellen übertragen</button>
+            )}
+          </div>
+        </div>
+      ))}
+      <div className="text-sm">
+        Einmalig {eur2(sum.einmalig)} · monatlich {eur2(sum.monatlich)} · pro Jahr {eur2(sum.jahr)}
+      </div>
+      <div className="flex flex-wrap gap-3 text-xs">
+        <button className="underline" style={{ color: C.strom }} onClick={() => setTextOffen(!textOffen)}>
+          {textOffen ? "Texte zuklappen" : "Texte im Angebot ansehen und ändern"}
+        </button>
+        {darfVorlage && <button className="underline" style={{ color: C.strom }} onClick={() => speichernAlsStandard("vorlagen")}>Positionen als Vorlage speichern</button>}
+      </div>
+      {textOffen && (
+        <div className="space-y-3">
+          <div className="grid sm:grid-cols-2 gap-3">
+            <Feld label="Titel Zeile 1" value={t.titel1 || ""} onChange={(w) => setT("titel1", w)} />
+            <Feld label="Titel Zeile 2 (grün)" value={t.titel2 || ""} onChange={(w) => setT("titel2", w)} />
+          </div>
+          <Feld label="Unterzeile" value={t.unterzeile || ""} onChange={(w) => setT("unterzeile", w)} />
+          {(t.kacheln || []).map((k, i) => (
+            <div key={i} className="grid sm:grid-cols-3 gap-3">
+              <Feld label={"Vorteil " + (i + 1) + ": Überschrift"} value={k.t} onChange={(w) => setKachel(i, "t", w)} />
+              <div className="sm:col-span-2"><Feld label="Text" value={k.s} onChange={(w) => setKachel(i, "s", w)} /></div>
+            </div>
+          ))}
+          <label className="block">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>Hinweis unter den Preisen</span>
+            <textarea rows={3} value={t.hinweis || ""} onChange={(e) => setT("hinweis", e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+          </label>
+          {darfVorlage && <Btn variante="hell" icon={Check} onClick={() => speichernAlsStandard("texte")}>Texte als Standard speichern</Btn>}
+        </div>
+      )}
+      {meldung && <p className="text-xs" style={{ color: /^Nicht/.test(meldung) ? C.warn : C.ok }}>{meldung}</p>}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpeichern, onSenden, onAbbrechen }) {
   const [a, setA] = useState(entwurf || leereAnfrage(user));
@@ -4519,6 +4783,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
       const n = (l.bezeichnung || "Lieferstelle " + (i + 1)) + ": ";
       if (l.neueinzug && !l.gewerbeanmeldung) f.push(n + "Gewerbeanmeldung (Neueinzug)");
       if (l.neueinzug && !l.pachtvertrag) f.push(n + "Pachtvertrag (Neueinzug)");
+      if (a.smartmeter && !l.meloId) f.push(n + "Messlokations-ID (MeLo-ID) für den Smartmeter");
     });
     if (a.wunschLieferbeginn && a.wunschLieferbeginn < fruehesterBeginn())
       f.push("Lieferbeginn frühestens am " + datum(fruehesterBeginn()));
@@ -4666,6 +4931,20 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
 
         {schritt === 2 && (
           <div className="space-y-6">
+            <div className="p-4 rounded"
+                 style={{ background: a.smartmeter ? "#F1F7F0" : "#F6F8FA", border: "1px solid " + (a.smartmeter ? C.ok : C.line) }}>
+              <label className="flex items-start gap-3 text-sm">
+                <input type="checkbox" className="mt-0.5" checked={!!a.smartmeter}
+                  onChange={(e) => setA({ ...a, smartmeter: e.target.checked })} style={{ accentColor: C.ok }} />
+                <span>
+                  Smartmeter gewünscht
+                  <span className="block text-xs mt-0.5" style={{ color: C.muted }}>
+                    Die Kalkulation legt dem Angebot ein Smartmeter-Angebot bei. Dafür brauchst du zu jeder
+                    Lieferstelle die Messlokations-ID (MeLo-ID), sie steht auf der Abrechnung des Kunden.
+                  </span>
+                </span>
+              </label>
+            </div>
             <div className="p-4 rounded"
                  style={{ background: a.lieferstellenListe ? "#F1F5FA" : "#F6F8FA",
                           border: "1px solid " + (a.lieferstellenListe ? C.strom : C.line) }}>
@@ -4834,6 +5113,11 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                         <Feld label="Marktlokations-ID (MaLo) *" value={l.maloId}
                           onChange={(v) => setL(l.id, "maloId", v)} placeholder="11-stellig"
                           fehler={geprueft && !l.maloId} />
+                        {a.smartmeter && (
+                          <Feld label="Messlokations-ID (MeLo-ID) * für den Smartmeter" value={l.meloId || ""}
+                            onChange={(v) => setL(l.id, "meloId", v.replace(/\s/g, "").toUpperCase())}
+                            placeholder="DE und 31 weitere Zeichen" fehler={geprueft && !l.meloId} />
+                        )}
                         <Feld label="Jahresverbrauch in kWh *" value={l.verbrauch} zahl
                           onChange={(v) => setL(l.id, "verbrauch", v)}
                           fehler={geprueft && !l.verbrauch} />
@@ -5349,6 +5633,7 @@ function kurzinfoZeilen(a) {
       ["Lieferende", a.laufzeitArt === "ende" ? (a.wunschLieferende ? datum(a.wunschLieferende) : "offen")
         : (a.wunschLieferende ? datum(a.wunschLieferende) : a.laufzeit ? a.laufzeit + " Monate Laufzeit" : "offen")],
       ["Beschaffungsmodell", modell || "–"],
+      ...(a.smartmeter ? [["Smartmeter", "gewünscht, MeLo-ID je Lieferstelle angegeben"]] : []),
       ["Aufschlag", num(zahlLesen(a.aufschlag) || 0, 3) + " ct/kWh"],
       ...(hatStrom ? [["Verbrauch Strom gesamt", num(summe("strom")) + " kWh"]] : []),
       ...(hatGas ? [["Verbrauch Erdgas gesamt", num(summe("gas")) + " kWh"]] : []),
@@ -5453,6 +5738,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const setVorvFeld = (lid, k, w) => setVorv((alt) => ({ ...alt, [lid]: { ...(alt[lid] || {}), [k]: w } }));
   const [vmBemerkung, setVmBemerkung] = useState((a.kalkulation && a.kalkulation.vollmachtBemerkung) || "");
   const [hinweisPartner, setHinweisPartner] = useState((a.kalkulation && a.kalkulation.hinweisPartner) || "");
+  const [sm, setSm] = useState(() => (a.kalkulation && a.kalkulation.smartmeter) || (a.smartmeter ? smartmeterStart(a) : null));
   const [erzeugt, setErzeugt] = useState(null);
   const [kurz, setKurz] = useState(false);
   const [paketLaeuft, setPaketLaeuft] = useState(false);
@@ -5469,7 +5755,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         jahr: umlagenJahr(UMLAGEN), vorjahre: umlagenVorjahre(UMLAGEN) }));
       if (!v.umlagen) setVar(v.id, "umlagen", vu);
       const pdf = await egcAngebotPdf(a, { ...v, umlagen: vu },
-        { mitarbeiter, vorversorger: mitVergleich ? vorv : {}, vollmachtBemerkung: vmBemerkung });
+        { mitarbeiter, vorversorger: mitVergleich ? vorv : {}, vollmachtBemerkung: vmBemerkung, smartmeter: sm });
       setVar(v.id, "angebot", pdf);
       setVar(v.id, "angebotMitVergleich", mitVergleich);
       /* gleich anzeigen, damit die Kalkulation es prüfen kann */
@@ -5502,6 +5788,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         vorversorger: vorv,
         vollmachtBemerkung: vmBemerkung,
         hinweisPartner: hinweisPartner.trim(),
+        smartmeter: sm,
         gewaehlt: null,
         varianten: vars.map((v) => ({
           ...v,
@@ -6137,6 +6424,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   {l.vertragsendeAlt && <Zeile k="Vertrag läuft bis" v={datum(l.vertragsendeAlt)} />}
                   {l.kuendigungsfrist && <Zeile k="Kündigungsfrist" v={l.kuendigungsfrist} />}
                   {l.abrechnungJahr && <Zeile k="Abrechnung aus" v={l.abrechnungJahr} />}
+                  {(a.smartmeter || l.meloId) && <Zeile k="Messlokations-ID (Smartmeter)" v={l.meloId || "fehlt"} />}
                   <Zeile k="Jahresverbrauch" v={num(parseFloat(l.verbrauch) || 0) + " kWh"} />
                   <Zeile k="Zählernummer" v={l.zaehlernummer} />
                   <Zeile k="Marktlokations-ID" v={l.maloId} />
@@ -6340,6 +6628,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                       von Hand ergänzen kann.
                     </span>
                   </label>
+
+                  <SmartmeterKalk a={a} sm={sm} setSm={setSm} user={user} />
 
                   <label className="block">
                     <span className="block text-xs mb-1" style={{ color: C.muted }}>
@@ -7321,6 +7611,15 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   <p className="whitespace-pre-line">{a.kalkulation.hinweisPartner}</p>
                 </div>
               )}
+              {a.kalkulation.smartmeter && smartmeterSummen(a.kalkulation.smartmeter).anzahl > 0 && (() => {
+                const su = smartmeterSummen(a.kalkulation.smartmeter);
+                return (
+                  <div className="p-3 rounded text-sm mt-3" style={{ background: "#F1F7F0", border: "1px solid " + C.ok }}>
+                    <span style={{ color: C.ok }}>Smartmeter-Angebot im PDF enthalten:</span>{" "}
+                    einmalig {num(su.einmalig, 2)} €, monatlich {num(su.monatlich, 2)} € netto
+                  </div>
+                );
+              })()}
               {varianten(a).length > 1 && a.status === "angebot" && (
                 <p className="text-sm mb-4" style={{ color: C.muted }}>
                   Der Kunde wählt aus. Je Sparte wird eine Variante angenommen, bei Strom und Erdgas
@@ -18545,6 +18844,7 @@ export function PortalApp({ pruefung } = {}) {
     if (e.firmenanteil != null) setFirmenanteil(String(e.firmenanteil));
     if (e.firmendaten) setFirmendaten(firmendatenMit(e.firmendaten));
     if (e.umlagen) setzeUmlagen(e.umlagen);
+    if (e.smartmeter) setzeSmartmeter(e.smartmeter);
   };
 
   const sammlungLaden = async (n) => {

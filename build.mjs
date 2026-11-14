@@ -85,6 +85,10 @@ await cp("daten/strom-de-lu.json", "dist/assets/strom-de-lu-" + STROM_STAND + ".
 /* Postleitzahl-Mittelpunkte für die Umkreissuche (GeoNames, CC BY 4.0). Bei neuem Bestand PLZ_STAND hier und in App.jsx erhöhen. */
 const PLZ_STAND = "1";
 await cp("daten/plz-de.json", "dist/assets/plz-de-" + PLZ_STAND + ".json");
+/* Titelbild des Smartmeter-Angebots (Abbildung ähnlich). Bei neuem Bild Stand hier und in App.jsx erhöhen. */
+const SMARTMETER_STAND = "1";
+await mkdir("dist/assets/smartmeter-" + SMARTMETER_STAND, { recursive: true });
+await cp("druckvorlagen/smartmeter/titel.jpg", "dist/assets/smartmeter-" + SMARTMETER_STAND + "/titel.jpg");
 
 await cp("manifest.json", "dist/manifest.json");
 await cp("icon-192.png", "dist/icon-192.png");
