@@ -2839,17 +2839,31 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     /* Vorteile und Preise */
     let ys = neueSeite("SMARTMETER-ANGEBOT");
     schrift(8, true); farbe(GRUEN1); text("IHRE VORTEILE", RA, ys, { charSpace: 1 }); ys += 4;
-    const kb = (BR - 5) / 2, khh = 34;
-    (tx.kacheln || []).slice(0, 4).forEach((k, i) => {
-      const x = RA + (i % 2) * (kb + 5), yy = ys + Math.floor(i / 2) * (khh + 5);
+    const kach = (tx.kacheln || []).filter((k) => String(k.t || "").trim()).slice(0, 6);
+    const eng = kach.length > 4, khh = eng ? 25 : 34, abst = eng ? 4 : 5;
+    kach.forEach((k, i) => {
+      const voll = i === kach.length - 1 && kach.length % 2 === 1;
+      const kb = voll ? BR : (BR - 5) / 2;
+      const x = RA + (voll ? 0 : (i % 2) * (kb + 5)), yy = ys + Math.floor(i / 2) * (khh + abst);
       verlauf(x, yy, kb, khh, i % 3 ? NAVY1 : NAVY2, i % 3 ? NAVY2 : [38, 74, 116], { r: 2, stufen: 50 });
-      flaeche(GRUEN); doc.circle(x + 9, yy + 10, 4.2, "F"); strich(WEISS); doc.setLineWidth(0.9);
-      doc.line(x + 7.1, yy + 10, x + 8.5, yy + 11.5); doc.line(x + 8.5, yy + 11.5, x + 11.1, yy + 8.4);
-      schrift(13, true); farbe(WEISS); const tz = doc.splitTextToSize(String(k.t || ""), kb - 22);
-      doc.text(tz, x + 17, yy + 11.5, { lineHeightFactor: 1.15 });
-      zeilen(k.s, x + 6, yy + 11.5 + tz.length * 5.2 + 3, kb - 12, 8.6, HELLBLAU, 1.35);
+      const oy = eng ? -2 : 0, tg = eng ? 11.5 : 13;
+      flaeche(GRUEN); doc.circle(x + 9, yy + 10 + oy, 4.2, "F"); strich(WEISS); doc.setLineWidth(0.9);
+      doc.line(x + 7.1, yy + 10 + oy, x + 8.5, yy + 11.5 + oy); doc.line(x + 8.5, yy + 11.5 + oy, x + 11.1, yy + 8.4 + oy);
+      schrift(tg, true); farbe(WEISS); const tz = doc.splitTextToSize(String(k.t || ""), kb - 22);
+      doc.text(tz, x + 17, yy + 11.5 + oy, { lineHeightFactor: 1.15 });
+      zeilen(k.s, x + 6, yy + 11.5 + oy + tz.length * tg * 0.4 + (eng ? 2 : 3), kb - 12, eng ? 8 : 8.6, HELLBLAU, 1.3);
     });
-    ys += 2 * (khh + 5) + 6;
+    ys += Math.ceil(kach.length / 2) * (khh + abst) + 1;
+    /* Klarstellung: EGC baut nicht selbst ein */
+    if (String(tx.einbau || "").trim()) {
+      schrift(8.6); const ez = doc.splitTextToSize(String(tx.einbau), BR - 16);
+      const eh = 11 + ez.length * 8.4 * 0.3528 * 1.35;
+      flaeche(GRUENHELL); doc.roundedRect(RA, ys, BR, eh, 2, 2, "F");
+      verlauf(RA, ys, 1.8, eh, GRUEN2, GRUEN1, { quer: false, stufen: 20 });
+      schrift(8.6, true); farbe(NAVY); text("Einbau und Betrieb durch den Messstellenbetreiber", RA + 6, ys + 5.5);
+      zeilen(tx.einbau, RA + 6, ys + 10, BR - 12, 8.4, TEXT, 1.35);
+      ys += eh + 6;
+    } else ys += 5;
     schrift(8, true); farbe(GRUEN1); text("IHRE PREISE", RA, ys, { charSpace: 1 }); ys += 4;
     const sp1 = RA + 3, sp2 = RA + 112;
     const tabKopf = () => {
@@ -2879,7 +2893,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     });
     const su = smartmeterSummen({ positionen: smPos });
     ys += 4;
-    if (ys + 50 > H - 22) ys = neueSeite("SMARTMETER-ANGEBOT");
+    if (ys + 32 > H - 22) ys = neueSeite("SMARTMETER-ANGEBOT");
     const sb = (BR - 8) / 3;
     [["EINMALIG GESAMT", eurx(su.einmalig)], ["MONATLICH GESAMT", eurx(su.monatlich)], ["PRO JAHR (12 × MONATLICH)", eurx(su.jahr)]].forEach(([k, w], i) => {
       const x = RA + i * (sb + 4);
@@ -2891,8 +2905,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     ys = zeilen(tx.hinweis, RA, ys, BR, 7.8, GRAU, 1.35) + 6;
     if (ys + 38 < H - 18) {
       schrift(8, true); farbe(GRUEN1); text("SO GEHT ES WEITER", RA, ys, { charSpace: 1 }); ys += 5;
-      const schritte = [["1", "Auftrag", "Sie bestätigen das Angebot."], ["2", "Termin", "Der Messstellenbetreiber meldet sich zur Terminabsprache."],
-        ["3", "Einbau", "Einbau und Inbetriebnahme vor Ort."], ["4", "Portal", "Sie erhalten Ihren Zugang zur Verbrauchsanalyse."]];
+      const schritte = [["1", "Auftrag", "Sie bestätigen das Angebot."], ["2", "Termin", "Der Messstellenbetreiber oder sein zugelassener Partner meldet sich."],
+        ["3", "Einbau", "Einbau und Inbetriebnahme durch den Messstellenbetreiber."], ["4", "Portal", "Sie erhalten Ihren Zugang zur Verbrauchsanalyse."]];
       const sw = (BR - 9) / 4;
       schritte.forEach(([n2, t2, s2], i) => {
         const x = RA + i * (sw + 3);
@@ -3639,10 +3653,12 @@ const SMARTMETER_VORGABE = {
     { t: "Bisherige Messkosten entfallen", s: "Die bisherigen Kosten für den Messstellenbetrieb bei Ihrem aktuellen Versorger entfallen." },
     { t: "Digitales Portal", s: "Verbrauchsanalyse online: Verläufe, Spitzen und Auffälligkeiten jederzeit im Blick." },
     { t: "Alle Verbrauchsstellen", s: "Auswertung aller Lieferstellen gebündelt in einem Portal, übersichtlich und vergleichbar." },
+    { t: "Zugang zu Live-Börsenpreisen", s: "Mit dem Smartmeter ist eine Belieferung zu aktuellen Spotmarktpreisen möglich. Sie zahlen den Börsenpreis, ohne die Risikoaufschläge, die Versorger für Festpreise am Terminmarkt einrechnen." },
   ],
-  hinweis: "Alle Preise netto zuzüglich der gesetzlichen Umsatzsteuer. Der Einbau erfolgt durch den Messstellenbetreiber nach Terminabsprache. Voraussetzung ist die Angabe der Messlokation (MeLo-ID) je Lieferstelle.",
+  einbau: "EGC Energie baut keine Smartmeter ein und betreibt sie nicht. Einbau und Messstellenbetrieb übernimmt der Messstellenbetreiber bzw. ein von ihm beauftragtes, zugelassenes Unternehmen. EGC Energie berät Sie und koordiniert den Auftrag.",
+  hinweis: "Alle Preise netto zuzüglich der gesetzlichen Umsatzsteuer. Der Einbau erfolgt nach Terminabsprache. Voraussetzung ist die Angabe der Messlokation (MeLo-ID) je Lieferstelle.",
   vorlagen: [
-    { bezeichnung: "Einbau und Inbetriebnahme intelligentes Messsystem", art: "einmalig", preis: "" },
+    { bezeichnung: "Einbau und Inbetriebnahme intelligentes Messsystem (durch den Messstellenbetreiber)", art: "einmalig", preis: "" },
     { bezeichnung: "Messstellenbetrieb inklusive Portalzugang", art: "monatlich", preis: "" },
   ],
 };
@@ -4581,7 +4597,7 @@ function AbrechnungAuslesen({ l, setL, user }) {
 const smartmeterStart = (a) => ({
   positionen: (a.lieferstellen || []).flatMap((l) => (SMARTMETER.vorlagen || []).map((v) => ({ id: uid(), lieferstelle: l.id, ...v }))),
   texte: { titel1: SMARTMETER.titel1, titel2: SMARTMETER.titel2, unterzeile: SMARTMETER.unterzeile,
-           kacheln: (SMARTMETER.kacheln || []).map((k) => ({ ...k })), hinweis: SMARTMETER.hinweis },
+           kacheln: (SMARTMETER.kacheln || []).map((k) => ({ ...k })), einbau: SMARTMETER.einbau, hinweis: SMARTMETER.hinweis },
 });
 function SmartmeterKalk({ a, sm, setSm, user }) {
   const [textOffen, setTextOffen] = useState(false);
@@ -4615,7 +4631,7 @@ function SmartmeterKalk({ a, sm, setSm, user }) {
       const gesehen = new Set();
       wert.vorlagen = pos.filter((p) => p.bezeichnung.trim()).map(({ bezeichnung, art, preis }) => ({ bezeichnung: bezeichnung.trim(), art, preis }))
         .filter((p) => { const k = p.bezeichnung + "|" + p.art; if (gesehen.has(k)) return false; gesehen.add(k); return true; });
-    } else Object.assign(wert, { titel1: t.titel1, titel2: t.titel2, unterzeile: t.unterzeile, kacheln: t.kacheln, hinweis: t.hinweis });
+    } else Object.assign(wert, { titel1: t.titel1, titel2: t.titel2, unterzeile: t.unterzeile, kacheln: t.kacheln, einbau: t.einbau, hinweis: t.hinweis });
     const f = await einstellungSpeichern("smartmeter", wert);
     if (f) setMeldung("Nicht gespeichert: " + f);
     else { setzeSmartmeter(wert); setMeldung(teil === "vorlagen" ? "Positionen als Vorlage gespeichert." : "Texte als Standard gespeichert."); }
@@ -4687,6 +4703,11 @@ function SmartmeterKalk({ a, sm, setSm, user }) {
               <div className="sm:col-span-2"><Feld label="Text" value={k.s} onChange={(w) => setKachel(i, "s", w)} /></div>
             </div>
           ))}
+          <label className="block">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>Kasten „Einbau und Betrieb durch den Messstellenbetreiber“</span>
+            <textarea rows={3} value={t.einbau || ""} onChange={(e) => setT("einbau", e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+          </label>
           <label className="block">
             <span className="block text-xs mb-1" style={{ color: C.muted }}>Hinweis unter den Preisen</span>
             <textarea rows={3} value={t.hinweis || ""} onChange={(e) => setT("hinweis", e.target.value)}
@@ -4941,6 +4962,8 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                   <span className="block text-xs mt-0.5" style={{ color: C.muted }}>
                     Die Kalkulation legt dem Angebot ein Smartmeter-Angebot bei. Dafür brauchst du zu jeder
                     Lieferstelle die Messlokations-ID (MeLo-ID), sie steht auf der Abrechnung des Kunden.
+                    Wichtig für das Kundengespräch: EGC Energie baut keine Smartmeter ein. Einbau und Betrieb
+                    übernimmt der Messstellenbetreiber bzw. ein von ihm beauftragtes, zugelassenes Unternehmen.
                   </span>
                 </span>
               </label>
