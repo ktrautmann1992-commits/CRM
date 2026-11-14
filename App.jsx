@@ -2840,7 +2840,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     let ys = neueSeite("SMARTMETER-ANGEBOT");
     schrift(8, true); farbe(GRUEN1); text("IHRE VORTEILE", RA, ys, { charSpace: 1 }); ys += 4;
     const kach = (tx.kacheln || []).filter((k) => String(k.t || "").trim()).slice(0, 6);
-    const eng = kach.length > 4, khh = eng ? 25 : 34, abst = eng ? 4 : 5;
+    const eng = kach.length > 4, khh = eng ? 22 : 34, abst = eng ? 3 : 5;
     /* Bei ungerader Anzahl steht die erste Kachel hervorgehoben über die volle Breite (Vorgabe: Live-Börsenpreise) */
     const ungerade = kach.length % 2 === 1;
     kach.forEach((k, i) => {
@@ -2850,12 +2850,12 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       const x = RA + (voll ? 0 : (pos % 2) * (kb + 5)), yy = ys + Math.floor(pos / 2) * (khh + abst);
       if (voll) verlauf(x, yy, kb, khh, GRUEN1, GRUEN, { r: 2, stufen: 60 });
       else verlauf(x, yy, kb, khh, i % 3 ? NAVY1 : NAVY2, i % 3 ? NAVY2 : [38, 74, 116], { r: 2, stufen: 50 });
-      const oy = eng ? -2 : 0, tg = eng ? 11.5 : 13;
+      const oy = eng ? -3 : 0, tg = eng ? 11.5 : 13;
       flaeche(voll ? WEISS : GRUEN); doc.circle(x + 9, yy + 10 + oy, 4.2, "F"); strich(voll ? GRUEN1 : WEISS); doc.setLineWidth(0.9);
       doc.line(x + 7.1, yy + 10 + oy, x + 8.5, yy + 11.5 + oy); doc.line(x + 8.5, yy + 11.5 + oy, x + 11.1, yy + 8.4 + oy);
       schrift(tg, true); farbe(WEISS); const tz = doc.splitTextToSize(String(k.t || ""), kb - 22);
       doc.text(tz, x + 17, yy + 11.5 + oy, { lineHeightFactor: 1.15 });
-      zeilen(k.s, x + 6, yy + 11.5 + oy + tz.length * tg * 0.4 + (eng ? 2 : 3), kb - 12, eng ? 8 : 8.6, voll ? WEISS : HELLBLAU, 1.3);
+      zeilen(k.s, x + 6, yy + 11.5 + oy + tz.length * tg * 0.4 + (eng ? 1.5 : 3), kb - 12, eng ? 8 : 8.6, voll ? WEISS : HELLBLAU, 1.25);
     });
     ys += Math.ceil(kach.length / 2) * (khh + abst) + 1;
     /* Klarstellung: EGC baut nicht selbst ein */
@@ -2866,7 +2866,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       verlauf(RA, ys, 1.8, eh, GRUEN2, GRUEN1, { quer: false, stufen: 20 });
       schrift(8.6, true); farbe(NAVY); text("Einbau und Betrieb durch den Smartmeter-Messstellenbetreiber", RA + 6, ys + 5.5);
       zeilen(tx.einbau, RA + 6, ys + 10, BR - 12, 8.4, TEXT, 1.35);
-      ys += eh + 6;
+      ys += eh + 5;
     } else ys += 5;
     schrift(8, true); farbe(GRUEN1); text("IHRE PREISE", RA, ys, { charSpace: 1 }); ys += 4;
     const sp1 = RA + 3, sp2 = RA + 112;
@@ -2908,16 +2908,16 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     ys += 22;
     ys = zeilen(tx.hinweis, RA, ys, BR, 7.8, GRAU, 1.35) + 4;
     /* Annahme des Smartmeter-Angebots durch den Kunden, eigene Unterschrift */
-    const nhS = 28;
+    const nhS = 40;
     if (ys + nhS > H - 19) ys = neueSeite("SMARTMETER-ANGEBOT");
     flaeche(HELL); doc.roundedRect(RA, ys, BR, nhS, 3, 3, "F");
     strich(GRUEN); doc.setLineWidth(0.4); doc.setLineDashPattern([1.6, 1.2], 0);
     doc.roundedRect(RA, ys, BR, nhS, 3, 3, "S"); doc.setLineDashPattern([], 0);
     haken(RA + 4, ys + 7.4);
-    schrift(9.5, true); farbe(NAVY); text("Smartmeter-Angebot angenommen:", RA + 9.5, ys + 7);
-    schrift(8.5); farbe(TEXT);
+    schrift(10, true); farbe(NAVY); text("Smartmeter-Angebot angenommen:", RA + 9.5, ys + 7);
+    schrift(8.8); farbe(TEXT);
     text(String(tx.annahme || SMARTMETER_VORGABE.annahme), RA + 4, ys + 12.5, { maxWidth: BR - 8 });
-    unterschriften(ys + 21.5, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"], 4);
+    unterschriften(ys + 33, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"], 4);
     ys += nhS + 7;
     if (ys + 38 < H - 18) {
       schrift(8, true); farbe(GRUEN1); text("SO GEHT ES WEITER", RA, ys, { charSpace: 1 }); ys += 5;
