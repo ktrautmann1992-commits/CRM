@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.36 · 15.11.2026 · Termine vom Teamleiter mit Kundendaten und Hinweisen, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.36 · 15.11.2026 · Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -11438,6 +11438,13 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
     });
     (leads || []).filter((l) => l.zugewiesen === user.id && !l.gelesen)
       .forEach((l) => zu("lead", l.id, "Neuer Lead: " + l.firma, { ansicht: "leads" }, l.angelegt));
+    (termine || []).filter((t) => t.vonId === user.id && t.fuerId !== user.id && (t.verlauf || []).length).forEach((t) => {
+      const v = t.verlauf[t.verlauf.length - 1];
+      const wer = ((mitarbeiter || []).find((m) => m.id === t.fuerId) || {}).name || "Dein Teampartner";
+      zu("terminrueck", t.id + ":" + t.verlauf.length, wer + ": " + ((t.kunde || {}).firma || t.titel) + " · "
+        + (v.art === "verschoben" ? "verschoben auf " + datum(v.neu.datum) + (v.neu.zeit ? " " + v.neu.zeit : "") : (TERMIN_ERGEBNIS[v.art] || {}).label || v.art)
+        + (v.notiz ? " · " + v.notiz.slice(0, 80) : ""), { ansicht: "kalender" }, v.am);
+    });
     (termine || []).filter((t) => t.fuerId === user.id && t.vonId && t.vonId !== user.id && !t.erledigt && (t.datum || "") >= heute())
       .forEach((t) => zu("termin", t.id + ":" + (t.datum || "") + (t.zeit || "") + String(t.notiz || "").length,
         "Termin von " + (t.vonName || "deinem Teamleiter") + ": " + ((t.kunde || {}).firma || t.titel)
@@ -13991,7 +13998,13 @@ const terminKunde = (t) => {
 const leererTermin = () => ({ titel: "", datum: heute(), zeit: "09:00", dauer: "60", ort: "", notiz: "",
   kunde: { firma: "", ansprechpartner: "", strasse: "", plz: "", ort: "", telefon: "", email: "" } });
 
-function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
+/* Ergebnis eines Termins */
+const TERMIN_ERGEBNIS = {
+  stattgefunden: { label: "Stattgefunden", farbe: "#4A9130", grund: "#ECF6E4" },
+  ausgefallen: { label: "Nicht stattgefunden", farbe: "#B24328", grund: "#FBEDEA" },
+};
+
+function Kalender({ termine, setTermine, user, leads, mitarbeiter, anfragen, onKundeAnlegen, onOeffnen }) {
   const [neuOffen, setNeuOffen] = useState(false);
   const [f, setF] = useState(leererTermin());
   /* Teamleiter und Leitung Vertrieb vergeben Termine an ihre Struktur */
@@ -14027,6 +14040,20 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
   const setTermin = (id, teil) => setTermine(termine.map((x) => (x.id === id ? { ...x, ...teil } : x)));
   /* Hinweise eines vergebenen Termins nachträglich ändern */
   const [hinweisEdit, setHinweisEdit] = useState(null); /* { id, text } */
+  /* Rückmeldung oder Verschieben eines Termins: { id, art: "stattgefunden" | "ausgefallen" | "verschieben", notiz, datum, zeit } */
+  const [aktion, setAktion] = useState(null);
+  const aktionSpeichern = (t) => {
+    const a = aktion;
+    if (a.art === "verschieben") {
+      const eintrag = { art: "verschoben", am: heute(), von: user.name, alt: { datum: t.datum, zeit: t.zeit },
+        neu: { datum: a.datum, zeit: a.zeit }, notiz: a.notiz.trim() };
+      setTermin(t.id, { datum: a.datum, zeit: a.zeit, ergebnis: null, erledigt: false, verlauf: [...(t.verlauf || []), eintrag] });
+    } else {
+      const ergebnis = { art: a.art, notiz: a.notiz.trim(), am: heute(), von: user.name };
+      setTermin(t.id, { ergebnis, erledigt: true, verlauf: [...(t.verlauf || []), { ...ergebnis, art: a.art }] });
+    }
+    setAktion(null);
+  };
 
   const beschreibung = (t) => [terminKunde(t), t.notiz].filter(Boolean).join("\n");
   const googleLink = (t) => {
@@ -14065,14 +14092,25 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
     const adresse = [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ");
     return (
       <div key={t.id} className="px-4 py-3" style={{ borderTop: i ? "1px solid " + C.line : "none",
-           background: t.datum === heute() ? "#F1F7F0" : "transparent", opacity: t.erledigt ? 0.6 : 1 }}>
+           background: t.datum === heute() ? "#F1F7F0" : "transparent", opacity: t.erledigt && !t.ergebnis ? 0.6 : 1 }}>
         <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
           <span className="text-sm w-28 shrink-0" style={{ fontVariantNumeric: "tabular-nums" }}>
             {datum(t.datum)}
             <span className="block text-xs" style={{ color: C.muted }}>{t.zeit} Uhr{t.dauer ? " · " + t.dauer + " Min." : ""}</span>
           </span>
           <div className="flex-1 min-w-[12rem]">
-            <div className="text-sm">{t.titel}{t.erledigt ? " · erledigt" : ""}</div>
+            <div className="text-sm flex flex-wrap items-center gap-2">
+              <span>{t.titel}</span>
+              {t.ergebnis && TERMIN_ERGEBNIS[t.ergebnis.art] && (
+                <span className="text-xs px-2 py-0.5 rounded-full"
+                  style={{ background: TERMIN_ERGEBNIS[t.ergebnis.art].grund, color: TERMIN_ERGEBNIS[t.ergebnis.art].farbe }}>
+                  {TERMIN_ERGEBNIS[t.ergebnis.art].label}</span>
+              )}
+              {!t.ergebnis && t.erledigt && <span className="text-xs" style={{ color: C.muted }}>erledigt</span>}
+              {(t.verlauf || []).some((v) => v.art === "verschoben") && !t.ergebnis && (
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#EEF3FB", color: C.strom }}>verschoben</span>
+              )}
+            </div>
             {(k.firma || k.ansprechpartner) && (
               <div className="text-sm">{[k.firma, k.ansprechpartner].filter(Boolean).join(" · ")}</div>
             )}
@@ -14098,6 +14136,46 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
                 {t.notiz}
               </div>
             )}
+            {(t.verlauf || []).length > 0 && (
+              <div className="mt-2 space-y-1">
+                {(t.verlauf || []).map((v, j) => (
+                  <div key={j} className="text-xs rounded px-2.5 py-1.5" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                    <span style={{ color: v.art === "verschoben" ? C.strom : (TERMIN_ERGEBNIS[v.art] || {}).farbe || C.muted }}>
+                      {v.art === "verschoben"
+                        ? "Verschoben von " + datum(v.alt.datum) + (v.alt.zeit ? " " + v.alt.zeit : "") + " auf " + datum(v.neu.datum) + (v.neu.zeit ? " " + v.neu.zeit : "")
+                        : (TERMIN_ERGEBNIS[v.art] || {}).label || v.art}
+                    </span>
+                    <span style={{ color: C.muted }}> · {datum(v.am)} · {v.von}</span>
+                    {v.notiz && <div className="whitespace-pre-wrap mt-0.5" style={{ color: C.text }}>{v.notiz}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {aktion && aktion.id === t.id && (
+              <div className="mt-2 rounded p-3 space-y-2" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                <div className="text-sm">{aktion.art === "verschieben" ? "Termin verschieben" : TERMIN_ERGEBNIS[aktion.art].label}</div>
+                {aktion.art === "verschieben" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Feld label="Neues Datum" type="date" value={aktion.datum} onChange={(v) => setAktion({ ...aktion, datum: v })} />
+                    <Feld label="Uhrzeit" value={aktion.zeit} onChange={(v) => setAktion({ ...aktion, zeit: v })} placeholder="09:00" />
+                  </div>
+                )}
+                <label className="block">
+                  <span className="block text-xs mb-1" style={{ color: C.muted }}>
+                    {aktion.art === "verschieben" ? "Notiz (Grund, Absprache mit dem Kunden)" : "Terminnotiz"}
+                  </span>
+                  <textarea value={aktion.notiz} rows={3} onChange={(e) => setAktion({ ...aktion, notiz: e.target.value })}
+                    placeholder={aktion.art === "stattgefunden" ? "z. B. Abrechnungen erhalten, Angebot anfragen, Kunde hat Interesse an PV"
+                      : aktion.art === "ausgefallen" ? "z. B. Kunde nicht angetroffen, neuer Termin vereinbart" : "z. B. Kunde krank, neuer Termin telefonisch abgestimmt"}
+                    className="w-full px-3 py-2 text-sm rounded outline-none bg-white" style={{ border: "1px solid " + C.line }} />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <Btn icon={Check} variante={aktion.art === "ausgefallen" ? "primär" : "ok"} onClick={() => aktionSpeichern(t)}
+                    disabled={aktion.art === "verschieben" ? !aktion.datum : aktion.art === "ausgefallen" && !aktion.notiz.trim()}>Speichern</Btn>
+                  <Btn variante="hell" onClick={() => setAktion(null)}>Abbrechen</Btn>
+                </div>
+              </div>
+            )}
             {(adresse || k.telefon || k.email) && (
               <div className="flex flex-wrap gap-2 mt-2">
                 {adresse && <a href={"https://maps.google.com/?q=" + encodeURIComponent(adresse)} target="_blank" rel="noreferrer"
@@ -14117,10 +14195,26 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
               <button onClick={() => setHinweisEdit({ id: t.id, text: t.notiz || "" })} className="text-xs px-2 py-1 rounded"
                 style={{ border: "1px solid " + C.line, color: C.gas }}>{t.notiz ? "Hinweise ändern" : "Hinweise ergänzen"}</button>
             )}
-            {!t.ausLead && !vergebenAn && (
-              <button onClick={() => setTermin(t.id, { erledigt: !t.erledigt })} className="text-xs px-2 py-1 rounded"
-                style={{ border: "1px solid " + C.line, color: t.erledigt ? C.muted : C.ok }}>{t.erledigt ? "wieder offen" : "erledigt"}</button>
+            {!t.ausLead && !vergebenAn && !t.ergebnis && (<>
+              <button onClick={() => setAktion({ id: t.id, art: "stattgefunden", notiz: "" })} className="text-xs px-2.5 py-1 rounded"
+                style={{ background: C.ok, color: "#fff" }}>Stattgefunden</button>
+              <button onClick={() => setAktion({ id: t.id, art: "ausgefallen", notiz: "" })} className="text-xs px-2.5 py-1 rounded"
+                style={{ background: C.warn, color: "#fff" }}>Nicht stattgefunden</button>
+              <button onClick={() => setAktion({ id: t.id, art: "verschieben", notiz: "", datum: t.datum, zeit: t.zeit || "" })} className="text-xs px-2.5 py-1 rounded"
+                style={{ background: C.strom, color: "#fff" }}>Verschieben</button>
+            </>)}
+            {!t.ausLead && !vergebenAn && t.ergebnis && (
+              <button onClick={() => setTermin(t.id, { ergebnis: null, erledigt: false })} className="text-xs px-2 py-1 rounded"
+                style={{ border: "1px solid " + C.line, color: C.muted }}>Rückmeldung zurücknehmen</button>
             )}
+            {!t.ausLead && !vergebenAn && onKundeAnlegen && (t.kunde || {}).firma && (() => {
+              const vorgang = t.vorgangId && (anfragen || []).find((x) => x.id === t.vorgangId);
+              return vorgang
+                ? <button onClick={() => onOeffnen && onOeffnen(vorgang.id)} className="text-xs px-2.5 py-1 rounded"
+                    style={{ border: "1px solid " + C.ok, color: C.ok }}>Kunde angelegt · {vorgang.id}</button>
+                : <button onClick={() => onKundeAnlegen(t)} className="text-xs px-2.5 py-1 rounded inline-flex items-center gap-1"
+                    style={{ background: C.ink, color: "#fff" }}><UserPlus size={12} /> Als Kunde anlegen</button>;
+            })()}
             <a href={googleLink(t)} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 rounded"
                style={{ border: "1px solid " + C.line, color: C.strom }}>in Google Kalender</a>
             {!t.ausLead && (!t.vonId || t.vonId === user.id) && (
@@ -19825,6 +19919,25 @@ export function PortalApp({ pruefung } = {}) {
     setAnsicht("neu");
   };
 
+  /* Termin → neuer Vorgang mit den Kundendaten des Termins */
+  const ausTermin = (t) => {
+    const k = t.kunde || {};
+    const a = leereAnfrage(user);
+    a.kunde = { ...a.kunde, firma: k.firma || "", strasse: k.strasse || "", plz: k.plz || "", ort: k.ort || "",
+      ansprechpartner: k.ansprechpartner || "", email: k.email || "", telefon: k.telefon || "" };
+    const notizen = [t.notiz, ...(t.verlauf || []).map((v) => v.notiz)].filter(Boolean);
+    a.beratungHinweis = notizen.join("\n");
+    if (t.vonId && t.vonId !== user.id) {
+      a.akquiseArt = "unternehmen";
+      a.herkunft = "Sonstiges";
+      a.herkunftDetail = "Termin von " + (t.vonName || "Teamleiter");
+    }
+    setTermine((alt) => alt.map((x) => (x.id === t.id ? { ...x, vorgangId: a.id } : x)));
+    setOffen(null);
+    setEntwurf(a);
+    setAnsicht("neu");
+  };
+
   /* Rechengrundlagen aktuell halten */
   useEffect(() => {
     const jeVersorger = {};
@@ -20364,7 +20477,8 @@ export function PortalApp({ pruefung } = {}) {
         }} />
     );
   } else if (ansicht === "kalender") {
-    inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} mitarbeiter={mitarbeiter} />;
+    inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} mitarbeiter={mitarbeiter}
+      anfragen={anfragenSicht} onOeffnen={setOffen} onKundeAnlegen={ausTermin} />;
   } else if (ansicht === "branchen") {
     inhalt = <Branchen anfragen={anfragenSicht}
                onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />;
