@@ -6,7 +6,7 @@ import {
   AlertTriangle, Users, Calculator, FileSignature, BarChart3,
   Wallet, Inbox, Trash2, ChevronRight, Paperclip, RotateCcw, Menu, Bell, Target, Calendar,
   Search, ClipboardList, Contact, Briefcase, Lightbulb, UserPlus, Network, Trophy, Ban,
-  MessageSquare, FolderOpen, CircleUser, Gauge, Settings, Copy, Save, Pencil, Layers,
+  MessageSquare, FolderOpen, CircleUser, Gauge, Settings, Copy, Save, Pencil, Layers, MapPin, Phone, Mail,
 } from "lucide-react";
 import {
   sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.35 · 15.11.2026 · Neues Smartmeter-Titelbild, Beschaffung: alle Terminprodukte, Hedgearten, Viertelstunden, Bundesland, Spot und Ausgleichsenergie";
+const VERSION = "v5.36 · 15.11.2026 · Termine vom Teamleiter mit Kundendaten, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -11405,7 +11405,7 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
 
 /* Punkt 4: Benachrichtigungen werden aus dem Datenbestand abgeleitet.
    Gelesenes merkt sich der Mitarbeiter über die Schlüssel der Meldungen. */
-function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter, akquise) {
+function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter, akquise, termine) {
   const m = [];
   const zu = (art, id, text, ziel, datum) => m.push({ id: art + ":" + id, art, text, ziel, datum });
   const meineIds = user.rolle === "Teamleiter"
@@ -11438,6 +11438,9 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
     });
     (leads || []).filter((l) => l.zugewiesen === user.id && !l.gelesen)
       .forEach((l) => zu("lead", l.id, "Neuer Lead: " + l.firma, { ansicht: "leads" }, l.angelegt));
+    (termine || []).filter((t) => t.fuerId === user.id && t.vonId && t.vonId !== user.id && !t.erledigt && (t.datum || "") >= heute())
+      .forEach((t) => zu("termin", t.id, "Termin von " + (t.vonName || "deinem Teamleiter") + ": " + ((t.kunde || {}).firma || t.titel)
+        + " am " + datum(t.datum) + (t.zeit ? " um " + t.zeit + " Uhr" : ""), { ansicht: "kalender" }, t.angelegt || t.datum));
     (akquise || []).filter((l) =>
       (Array.isArray(l.zugewiesen) ? l.zugewiesen : l.zugewiesen ? [l.zugewiesen] : [])
         .includes(user.id)).forEach((l) => {
@@ -13978,11 +13981,30 @@ function zielstand(m, anfragen, mitarbeiter) {
 }
 
 /* Punkt 11: Kalender mit Terminen */
-function Kalender({ termine, setTermine, user, leads }) {
+/* Kundendaten eines Termins als eine Zeile (für Liste, Google Kalender und ICS) */
+const terminKunde = (t) => {
+  const k = t.kunde || {};
+  return [k.firma, k.ansprechpartner, [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", "),
+    k.telefon ? "Tel. " + k.telefon : "", k.email].filter(Boolean).join(" · ");
+};
+const leererTermin = () => ({ titel: "", datum: heute(), zeit: "09:00", dauer: "60", ort: "", notiz: "",
+  kunde: { firma: "", ansprechpartner: "", strasse: "", plz: "", ort: "", telefon: "", email: "" } });
+
+function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
   const [neuOffen, setNeuOffen] = useState(false);
-  const [f, setF] = useState({ titel: "", datum: heute(), zeit: "09:00", dauer: "60", ort: "", notiz: "" });
+  const [f, setF] = useState(leererTermin());
+  /* Teamleiter und Leitung Vertrieb vergeben Termine an ihre Struktur */
+  const darfZuweisen = ["Teamleiter", "Leitung Vertrieb"].includes(user.rolle);
+  const team = darfZuweisen ? strukturUnter(user.id, mitarbeiter || [])
+    .filter((m) => ["Vertriebspartner", "Teamleiter"].includes(m.rolle) && m.status === "aktiv") : [];
+  const [fuer, setFuer] = useState(user.id);
+  const name = (id) => ((mitarbeiter || []).find((m) => m.id === id) || {}).name || "–";
+  const setK = (feld, w) => setF({ ...f, kunde: { ...f.kunde, [feld]: w } });
 
   const meine = termine.filter((t) => t.fuerId === user.id)
+    .sort((a, b) => (a.datum + a.zeit).localeCompare(b.datum + b.zeit));
+  /* vom mir an das Team vergebene Termine */
+  const vergeben = termine.filter((t) => t.vonId === user.id && t.fuerId !== user.id)
     .sort((a, b) => (a.datum + a.zeit).localeCompare(b.datum + b.zeit));
 
   /* Termine aus Leads mit Termindatum ergänzen */
@@ -13994,11 +14016,16 @@ function Kalender({ termine, setTermine, user, leads }) {
   const alle = [...meine, ...ausLeads].sort((a, b) => (a.datum + a.zeit).localeCompare(b.datum + b.zeit));
 
   const anlegen = () => {
-    setTermine([...termine, { id: "TE" + uid(), fuerId: user.id, ...f }]);
-    setF({ titel: "", datum: heute(), zeit: "09:00", dauer: "60", ort: "", notiz: "" });
+    const titel = f.titel.trim() || ("Termin " + (f.kunde.firma || "")).trim();
+    const t = { id: "TE" + uid(), ...f, titel, fuerId: fuer, angelegt: heute() };
+    if (fuer !== user.id) { t.vonId = user.id; t.vonName = user.name; }
+    setTermine([...termine, t]);
+    setF(leererTermin()); setFuer(user.id);
     setNeuOffen(false);
   };
+  const setTermin = (id, teil) => setTermine(termine.map((x) => (x.id === id ? { ...x, ...teil } : x)));
 
+  const beschreibung = (t) => [terminKunde(t), t.notiz].filter(Boolean).join("\n");
   const googleLink = (t) => {
     const start = (t.datum || heute()).replace(/-/g, "") + "T" +
       (t.zeit || "09:00").replace(":", "") + "00";
@@ -14007,48 +14034,124 @@ function Kalender({ termine, setTermine, user, leads }) {
     const eh = String(Math.floor(endeMin / 60) % 24).padStart(2, "0");
     const em = String(endeMin % 60).padStart(2, "0");
     const ende = (t.datum || heute()).replace(/-/g, "") + "T" + eh + em + "00";
+    const k = t.kunde || {};
+    const adresse = [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ");
     return "https://calendar.google.com/calendar/render?action=TEMPLATE&text=" +
       encodeURIComponent(t.titel) + "&dates=" + start + "/" + ende +
-      "&location=" + encodeURIComponent(t.ort || "") +
-      "&details=" + encodeURIComponent(t.notiz || "");
+      "&location=" + encodeURIComponent(adresse || t.ort || "") +
+      "&details=" + encodeURIComponent(beschreibung(t));
   };
 
   const icsLaden = () => {
     const zeilen = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//EGC Energie//Vertriebsportal//DE"];
     alle.forEach((t) => {
       const start = t.datum.replace(/-/g, "") + "T" + (t.zeit || "09:00").replace(":", "") + "00";
+      const k = t.kunde || {};
+      const adresse = [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ");
       zeilen.push("BEGIN:VEVENT", "UID:" + t.id + "@egc-energie", "DTSTART:" + start,
-        "SUMMARY:" + t.titel, "LOCATION:" + (t.ort || ""), "DESCRIPTION:" + (t.notiz || ""), "END:VEVENT");
+        "SUMMARY:" + t.titel, "LOCATION:" + (adresse || t.ort || ""), "DESCRIPTION:" + beschreibung(t).replace(/\n/g, "\\n"), "END:VEVENT");
     });
     zeilen.push("END:VCALENDAR");
     const url = "data:text/calendar;base64," + btoa(utf8Binaer(zeilen.join("\r\n")));
     dateiLaden({ name: "egc-termine.ics", url });
   };
 
+  /* Eine Terminzeile mit Kundendaten, Anruf- und Kartenlink */
+  const Zeile = ({ t, i, vergebenAn }) => {
+    const k = t.kunde || {};
+    const adresse = [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    return (
+      <div className="px-4 py-3" style={{ borderTop: i ? "1px solid " + C.line : "none",
+           background: t.datum === heute() ? "#F1F7F0" : "transparent", opacity: t.erledigt ? 0.6 : 1 }}>
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
+          <span className="text-sm w-28 shrink-0" style={{ fontVariantNumeric: "tabular-nums" }}>
+            {datum(t.datum)}
+            <span className="block text-xs" style={{ color: C.muted }}>{t.zeit} Uhr{t.dauer ? " · " + t.dauer + " Min." : ""}</span>
+          </span>
+          <div className="flex-1 min-w-[12rem]">
+            <div className="text-sm">{t.titel}{t.erledigt ? " · erledigt" : ""}</div>
+            {(k.firma || k.ansprechpartner) && (
+              <div className="text-sm">{[k.firma, k.ansprechpartner].filter(Boolean).join(" · ")}</div>
+            )}
+            <div className="text-xs" style={{ color: C.muted }}>
+              {[t.ort, t.ausLead ? "aus Lead" : "", t.vonId && t.vonId !== user.id ? "von " + (t.vonName || name(t.vonId)) : "",
+                vergebenAn ? "für " + name(t.fuerId) : "", t.notiz].filter(Boolean).join(" · ")}
+            </div>
+            {(adresse || k.telefon || k.email) && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {adresse && <a href={"https://maps.google.com/?q=" + encodeURIComponent(adresse)} target="_blank" rel="noreferrer"
+                  className="text-xs px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: "#EEF3FB", color: C.strom }}>
+                  <MapPin size={12} /> {adresse}</a>}
+                {k.telefon && <a href={"tel:" + k.telefon.replace(/[^\d+]/g, "")}
+                  className="text-xs px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: "#ECF6E4", color: C.ok }}>
+                  <Phone size={12} /> {k.telefon}</a>}
+                {k.email && <a href={"mailto:" + k.email}
+                  className="text-xs px-2 py-1 rounded inline-flex items-center gap-1" style={{ background: "#F3F0FA", color: "#5B4BA0" }}>
+                  <Mail size={12} /> {k.email}</a>}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {!t.ausLead && !vergebenAn && (
+              <button onClick={() => setTermin(t.id, { erledigt: !t.erledigt })} className="text-xs px-2 py-1 rounded"
+                style={{ border: "1px solid " + C.line, color: t.erledigt ? C.muted : C.ok }}>{t.erledigt ? "wieder offen" : "erledigt"}</button>
+            )}
+            <a href={googleLink(t)} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 rounded"
+               style={{ border: "1px solid " + C.line, color: C.strom }}>in Google Kalender</a>
+            {!t.ausLead && (!t.vonId || t.vonId === user.id) && (
+              <button onClick={() => setTermine(termine.filter((x) => x.id !== t.id))} title="Termin löschen"
+                style={{ color: C.muted }}><Trash2 size={15} /></button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm" style={{ color: C.muted, maxWidth: "50ch" }}>
-          Deine Termine, ergänzt um die Termine aus deinen Leads.
+          {darfZuweisen ? "Deine Termine und die, die du deinem Team gegeben hast, ergänzt um die Termine aus deinen Leads."
+            : "Deine Termine, ergänzt um die Termine aus deinen Leads."}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Btn icon={Plus} onClick={() => setNeuOffen(!neuOffen)}>Termin anlegen</Btn>
+          <Btn icon={Plus} onClick={() => setNeuOffen(!neuOffen)}>{darfZuweisen ? "Termin anlegen oder vergeben" : "Termin anlegen"}</Btn>
           <Btn variante="hell" icon={Upload} onClick={icsLaden}>Alle exportieren</Btn>
         </div>
       </div>
 
       {neuOffen && (
         <div className="rounded p-5 space-y-4" style={{ background: C.card, border: "1px solid " + C.line }}>
+          {darfZuweisen && (
+            <Select label="Termin für" value={fuer} onChange={setFuer}
+              options={[{ value: user.id, label: "mich selbst" }, ...team.map((m) => ({ value: m.id, label: m.name + " (" + m.rolle + ")" }))]} />
+          )}
           <div className="grid sm:grid-cols-2 gap-4">
-            <Feld label="Titel" value={f.titel} onChange={(v) => setF({ ...f, titel: v })} breit />
+            <Feld label="Titel" value={f.titel} onChange={(v) => setF({ ...f, titel: v })} breit placeholder="z. B. Erstgespräch Strom und Gas" />
             <Feld label="Datum" type="date" value={f.datum} onChange={(v) => setF({ ...f, datum: v })} />
             <Feld label="Uhrzeit" value={f.zeit} onChange={(v) => setF({ ...f, zeit: v })} placeholder="09:00" />
             <Feld label="Dauer in Minuten" value={f.dauer} onChange={(v) => setF({ ...f, dauer: v })} />
             <Feld label="Ort oder Form" value={f.ort} onChange={(v) => setF({ ...f, ort: v })}
               placeholder="Vor Ort, Teams, Telefon" />
-            <Feld label="Notiz" value={f.notiz} onChange={(v) => setF({ ...f, notiz: v })} breit />
           </div>
-          <Btn icon={Check} onClick={anlegen} disabled={!f.titel.trim()}>Termin speichern</Btn>
+          <div className="text-sm pt-1">Kunde</div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Feld label="Firma" value={f.kunde.firma} onChange={(v) => setK("firma", v)} />
+            <Feld label="Ansprechpartner" value={f.kunde.ansprechpartner} onChange={(v) => setK("ansprechpartner", v)} />
+            <Feld label="Straße und Hausnummer" value={f.kunde.strasse} onChange={(v) => setK("strasse", v)} />
+            <div className="grid grid-cols-3 gap-3">
+              <Feld label="PLZ" value={f.kunde.plz} onChange={(v) => setK("plz", v.replace(/\D/g, "").slice(0, 5))} />
+              <div className="col-span-2"><Feld label="Ort" value={f.kunde.ort} onChange={(v) => setK("ort", v)} /></div>
+            </div>
+            <Feld label="Telefon" type="tel" value={f.kunde.telefon} onChange={(v) => setK("telefon", v)} />
+            <Feld label="E-Mail" type="email" value={f.kunde.email} onChange={(v) => setK("email", v)} />
+            <Feld label="Notiz für den Termin" value={f.notiz} onChange={(v) => setF({ ...f, notiz: v })} breit
+              placeholder="z. B. Abrechnung mitbringen lassen, Interesse an PV" />
+          </div>
+          <Btn icon={Check} onClick={anlegen} disabled={!f.titel.trim() && !f.kunde.firma.trim()}>
+            {fuer === user.id ? "Termin speichern" : "Termin an " + name(fuer) + " geben"}
+          </Btn>
         </div>
       )}
 
@@ -14059,28 +14162,16 @@ function Kalender({ termine, setTermine, user, leads }) {
         </div>
       ) : (
         <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
-          {alle.map((t, i) => (
-            <div key={t.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3"
-                 style={{ borderTop: i ? "1px solid " + C.line : "none",
-                          background: t.datum === heute() ? "#F1F7F0" : "transparent" }}>
-              <span className="text-sm w-32" style={{ fontVariantNumeric: "tabular-nums" }}>
-                {datum(t.datum)}
-                <span className="block text-xs" style={{ color: C.muted }}>{t.zeit} Uhr</span>
-              </span>
-              <div className="flex-1 min-w-40">
-                <div className="text-sm">{t.titel}</div>
-                <div className="text-xs" style={{ color: C.muted }}>
-                  {t.ort}{t.ausLead ? " · aus Lead" : ""}{t.notiz ? " · " + t.notiz : ""}
-                </div>
-              </div>
-              <a href={googleLink(t)} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 rounded"
-                 style={{ border: "1px solid " + C.line, color: C.strom }}>in Google Kalender</a>
-              {!t.ausLead && (
-                <button onClick={() => setTermine(termine.filter((x) => x.id !== t.id))}
-                  style={{ color: C.muted }}><Trash2 size={15} /></button>
-              )}
-            </div>
-          ))}
+          {alle.map((t, i) => <Zeile key={t.id} t={t} i={i} />)}
+        </div>
+      )}
+
+      {darfZuweisen && vergeben.length > 0 && (
+        <div>
+          <div className="text-sm mb-2">An dein Team vergeben</div>
+          <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
+            {vergeben.map((t, i) => <Zeile key={t.id} t={t} i={i} vergebenAn />)}
+          </div>
         </div>
       )}
 
@@ -19363,6 +19454,19 @@ export function PortalApp({ pruefung } = {}) {
   };
 
   /* beim Start: noch angemeldet? */
+  /* Neue Ansicht oder neuer Vorgang: oben beginnen */
+  useEffect(() => {
+    try { window.scrollTo(0, 0); } catch (e) { /* ohne Fenster (Bautest) */ }
+  }, [ansicht, offen, listenAnsicht]);
+  /* Geöffnetes Menü auf dem Handy: die Seite dahinter festhalten */
+  useEffect(() => {
+    if (typeof document === "undefined" || !document.body || !document.body.style) return;
+    const handy = typeof window.matchMedia === "function" ? !window.matchMedia("(min-width: 1024px)").matches : true;
+    if (!menu || !handy) return;
+    const vorher = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = vorher; };
+  }, [menu]);
   useEffect(() => {
     (async () => {
       try {
@@ -19693,7 +19797,7 @@ export function PortalApp({ pruefung } = {}) {
   }, [firmenanteil, versorger]);
 
   const meldungen = user
-    ? meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter, akquise) : [];
+    ? meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, smartmeter, akquise, termine) : [];
   const gelesen = (user && user.gelesen) || [];
   const alsGelesen = (schluessel) =>
     setMitarbeiter((alt) => alt.map((m) => m.id === (user && user.id)
@@ -20222,7 +20326,7 @@ export function PortalApp({ pruefung } = {}) {
         }} />
     );
   } else if (ansicht === "kalender") {
-    inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} />;
+    inhalt = <Kalender termine={termine} setTermine={setTermine} user={user} leads={leads} mitarbeiter={mitarbeiter} />;
   } else if (ansicht === "branchen") {
     inhalt = <Branchen anfragen={anfragenSicht}
                onListe={(titel, liste) => setListenAnsicht({ titel, liste })} />;
@@ -20303,7 +20407,11 @@ export function PortalApp({ pruefung } = {}) {
     <div className="min-h-screen flex flex-col lg:flex-row"
          style={{ background: C.paper, color: C.text, fontFamily: FONT, paddingBottom: "env(safe-area-inset-bottom)" }}>
       {/* Seitenleiste, auf dem Handy als einklappbare Kopfzeile */}
-      <aside className="lg:w-64 shrink-0 lg:px-4 lg:py-5" style={{ background: C.ink, color: "#fff" }}>
+      {/* Seitenleiste: am Rechner fest am Rand und für sich scrollbar; auf dem Handy legt sich das
+          geöffnete Menü über die ganze Seite, scrollt für sich und zieht die Seite nicht mit */}
+      <aside className={"lg:w-64 shrink-0 lg:px-4 lg:py-5 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto lg:self-start"
+          + (menu ? " max-lg:fixed max-lg:inset-0 max-lg:z-40 max-lg:overflow-y-auto" : "")}
+        style={{ background: C.ink, color: "#fff", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
         {/* Als App auf dem iPhone liegt die Statusleiste (Uhrzeit, Akku) über der Seite:
             so viel Platz frei lassen, wie sie hoch ist. Im Browser ist der Wert 0. */}
         <div className="lg:hidden" style={{ height: "env(safe-area-inset-top)" }} />
