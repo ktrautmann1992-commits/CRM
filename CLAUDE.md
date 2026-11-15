@@ -119,6 +119,17 @@ Gespeichert werden nur Kennzahlen (`bewertung.ergebnis`), nicht die Kurve.
 Änderungen an der Rechnung wie bei der Provision in Node nachrechnen:
 Eine flache Last muss genau den Base-Preis ergeben, Struktur 0.
 
+Seit v5.35 (Strom): Terminprodukte Base/Peak/Offpeak für Cal, Saison
+(Sommer Apr–Sep, Winter Jan–Mär + Okt–Dez), Quartal und Monat, Vorrang Monat →
+Quartal → Saison → Cal (`preiseStromAus`, `STROM_PRODUKTE`). Viertelstunden
+bleiben Viertelstunden (`proTag` 96), Last je Zeitschritt in MWh, `dt` = Stunden
+je Schritt. Hedgearten `HEDGE_ARTEN` (Menge, Preis, Preis-Menge, Bottom-up) mit
+Produkt Cal/Quartal/Monat und Prozentanteil; Lastgangpreis =
+`hedgeQuote × hedgePreis + strukturProMWh` (`lastgangPreis`). Feiertage je
+Bundesland (`b.bundesland`, ohne Wahl nur bundesweite). Spot-PFC und
+Ausgleichsenergiepreise als Dateien im Auftrag (`spotDatei`, `aeDatei`),
+AE-Risiko = (Ist − typische Last) × AE-Preis (`aeRisiko`).
+
 **Strom und Erdgas:** Ein Auftrag hat `sparten` (`["strom"]`, `["gas"]` oder
 beide; ältere Aufträge ohne Feld gelten als Strom). Strom liegt in
 `bewertung`, Erdgas in `bewertungGas`. Empfehlung und abgelegte Pläne

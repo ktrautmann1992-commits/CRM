@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.34 · 14.11.2026 · Smartmeter-Angebot mit Börsenpreisen, Hinweis an den Partner, Umlagen-Ausgleich, Kalkulation korrigiert und überarbeitet";
+const VERSION = "v5.35 · 15.11.2026 · Beschaffung: alle Terminprodukte, Hedgearten, Viertelstunden, Bundesland, Spot und Ausgleichsenergie";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1288,8 +1288,8 @@ function lastgangVerlaeufe(werte, zeiten, proStunde) {
   const zeit = (i) => (mitZeit && gelesen[i]) ? gelesen[i] : new Date(start.getTime() + i * schritt * 60000);
 
   const tage = new Map();
-  const woche = Array(7 * 24).fill(0), wocheN = Array(7 * 24).fill(0);
   const slots = 24 * proStunde;
+  const woche = Array(7 * slots).fill(0), wocheN = Array(7 * slots).fill(0);
   const werktag = Array(slots).fill(0), werktagN = Array(slots).fill(0);
   let imax = 0;
   werte.forEach((w, i) => {
@@ -1299,11 +1299,9 @@ function lastgangVerlaeufe(werte, zeiten, proStunde) {
     const tag = t.getFullYear() + "-" + (t.getMonth() + 1) + "-" + t.getDate();
     tage.set(tag, Math.max(tage.get(tag) || 0, kw));
     const wt = (t.getDay() + 6) % 7;
-    woche[wt * 24 + t.getHours()] += kw; wocheN[wt * 24 + t.getHours()]++;
-    if (wt < 5) {
-      const s = t.getHours() * proStunde + Math.floor(t.getMinutes() / schritt);
-      werktag[s] += kw; werktagN[s]++;
-    }
+    const s = Math.min(slots - 1, t.getHours() * proStunde + Math.floor(t.getMinutes() / schritt));
+    woche[wt * slots + s] += kw; wocheN[wt * slots + s]++;
+    if (wt < 5) { werktag[s] += kw; werktagN[s]++; }
   });
   const jahre = {};
   werte.forEach((_, i) => { const j = zeit(i).getFullYear(); jahre[j] = (jahre[j] || 0) + 1; });
@@ -1371,7 +1369,7 @@ function lastgangGrafiken(stand) {
     jahr: lastgangGrafik(vl.tagesSpitze, { titel: "Tagesspitzenlast " + vl.jahr,
       achse: MONATE_KURZ.map((m, k) => ({ i: Math.round((k + 0.5) * (n - 1) / 12), text: m })) }),
     woche: lastgangGrafik(vl.woche, { titel: "Eine durchschnittliche Woche",
-      achse: WOCHENTAGE.map((t, k) => ({ i: k * 24 + 12, text: t })) }),
+      achse: WOCHENTAGE.map((t, k) => ({ i: Math.round((k + 0.5) * vl.woche.length / 7), text: t })) }),
     werktag: lastgangGrafik(vl.werktag, { titel: "Ein typischer Werktag",
       achse: [0, 4, 8, 12, 16, 20].map((s) => ({ i: Math.round((s * vl.werktag.length) / 24),
         text: String(s).padStart(2, "0") + ":00" })) }),
@@ -15591,7 +15589,14 @@ function Kalkulationen({ anfragen, onOeffnen, user }) {
 /*  Ein Stundenprofil aus Day-Ahead-Preisen ist optional.              */
 /* ------------------------------------------------------------------ */
 
-/* Feiertage, die im Lastgang wie Sonntage wirken (bundesweit, dazu Saarland/RLP) */
+/* Feiertage, die im Lastgang wie Sonntage wirken: bundesweit und, falls gewählt, die des Bundeslandes.
+   Fronleichnam gilt in Teilen von Sachsen und Thüringen, Mariä Himmelfahrt nur in Teilen Bayerns;
+   gerechnet wird mit der Regel, die für den größten Teil des Landes gilt. */
+const BUNDESLAENDER = [
+  ["", "nicht gewählt (nur bundesweite Feiertage)"], ["BW", "Baden-Württemberg"], ["BY", "Bayern"], ["BE", "Berlin"],
+  ["BB", "Brandenburg"], ["HB", "Bremen"], ["HH", "Hamburg"], ["HE", "Hessen"], ["MV", "Mecklenburg-Vorpommern"],
+  ["NI", "Niedersachsen"], ["NW", "Nordrhein-Westfalen"], ["RP", "Rheinland-Pfalz"], ["SL", "Saarland"], ["SN", "Sachsen"],
+  ["ST", "Sachsen-Anhalt"], ["SH", "Schleswig-Holstein"], ["TH", "Thüringen"]];
 function ostersonntag(j) {
   const a = j % 19, b = Math.floor(j / 100), c = j % 100, d = Math.floor(b / 4), e = b % 4;
   const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
@@ -15601,85 +15606,133 @@ function ostersonntag(j) {
   return new Date(Date.UTC(j, monat - 1, tag));
 }
 const FEIERTAGE_CACHE = {};
-function feiertage(j) {
-  if (FEIERTAGE_CACHE[j]) return FEIERTAGE_CACHE[j];
+function feiertage(j, land = "") {
+  const schl = j + (land || "");
+  if (FEIERTAGE_CACHE[schl]) return FEIERTAGE_CACHE[schl];
   const os = ostersonntag(j).getTime(), T = 86400000;
+  /* bundesweit */
   const tage = [Date.UTC(j, 0, 1), os - 2 * T, os + T, Date.UTC(j, 4, 1), os + 39 * T, os + 50 * T,
-    os + 60 * T, Date.UTC(j, 7, 15), Date.UTC(j, 9, 3), Date.UTC(j, 10, 1), Date.UTC(j, 11, 25), Date.UTC(j, 11, 26)];
-  return (FEIERTAGE_CACHE[j] = new Set(tage.map((t) => new Date(t).toISOString().slice(0, 10))));
+    Date.UTC(j, 9, 3), Date.UTC(j, 11, 25), Date.UTC(j, 11, 26)];
+  const in_ = (...l) => l.includes(land);
+  if (in_("BW", "BY", "ST")) tage.push(Date.UTC(j, 0, 6));                                   /* Heilige Drei Könige */
+  if ((land === "BE" && j >= 2019) || (land === "MV" && j >= 2023)) tage.push(Date.UTC(j, 2, 8)); /* Frauentag */
+  if (in_("BW", "BY", "HE", "NW", "RP", "SL")) tage.push(os + 60 * T);                        /* Fronleichnam */
+  if (in_("BY", "SL")) tage.push(Date.UTC(j, 7, 15));                                         /* Mariä Himmelfahrt */
+  if (land === "TH" && j >= 2019) tage.push(Date.UTC(j, 8, 20));                              /* Weltkindertag */
+  if (in_("BB", "MV", "SN", "ST", "TH") || (in_("HB", "HH", "NI", "SH") && j >= 2018)) tage.push(Date.UTC(j, 9, 31)); /* Reformationstag */
+  if (in_("BW", "BY", "NW", "RP", "SL")) tage.push(Date.UTC(j, 10, 1));                       /* Allerheiligen */
+  if (land === "SN") { const w = new Date(Date.UTC(j, 10, 22)).getUTCDay(); tage.push(Date.UTC(j, 10, 22 - ((w - 3 + 7) % 7))); } /* Buß- und Bettag */
+  return (FEIERTAGE_CACHE[schl] = new Set(tage.map((t) => new Date(t).toISOString().slice(0, 10))));
 }
 /* Tagesart für die Lastform: 0 Werktag, 1 Samstag, 2 Sonn- und Feiertag */
-function tagesart(jahr, monat, tag) {
+function tagesart(jahr, monat, tag, land = "") {
   const d = new Date(Date.UTC(jahr, monat, tag));
   const w = d.getUTCDay();
-  if (w === 0 || feiertage(jahr).has(d.toISOString().slice(0, 10))) return 2;
+  if (w === 0 || feiertage(jahr, land).has(d.toISOString().slice(0, 10))) return 2;
   return w === 6 ? 1 : 0;
 }
 
-/* Stunden eines Lieferjahres (ohne Zeitumstellung, 8760 bzw. 8784 Stunden).
-   Peak nach Börsendefinition: Montag bis Freitag 8 bis 20 Uhr, auch an Feiertagen. */
-function jahresStunden(jahr) {
-  const raus = [];
+/* Zeitschritte eines Lieferjahres (ohne Zeitumstellung): 24 Stunden oder 96 Viertelstunden je Tag.
+   q = Schritt im Tag, h = Stunde. Peak nach Börsendefinition: Montag bis Freitag 8 bis 20 Uhr, auch an Feiertagen. */
+const JAHRES_CACHE = {};
+function jahresStunden(jahr, land = "", proTag = 24) {
+  const schl = jahr + "|" + (land || "") + "|" + proTag;
+  if (JAHRES_CACHE[schl]) return JAHRES_CACHE[schl];
+  const raus = [], proH = proTag / 24;
   for (let m = 0; m < 12; m++) {
     const tageImMonat = new Date(Date.UTC(jahr, m + 1, 0)).getUTCDate();
     for (let t = 1; t <= tageImMonat; t++) {
       const w = new Date(Date.UTC(jahr, m, t)).getUTCDay();
-      const art = tagesart(jahr, m, t);
-      for (let h = 0; h < 24; h++)
-        raus.push({ m, t, h, art, peak: w >= 1 && w <= 5 && h >= 8 && h < 20 });
+      const art = tagesart(jahr, m, t, land);
+      for (let q = 0; q < proTag; q++) {
+        const h = Math.floor(q / proH);
+        raus.push({ m, t, h, q, art, peak: w >= 1 && w <= 5 && h >= 8 && h < 20 });
+      }
     }
   }
-  return raus;
+  return (JAHRES_CACHE[schl] = raus);
+}
+
+/* Lage der Zeitstempel: Beginn oder Ende des Intervalls. Beginnt die Reihe um 00:00, gilt Beginn;
+   um 00:15 (Viertelstunden) bzw. 01:00 (Stunden) gilt Ende; sonst entscheidet, ob die Reihe um Mitternacht endet. */
+function zeitstempelAmEnde(zeiten, proStunde, zeitLesenFn) {
+  let erst = null, letzt = null;
+  for (let i = 0; i < zeiten.length && !erst; i++) erst = zeitLesenFn(zeiten[i]);
+  for (let i = zeiten.length - 1; i >= 0 && !letzt; i--) letzt = zeitLesenFn(zeiten[i]);
+  if (!erst) return true;
+  const min = erst.getHours() * 60 + erst.getMinutes(), schritt = 60 / proStunde;
+  if (min === 0) return false;
+  if (min === schritt) return true;
+  return !!letzt && letzt.getHours() === 0 && letzt.getMinutes() === 0;
 }
 
 /* Lastgang (Werte und Zeitpunkte aus lastgangAuswerten) → Lastform:
-   mittlere kWh je Stunde für Monat × Tagesart × Stunde, dazu die Jahresmenge. */
-function lastform(werte, zeiten, proStunde, zeitLesenFn) {
-  const summe = Array.from({ length: 12 }, () => Array.from({ length: 3 }, () => Array(24).fill(0)));
-  const zahl = Array.from({ length: 12 }, () => Array.from({ length: 3 }, () => Array(24).fill(0)));
-  const proStd = new Map(); /* Stundenwerte zuerst aufsummieren (Viertelstunden → Stunde) */
+   mittlere kWh je Zeitschritt für Monat × Tagesart × Schritt im Tag, dazu die Jahresmenge.
+   Viertelstundenwerte bleiben Viertelstunden (96 je Tag), sonst Stunden (24 je Tag).
+   ist: tatsächliche kWh je Zeitschritt mit Zeitpunkt, für die Ausgleichsenergie (nur im Speicher). */
+function lastform(werte, zeiten, proStunde, zeitLesenFn, land = "") {
+  const proTag = proStunde >= 4 ? 96 : 24, proH = proTag / 24, schrittMs = 3600000 / proH;
+  const leer = () => Array.from({ length: 12 }, () => Array.from({ length: 3 }, () => Array(proTag).fill(0)));
+  const summe = leer(), zahl = leer();
+  const amEnde = zeitstempelAmEnde(zeiten, proStunde, zeitLesenFn);
+  const versatz = amEnde ? 3600000 / proStunde : 0;
+  const proSchritt = new Map(); /* Werte je Zeitschritt aufsummieren (z. B. Viertelstunden → Stunde) */
   let start = null, ohneDatum = 0;
   werte.forEach((w, i) => {
     let t = zeitLesenFn(zeiten[i]);
     if (!t) {
       ohneDatum++;
       if (!start) start = new Date(new Date().getFullYear() - 1, 0, 1);
-      t = new Date(start.getTime() + (i / proStunde) * 3600000);
+      t = new Date(start.getTime() + (i / proStunde) * 3600000 + versatz);
     }
-    /* Zeitstempel am Ende der Viertelstunde (00:15) gehören zur Stunde davor */
-    const k = new Date(t.getTime() - 60000);
-    const schl = k.getFullYear() + "-" + k.getMonth() + "-" + k.getDate() + "-" + k.getHours();
-    const alt = proStd.get(schl);
-    if (alt) alt.kwh += w; else proStd.set(schl, { j: k.getFullYear(), m: k.getMonth(), t: k.getDate(), h: k.getHours(), kwh: w });
+    const k = new Date(t.getTime() - versatz);
+    const q = k.getHours() * proH + Math.floor(k.getMinutes() / (60 / proH));
+    const ab = new Date(k.getFullYear(), k.getMonth(), k.getDate()).getTime() + q * schrittMs;
+    const alt = proSchritt.get(ab);
+    if (alt) alt.kwh += w; else proSchritt.set(ab, { j: k.getFullYear(), m: k.getMonth(), t: k.getDate(), q, kwh: w });
   });
   let gesamt = 0;
-  for (const s of proStd.values()) {
-    const art = tagesart(s.j, s.m, s.t);
-    summe[s.m][art][s.h] += s.kwh;
-    zahl[s.m][art][s.h] += 1;
+  for (const s of proSchritt.values()) {
+    const art = tagesart(s.j, s.m, s.t, land);
+    s.art = art;
+    summe[s.m][art][s.q] += s.kwh;
+    zahl[s.m][art][s.q] += 1;
     gesamt += s.kwh;
   }
-  /* fehlende Felder: erst andere Tagesart desselben Monats, dann Jahresmittel der Stunde */
-  const mittel = summe.map((mo, m) => mo.map((ar, a) => ar.map((x, h) => (zahl[m][a][h] ? x / zahl[m][a][h] : null))));
-  for (let m = 0; m < 12; m++) for (let a = 0; a < 3; a++) for (let h = 0; h < 24; h++) {
-    if (mittel[m][a][h] != null) continue;
-    const ersatz = [0, 1, 2].map((b) => mittel[m][b][h]).find((x) => x != null);
-    if (ersatz != null) { mittel[m][a][h] = ersatz; continue; }
+  /* fehlende Felder: erst andere Tagesart desselben Monats, dann Jahresmittel des Schritts */
+  const mittel = summe.map((mo, m) => mo.map((ar, a) => ar.map((x, q) => (zahl[m][a][q] ? x / zahl[m][a][q] : null))));
+  for (let m = 0; m < 12; m++) for (let a = 0; a < 3; a++) for (let q = 0; q < proTag; q++) {
+    if (mittel[m][a][q] != null) continue;
+    const ersatz = [0, 1, 2].map((b) => mittel[m][b][q]).find((x) => x != null);
+    if (ersatz != null) { mittel[m][a][q] = ersatz; continue; }
     const andere = [];
-    for (let n = 0; n < 12; n++) if (mittel[n][a][h] != null) andere.push(mittel[n][a][h]);
-    mittel[m][a][h] = andere.length ? andere.reduce((x, y) => x + y, 0) / andere.length : 0;
+    for (let n = 0; n < 12; n++) if (mittel[n][a][q] != null) andere.push(mittel[n][a][q]);
+    mittel[m][a][q] = andere.length ? andere.reduce((x, y) => x + y, 0) / andere.length : 0;
   }
-  const stunden = proStd.size;
-  return { mittel, gesamt, stunden, ohneDatum, jahresmenge: stunden ? (gesamt / stunden) * 8760 : 0 };
+  const schritte = proSchritt.size;
+  const ist = [...proSchritt.entries()].sort((x, y) => x[0] - y[0]).map(([t, s]) => ({ t, m: s.m, art: s.art, q: s.q, kwh: s.kwh }));
+  return { mittel, gesamt, proTag, land, ist, stunden: schritte / proH, ohneDatum,
+           jahresmenge: schritte ? (gesamt / schritte) * 8760 * proH : 0 };
 }
 
-/* Stundenlast eines Lieferjahres in MWh, auf die Jahresmenge (kWh) skaliert */
+/* Viertelstundenform auf Stunden verdichten (für das Zusammenlegen mit Stundenwerten) */
+function formAufStunden(f) {
+  if (f.proTag === 24) return f;
+  const mittel = f.mittel.map((mo) => mo.map((ar) => Array.from({ length: 24 }, (_, h) => ar[4 * h] + ar[4 * h + 1] + ar[4 * h + 2] + ar[4 * h + 3])));
+  const ist = [], zus = new Map();
+  (f.ist || []).forEach((x) => { const t = x.t - (x.q % 4) * 900000; const a = zus.get(t);
+    if (a) a.kwh += x.kwh; else { const n = { t, m: x.m, art: x.art, q: Math.floor(x.q / 4), kwh: x.kwh }; zus.set(t, n); ist.push(n); } });
+  return { ...f, mittel, proTag: 24, ist };
+}
+
+/* Last eines Lieferjahres in MWh je Zeitschritt, auf die Jahresmenge (kWh) skaliert; dt = Stunden je Schritt */
 function jahresLast(form, jahr, mengeKwh) {
-  const st = jahresStunden(jahr);
-  const roh = st.map((s) => form.mittel[s.m][s.art][s.h]);
+  const proTag = form.proTag || 24;
+  const st = jahresStunden(jahr, form.land || "", proTag);
+  const roh = st.map((s) => form.mittel[s.m][s.art][s.q]);
   const sum = roh.reduce((x, y) => x + y, 0) || 1;
   const faktor = (mengeKwh || form.jahresmenge) / sum / 1000;
-  return { stunden: st, last: roh.map((x) => x * faktor) };
+  return { stunden: st, last: roh.map((x) => x * faktor), dt: 24 / proTag };
 }
 
 /* Standardverteilung der Monate, falls keine Quartalspreise vorliegen.
@@ -15687,77 +15740,157 @@ function jahresLast(form, jahr, mengeKwh) {
 const MONATSFORM_BASE = [1.17, 1.12, 1.01, 0.9, 0.84, 0.86, 0.9, 0.9, 0.97, 1.04, 1.12, 1.16];
 const MONATSFORM_PEAK = [1.15, 1.1, 1.0, 0.88, 0.82, 0.86, 0.92, 0.91, 0.98, 1.05, 1.13, 1.18];
 
+/* Terminprodukte Strom: Zeiträume eines Lieferjahres (Monate 0–11).
+   Saison wie am Gasmarkt auf das Kalenderjahr bezogen: Sommer April–September, Winter Januar–März und Oktober–Dezember. */
+const STROM_PRODUKTE = [
+  ...Array.from({ length: 12 }, (_, m) => ({ ebene: "mo", i: m, monate: [m] })),
+  ...[0, 1, 2, 3].map((q) => ({ ebene: "q", i: q, monate: [3 * q, 3 * q + 1, 3 * q + 2] })),
+  { ebene: "sommer", monate: [3, 4, 5, 6, 7, 8] }, { ebene: "winter", monate: [0, 1, 2, 9, 10, 11] },
+  { ebene: "cal", monate: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }];
+const produktName = (pr, jahr) => pr.ebene === "mo" ? MONATE_KURZ[pr.i] + " " + jahr : pr.ebene === "q" ? "Q" + (pr.i + 1) + " " + jahr
+  : pr.ebene === "sommer" ? "Sommer " + jahr : pr.ebene === "winter" ? "Winter " + jahr : "Cal " + jahr;
+
+/* Eingaben eines Lieferjahres (Strom) → { cal, sommer, winter, q[4], mo[12] } mit je { base, peak, offpeak } in €/MWh */
+function preiseStromAus(j) {
+  const z = (v) => zahlOder(v);
+  const bpo = (x) => ({ base: z(x && x.base), peak: z(x && x.peak), offpeak: z(x && x.offpeak) });
+  return { cal: bpo(j), sommer: bpo(j.sommer), winter: bpo(j.winter),
+    q: [0, 1, 2, 3].map((i) => bpo((j.q || [])[i])), mo: Array.from({ length: 12 }, (_, i) => bpo((j.mo || [])[i])) };
+}
+
 /* Preiskurve für ein Lieferjahr.
-   p = { base, peak, q: [{ base, peak } × 4] (optional) }, alles €/MWh.
-   profil (optional): Faktoren je Monat × Tagesart × Stunde für Peak- und Offpeakstunden. */
-function preiskurve(jahr, p, profil) {
-  const st = jahresStunden(jahr);
-  const B = +p.base, P = +p.peak;
-  if (!(B > 0) || !(P > 0)) throw new Error("Für " + jahr + " fehlen Base- und Peakpreis.");
-  /* Stunden je Monat */
+   p = preiseStromAus(...) (ältere Form { base, peak, q } wird übernommen), alles €/MWh.
+   Vorrang: Monat → Quartal → Saison → Cal. Jede Stufe trifft ihren Preis genau, freie Monate werden
+   verschoben, bis die gröbere Stufe stimmt (arbitragefrei). Offpeak ergibt sich aus Base und Peak;
+   wer zwei der drei Preise einträgt, bekommt den dritten gerechnet, drei widersprüchliche werden gemeldet.
+   profil (optional): Faktoren je Monat × Tagesart × Stunde für Peak- und Offpeakstunden.
+   opt: { land, proTag } muss zur Last passen. */
+function preiskurve(jahr, p, profil, opt = {}) {
+  if (!p.cal) p = { cal: { base: zahlOder(p.base), peak: zahlOder(p.peak) }, q: (p.q || []).map((x) => ({ base: zahlOder(x && x.base), peak: zahlOder(x && x.peak) })) };
+  const st = jahresStunden(jahr, opt.land || "", opt.proTag || 24);
   const hM = Array(12).fill(0), hPM = Array(12).fill(0);
   st.forEach((s) => { hM[s.m]++; if (s.peak) hPM[s.m]++; });
-  const quartal = (m) => Math.floor(m / 3);
-
-  /* Monatspreise Base und Peak: Form × Kalibrierung auf Quartal (falls vorhanden) und Jahr */
-  const kalibriere = (form, ziel, stundenM, feld) => {
-    const qWerte = [0, 1, 2, 3].map((q) => {
-      const e = p.q && p.q[q];
-      const v = e && +e[feld];
-      return v > 0 ? v : null;
-    });
-    let mp = form.slice();
-    /* zuerst je Quartal auf den Quartalspreis */
-    for (let q = 0; q < 4; q++) {
-      const ms = [3 * q, 3 * q + 1, 3 * q + 2];
-      const hs = ms.reduce((x, m) => x + stundenM[m], 0);
-      const mittel = ms.reduce((x, m) => x + mp[m] * stundenM[m], 0) / hs;
-      const zielQ = qWerte[q] != null ? qWerte[q] : null;
-      if (zielQ != null) ms.forEach((m) => { mp[m] = (mp[m] / mittel) * zielQ; });
+  const hinweise = [];
+  /* Vorgaben je Produkt: Base und Peak, notfalls aus Offpeak gerechnet */
+  const vorgaben = [];
+  STROM_PRODUKTE.forEach((pr) => {
+    const e = pr.ebene === "cal" ? p.cal : pr.ebene === "q" ? (p.q || [])[pr.i] : pr.ebene === "mo" ? (p.mo || [])[pr.i] : p[pr.ebene];
+    if (!e) return;
+    const ok = (v) => v != null && isFinite(v) && v !== 0;
+    let B = ok(e.base) ? +e.base : null, P = ok(e.peak) ? +e.peak : null;
+    const O = ok(e.offpeak) ? +e.offpeak : null;
+    const h = pr.monate.reduce((x, m) => x + hM[m], 0), hp = pr.monate.reduce((x, m) => x + hPM[m], 0), ho = h - hp;
+    const name = produktName(pr, jahr);
+    if (O != null) {
+      if (B != null && P != null) {
+        const soll = (B * h - P * hp) / ho;
+        if (Math.abs(soll - O) > 0.05) hinweise.push(name + ": Base, Peak und Offpeak passen nicht zusammen (Offpeak rechnerisch " + num(soll, 2) + ")");
+      } else if (B != null) P = (B * h - O * ho) / hp;
+      else if (P != null) B = (P * hp + O * ho) / h;
+      else hinweise.push(name + ": Offpeak allein reicht nicht, bitte Base oder Peak dazu eintragen");
     }
-    /* dann Quartale ohne Preis so verschieben, dass das Jahr stimmt */
-    const fest = [0, 1, 2, 3].filter((q) => qWerte[q] != null);
-    const frei = [0, 1, 2, 3].filter((q) => qWerte[q] == null);
-    const hJahr = stundenM.reduce((x, y) => x + y, 0);
-    const summeFest = stundenM.reduce((x, h, m) => x + (fest.includes(quartal(m)) ? mp[m] * h : 0), 0);
-    const summeFreiForm = stundenM.reduce((x, h, m) => x + (frei.includes(quartal(m)) ? mp[m] * h : 0), 0);
-    if (frei.length && summeFreiForm > 0) {
-      const faktor = (ziel * hJahr - summeFest) / summeFreiForm;
-      mp = mp.map((v, m) => (frei.includes(quartal(m)) ? v * faktor : v));
-    }
-    return { monate: mp, abweichung: frei.length ? 0 : summeFest / hJahr - ziel };
+    if (B != null || P != null) vorgaben.push({ ...pr, name, B, P });
+  });
+  const startwert = (feld) => {
+    const c = vorgaben.find((v) => v.ebene === "cal" && v[feld] != null);
+    if (c) return c[feld];
+    const alle = vorgaben.filter((v) => v[feld] != null);
+    return alle.length ? alle.reduce((x, v) => x + v[feld], 0) / alle.length : null;
   };
-  const base = kalibriere(MONATSFORM_BASE.map((f) => f * B), B, hM, "base");
-  const peak = kalibriere(MONATSFORM_PEAK.map((f) => f * P), P, hPM, "peak");
-  const offpeak = base.monate.map((b, m) => (b * hM[m] - peak.monate[m] * hPM[m]) / (hM[m] - hPM[m]));
+  const kalibriere = (form, feld, stundenM) => {
+    const s0 = startwert(feld);
+    if (s0 == null) throw new Error("Für " + jahr + " fehlt der " + (feld === "B" ? "Base" : "Peak") + "preis (Cal oder Saison, Quartale, Monate).");
+    const mp = form.map((f) => f * s0);
+    const fest = new Set();
+    vorgaben.filter((v) => v[feld] != null).forEach((v) => {   /* Reihenfolge der Liste: fein vor grob */
+      const frei = v.monate.filter((m) => !fest.has(m));
+      const H = v.monate.reduce((x, m) => x + stundenM[m], 0);
+      const summeFest = v.monate.filter((m) => fest.has(m)).reduce((x, m) => x + mp[m] * stundenM[m], 0);
+      if (!frei.length) {
+        const d = summeFest / H - v[feld];
+        if (Math.abs(d) > 0.05) hinweise.push(v.name + " " + (feld === "B" ? "Base" : "Peak") + ": feinere Preise ergeben " + num(summeFest / H, 2)
+          + " statt " + num(v[feld], 2) + " €/MWh");
+      } else {
+        const summeFrei = frei.reduce((x, m) => x + mp[m] * stundenM[m], 0);
+        const f = summeFrei ? (v[feld] * H - summeFest) / summeFrei : 1;
+        frei.forEach((m) => { mp[m] *= f; });
+      }
+      v.monate.forEach((m) => fest.add(m));
+    });
+    if (fest.size < 12) {
+      const fehlt = [...Array(12).keys()].filter((m) => !fest.has(m)).map((m) => MONATE_KURZ[m]);
+      throw new Error("Für " + jahr + " fehlen " + (feld === "B" ? "Base" : "Peak") + "preise für " + fehlt.join(", ") + " (oder ein Cal-Preis).");
+    }
+    return mp;
+  };
+  const baseM = kalibriere(MONATSFORM_BASE, "B", hM);
+  const peakM = kalibriere(MONATSFORM_PEAK, "P", hPM);
+  const offpeak = baseM.map((b, m) => (b * hM[m] - peakM[m] * hPM[m]) / (hM[m] - hPM[m]));
 
-  /* Stundenpreise: Peak/Offpeak-Monatswert × Profilfaktor, danach je Monat und Zeitzone
+  /* Preise je Zeitschritt: Peak/Offpeak-Monatswert × Profilfaktor der Stunde, danach je Monat und Zeitzone
      auf den Monatswert zurückgeführt, damit die Kurve arbitragefrei bleibt */
-  const preis = st.map((s) => (s.peak ? peak.monate[s.m] : offpeak[s.m])
+  const preis = st.map((s) => (s.peak ? peakM[s.m] : offpeak[s.m])
     * (profil ? profil[s.peak ? 1 : 0][s.m][s.art][s.h] || 1 : 1));
   if (profil) {
     for (let m = 0; m < 12; m++) for (const pk of [true, false]) {
       let sum = 0, n = 0;
       st.forEach((s, i) => { if (s.m === m && s.peak === pk) { sum += preis[i]; n++; } });
-      const ziel = pk ? peak.monate[m] : offpeak[m];
+      const ziel = pk ? peakM[m] : offpeak[m];
       const f = n && sum ? (ziel * n) / sum : 1;
       st.forEach((s, i) => { if (s.m === m && s.peak === pk) preis[i] *= f; });
     }
   }
-  return { stunden: st, preis, monate: { base: base.monate, peak: peak.monate, offpeak },
-           quartalAbweichung: { base: base.abweichung, peak: peak.abweichung } };
+  return { stunden: st, preis, monate: { base: baseM, peak: peakM, offpeak }, hinweise,
+           quartalAbweichung: { base: 0, peak: 0 } };
+}
+
+/* Spot-PFC oder Ausgleichsenergiepreise (Reihe [{ t: Date, preis }]) → Preis je Zeitschritt eines Jahres.
+   Deckt die Reihe das Jahr ab (mindestens 90 %), gelten die Preise zum selben Zeitpunkt; sonst der Mittelwert
+   je Monat × Tagesart × Schritt im Tag aus der Reihe (Form eines anderen Jahres). */
+function preiseAufJahr(reihe, jahr, land = "", proTag = 24) {
+  const st = jahresStunden(jahr, land, proTag), proH = proTag / 24;
+  const genau = new Map(), form = new Map(), formM = new Map();
+  let summe = 0, n = 0;
+  reihe.forEach(({ t, preis }) => {
+    if (!t || !isFinite(preis)) return;
+    const q = t.getHours() * proH + Math.floor(t.getMinutes() / (60 / proH));
+    const add = (map, k) => { const a = map.get(k); if (a) { a[0] += preis; a[1]++; } else map.set(k, [preis, 1]); };
+    if (t.getFullYear() === jahr) add(genau, t.getMonth() + "-" + t.getDate() + "-" + q);
+    add(form, t.getMonth() + "-" + tagesart(t.getFullYear(), t.getMonth(), t.getDate(), land) + "-" + q);
+    add(formM, t.getMonth() + "-" + q);
+    summe += preis; n++;
+  });
+  if (!n) throw new Error("Die Datei enthält keine Preise mit Zeitpunkt.");
+  const mw = (a) => a[0] / a[1];
+  const treffer = st.filter((s) => genau.has(s.m + "-" + s.t + "-" + s.q)).length;
+  const exakt = treffer >= st.length * 0.9;
+  const preis = st.map((s) => {
+    const g = exakt && genau.get(s.m + "-" + s.t + "-" + s.q);
+    if (g) return mw(g);
+    const f = form.get(s.m + "-" + s.art + "-" + s.q) || formM.get(s.m + "-" + s.q);
+    return f ? mw(f) : summe / n;
+  });
+  return { stunden: st, preis, exakt, mittel: summe / n };
+}
+
+/* Spot- oder Ausgleichsenergiepreise aus einer Datei (CSV/Excel mit Zeit und €/MWh), Viertelstunden bleiben erhalten */
+async function preisreiheRohAusDatei(d) {
+  const stand = await lastgangAuswerten(d);
+  const r = stand.werte.map((w, i) => ({ t: zeitLesen(stand.zeitpunkte[i]), preis: w })).filter((x) => x.t && isFinite(x.preis));
+  if (r.length < 24 * 28) throw new Error("In " + d.name + " wurden nur " + r.length + " Preise mit Zeitpunkt gefunden.");
+  return r;
 }
 
 /* Stundenprofil aus Day-Ahead-Preisen: Faktor je Monat × Tagesart × Stunde,
    getrennt für Peak- und Offpeakstunden, jeweils relativ zum Monatsmittel der Zeitzone. */
-function profilAusPreisen(reihe /* [{ t: Date, preis }] */) {
+function profilAusPreisen(reihe /* [{ t: Date, preis }] */, land = "") {
   const roh = [0, 1].map(() => Array.from({ length: 12 }, () => Array.from({ length: 3 }, () => Array(24).fill(null).map(() => [0, 0]))));
   const mon = [0, 1].map(() => Array.from({ length: 12 }, () => [0, 0]));
   reihe.forEach(({ t, preis }) => {
     if (!t || !isFinite(preis)) return;
     const j = t.getFullYear(), m = t.getMonth(), tg = t.getDate(), h = t.getHours(), w = t.getDay();
     const pk = w >= 1 && w <= 5 && h >= 8 && h < 20 ? 1 : 0;
-    const art = tagesart(j, m, tg);
+    const art = tagesart(j, m, tg, land);
     roh[pk][m][art][h][0] += preis; roh[pk][m][art][h][1]++;
     mon[pk][m][0] += preis; mon[pk][m][1]++;
   });
@@ -15768,29 +15901,118 @@ function profilAusPreisen(reihe /* [{ t: Date, preis }] */) {
   }))));
 }
 
-/* Bewertung eines Lieferjahres */
-function jahresBewertung(last, kurve) {
-  const L = last.last, Pr = kurve.preis, st = last.stunden;
-  let menge = 0, wert = 0, peakMenge = 0, peakSt = 0, offSt = 0, offMenge = 0, spitze = 0;
+/* Hedgearten (Strom). Je Zeitraum des gewählten Produkts (Cal, Quartal, Monat) entsteht eine Base- und eine
+   Peakleistung; Peak = Mehrleistung in den Peakstunden über Base (nicht negativ).
+   menge:      Base = mittlere Offpeaklast, Peak = mittlere Peaklast − Base (Energie je Zone gedeckt)
+   preis:      wertgleich: Hedge hat je Zone denselben Marktwert wie die Last (Σ Last·Preis / Σ Preis)
+   preismenge: kleinste Abweichung, mit dem Preis gewichtet (Σ Preis²·Last / Σ Preis²)
+   bottomup:   Sockel: 5-%-Wert der Last je Zone; was darüber liegt, bleibt offen (Spot) */
+const HEDGE_ARTEN = [
+  { id: "menge", name: "Mengenhedge", text: "Base = mittlere Offpeaklast, Peak = Mehrlast in den Peakstunden. Die Hedgemenge entspricht der Last." },
+  { id: "preis", name: "Preishedge", text: "Wertgleich: Die Absicherung hat je Zeitzone denselben Marktwert wie der Lastgang; die Menge kann abweichen." },
+  { id: "preismenge", name: "Preis-Mengen-Hedge", text: "Kleinste Abweichung zwischen Last und Absicherung, jede Stunde mit ihrem Preis gewichtet: teure Stunden zählen mehr." },
+  { id: "bottomup", name: "Bottom-up-Hedge", text: "Nur der Sockel, der fast immer verbraucht wird (5-%-Wert der Last je Zeitzone); der Rest bleibt offen für den Spotmarkt." }];
+const HEDGE_PRODUKTE = [{ id: "cal", name: "Cal (ein Jahresband)" }, { id: "quartal", name: "Quartale" }, { id: "monat", name: "Monate" }];
+const hedgeVon = (h) => ({ art: "menge", produkt: "cal", prozent: "100", ...(h || {}) });
+
+/* Bewertung eines Lieferjahres. last.last: MWh je Zeitschritt, kurve.preis: €/MWh je Zeitschritt. */
+function jahresBewertung(last, kurve, hedge) {
+  const L = last.last, Pr = kurve.preis, st = last.stunden, dt = last.dt || 1;
+  const hg = hedgeVon(hedge);
+  const quote = Math.max(0, zahlOder(hg.prozent) == null ? 100 : zahlOder(hg.prozent)) / 100;
+  let menge = 0, wert = 0, peakMenge = 0, peakSt = 0, spitze = 0;
   for (let i = 0; i < L.length; i++) {
     menge += L[i]; wert += L[i] * Pr[i];
     if (L[i] > spitze) spitze = L[i];
-    if (st[i].peak) { peakMenge += L[i]; peakSt++; } else { offMenge += L[i]; offSt++; }
+    if (st[i].peak) { peakMenge += L[i]; peakSt++; }
   }
-  /* Mengen-Hedge mit Jahresprodukten: Base = mittlere Offpeaklast, Peak = Rest der Peaklast */
-  const baseMW = offSt ? offMenge / offSt : 0;
-  const peakMW = Math.max(0, (peakSt ? peakMenge / peakSt : 0) - baseMW);
-  const hedgeMenge = baseMW * L.length + peakMW * peakSt;
-  let hedgeWert = 0;
-  for (let i = 0; i < L.length; i++) hedgeWert += (baseMW + (st[i].peak ? peakMW : 0)) * Pr[i];
+  const gruppe = (s) => hg.produkt === "monat" ? s.m : hg.produkt === "quartal" ? Math.floor(s.m / 3) : 0;
+  const anzahl = hg.produkt === "monat" ? 12 : hg.produkt === "quartal" ? 4 : 1;
+  const zonen = Array.from({ length: anzahl }, () => [[], []]); /* [offpeak, peak] je Zeitraum: Indizes */
+  st.forEach((s, i) => zonen[gruppe(s)][s.peak ? 1 : 0].push(i));
+  const quantil = (werte, p) => { if (!werte.length) return 0; const a = werte.slice().sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(p * a.length))]; };
+  /* Leistung (MW), die eine Zone abdeckt */
+  const zonenMW = (idx) => {
+    if (!idx.length) return 0;
+    const l = idx.map((i) => L[i] / dt), p = idx.map((i) => Pr[i]);
+    const mittel = l.reduce((x, y) => x + y, 0) / l.length;
+    if (hg.art === "preis") { const sp = p.reduce((x, y) => x + y, 0); return sp > 0 ? l.reduce((x, v, k) => x + v * p[k], 0) / sp : mittel; }
+    if (hg.art === "preismenge") { const sq = p.reduce((x, y) => x + y * y, 0); return sq > 0 ? l.reduce((x, v, k) => x + v * p[k] * p[k], 0) / sq : mittel; }
+    if (hg.art === "bottomup") return quantil(l, 0.05);
+    return mittel;
+  };
+  const perioden = zonen.map(([off, pk], g) => {
+    const b = zonenMW(off);
+    const pkGes = pk.length ? zonenMW(pk) : b;
+    return { g, baseMW: b * quote, peakMW: Math.max(0, pkGes - b) * quote };
+  });
+  const hb = new Float64Array(L.length), hp = new Float64Array(L.length);
+  let hedgeMenge = 0, hedgeWert = 0, baseSum = 0, peakSum = 0, baseEnergie = 0;
+  st.forEach((s, i) => {
+    const pe = perioden[gruppe(s)];
+    hb[i] = pe.baseMW; hp[i] = s.peak ? pe.peakMW : 0;
+    const e = (hb[i] + hp[i]) * dt;
+    hedgeMenge += e; hedgeWert += e * Pr[i]; baseEnergie += hb[i] * dt;
+    baseSum += hb[i]; if (s.peak) peakSum += hp[i];
+  });
+  /* Kennzahlen je Zeitraum für die Tabelle: Leistung, Menge und Preise der Kurve */
+  const periodenInfo = perioden.map((pe) => {
+    const [off, pk] = zonen[pe.g];
+    const alle = off.concat(pk);
+    const mittelP = (idx) => idx.length ? idx.reduce((x, i) => x + Pr[i], 0) / idx.length : 0;
+    const e = (pe.baseMW * alle.length + pe.peakMW * pk.length) * dt;
+    const w = alle.reduce((x, i) => x + (pe.baseMW + (st[i].peak ? pe.peakMW : 0)) * dt * Pr[i], 0);
+    return { name: hg.produkt === "monat" ? MONATE_KURZ[pe.g] : hg.produkt === "quartal" ? "Q" + (pe.g + 1) : "Cal",
+      baseMW: pe.baseMW, peakMW: pe.peakMW, menge: e, preis: e ? w / e : 0,
+      basePreis: mittelP(alle), peakPreis: mittelP(pk),
+      last: alle.reduce((x, i) => x + L[i], 0) };
+  });
+  const rest = wert - hedgeWert;
   return {
     menge, wert, preis: menge ? wert / menge : 0,
-    spitze, benutzung: spitze ? menge / spitze : 0, peakAnteil: menge ? peakMenge / menge : 0,
-    baseMW, peakMW, hedgeMenge, hedgeWert, hedgePreis: hedgeMenge ? hedgeWert / hedgeMenge : 0,
-    struktur: wert - hedgeWert, strukturProMWh: menge ? (wert - hedgeWert) / menge : 0,
-    gewichtBase: hedgeMenge ? (baseMW * L.length) / hedgeMenge : 1,
+    spitze: spitze / dt, benutzung: spitze ? menge / (spitze / dt) : 0, peakAnteil: menge ? peakMenge / menge : 0,
+    baseMW: L.length ? baseSum / L.length : 0, peakMW: peakSt ? peakSum / peakSt : 0,
+    hedgeMenge, hedgeWert, hedgePreis: hedgeMenge ? hedgeWert / hedgeMenge : 0, hedgeQuote: menge ? hedgeMenge / menge : 0,
+    struktur: rest, strukturProMWh: menge ? rest / menge : 0,
+    gewichtBase: hedgeMenge ? baseEnergie / hedgeMenge : 1,
+    perioden: periodenInfo, hedge: hg, hb, hp, dt,
   };
 }
+/* Ausgleichsenergie-Risiko aus dem eingelesenen Lastgang.
+   Prognose je Zeitschritt = typische Last (Mittel aus Monat × Tagesart × Schritt), Abweichung = tatsächliche Last − Prognose.
+   Bewertet mit dem Ausgleichsenergiepreis (z. B. reBAP) zum selben Zeitpunkt: Unterdeckung kostet, Überdeckung bringt Erlös.
+   Weil sich die Abweichungen je Klasse aufheben, misst das Ergebnis die Kosten der Abweichung gegenüber einem festen Preis. */
+function aeRisiko(form, reihe) {
+  if (!form || !form.ist || !form.ist.length) throw new Error("Für die Ausgleichsenergie bitte zuerst den Lastgang mit Zeitstempeln einlesen.");
+  const proH = (form.proTag || 24) / 24, schrittMs = 3600000 / proH;
+  const genau = new Map(), klasse = new Map();
+  const add = (map, k, v) => { const a = map.get(k); if (a) { a[0] += v; a[1]++; } else map.set(k, [v, 1]); };
+  reihe.forEach(({ t, preis }) => {
+    const q = t.getHours() * proH + Math.floor(t.getMinutes() / (60 / proH));
+    const ab = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime() + q * schrittMs;
+    add(genau, ab, preis);
+    add(klasse, t.getMonth() + "-" + tagesart(t.getFullYear(), t.getMonth(), t.getDate(), form.land || "") + "-" + q, preis);
+  });
+  let menge = 0, abw = 0, kosten = 0, treffer = 0;
+  const monK = Array(12).fill(0), monM = Array(12).fill(0);
+  form.ist.forEach((x) => {
+    const g = genau.get(x.t);
+    const k = g || klasse.get(x.m + "-" + x.art + "-" + x.q);
+    if (g) treffer++;
+    if (!k) return;
+    const preis = k[0] / k[1];
+    const d = (x.kwh - form.mittel[x.m][x.art][x.q]) / 1000;
+    menge += x.kwh / 1000; abw += Math.abs(d); kosten += d * preis;
+    monK[x.m] += d * preis; monM[x.m] += x.kwh / 1000;
+  });
+  if (!menge) throw new Error("Die Ausgleichsenergiepreise passen zeitlich nicht zum Lastgang.");
+  const monate = monK.map((k, m) => (monM[m] ? k / monM[m] : null)).filter((x) => x != null);
+  return { menge, abweichung: abw, abwAnteil: abw / menge, kosten, proMWh: kosten / menge,
+           treffer: treffer / form.ist.length, monatHoechst: monate.length ? Math.max(...monate) : 0 };
+}
+
+/* Energiepreis des Lastgangs: Anteil der Absicherung × Hedgepreis + Struktur und offene Menge (je MWh Last) */
+const lastgangPreis = (j) => (j.hedgeQuote == null ? 1 : j.hedgeQuote) * j.hedgePreis + j.strukturProMWh;
 
 /* Tranchenplan eines Jahres: gekaufte Anteile mit Preis, offener Rest zum aktuellen Hedgepreis */
 function tranchenStand(tranchen, jahr, bew, stress, heuteStr) {
@@ -15805,7 +16027,9 @@ function tranchenStand(tranchen, jahr, bew, stress, heuteStr) {
   const gekauftPreis = gekauftAnteil ? gekauft.reduce((s, x) => s + anteil(x) * preisVon(x), 0) / gekauft.reduce((s, x) => s + anteil(x), 0) : 0;
   const offen = 1 - gekauftAnteil;
   const s = (+stress || 0) / 100;
-  const misch = (aufschlag) => gekauftAnteil * gekauftPreis + offen * bew.hedgePreis * (1 + aufschlag) + bew.strukturProMWh * (1 + aufschlag);
+  const quote = bew.hedgeQuote == null ? 1 : bew.hedgeQuote;
+  const misch = (aufschlag) => quote * (gekauftAnteil * gekauftPreis + offen * bew.hedgePreis * (1 + aufschlag)) + bew.strukturProMWh * (1 + aufschlag)
+    + (bew.aeProMWh || 0) * (1 + aufschlag);
   /* Sollstand: Anteil der geplanten Tranchen, deren Termin schon vorbei ist */
   const geplantBis = t.filter((x) => x.datum && x.datum <= heuteStr).reduce((s, x) => s + anteil(x), 0);
   const geplant = t.reduce((s, x) => s + anteil(x), 0);
@@ -15862,11 +16086,11 @@ function tranchenVorschlag(jahr, n, von, bis, produkt) {
 /* ------------------------------------------------------------------ */
 
 /* Gastage eines Lieferjahres (Kalenderjahr), mit Tagesart wie bei Strom */
-function gasTage(jahr) {
+function gasTage(jahr, land = "") {
   const raus = [];
   for (let m = 0; m < 12; m++) {
     const n = new Date(Date.UTC(jahr, m + 1, 0)).getUTCDate();
-    for (let t = 1; t <= n; t++) raus.push({ m, t, h: 0, art: tagesart(jahr, m, t), peak: false });
+    for (let t = 1; t <= n; t++) raus.push({ m, t, h: 0, art: tagesart(jahr, m, t, land), peak: false });
   }
   return raus;
 }
@@ -15907,14 +16131,14 @@ function gasTagesmengen(werte, zeiten, proStunde, einheit) {
 }
 
 /* Tagesmengen (Map JJJJ-MM-TT → kWh) → Gasform: mittlere kWh je Gastag für Monat × Tagesart */
-function gasForm(tage) {
+function gasForm(tage, land = "") {
   const summe = Array.from({ length: 12 }, () => [0, 0, 0]);
   const zahl = Array.from({ length: 12 }, () => [0, 0, 0]);
   let gesamt = 0, n = 0, spitzeTag = 0;
   const monate = Array(12).fill(0);
   for (const [s, kwh] of tage) {
     const [j, m, d] = s.split("-").map(Number);
-    const art = tagesart(j, m - 1, d);
+    const art = tagesart(j, m - 1, d, land);
     summe[m - 1][art] += kwh; zahl[m - 1][art]++;
     monate[m - 1] += kwh;
     gesamt += kwh; n++; spitzeTag = Math.max(spitzeTag, kwh);
@@ -15928,12 +16152,12 @@ function gasForm(tage) {
     for (let k = 0; k < 12; k++) if (mittel[k][a] != null) andere.push(mittel[k][a]);
     mittel[m][a] = andere.length ? andere.reduce((x, y) => x + y, 0) / andere.length : 0;
   }
-  return { mittel, gesamt, tage: n, spitzeTag, monate, jahresmenge: n ? (gesamt / n) * 365 : 0 };
+  return { mittel, gesamt, tage: n, spitzeTag, monate, land, jahresmenge: n ? (gesamt / n) * 365 : 0 };
 }
 
 /* Tageslast eines Lieferjahres in MWh je Gastag, auf die Jahresmenge (kWh) skaliert */
 function gasJahresLast(form, jahr, mengeKwh) {
-  const tage = gasTage(jahr);
+  const tage = gasTage(jahr, form.land || "");
   const roh = tage.map((d) => form.mittel[d.m][d.art]);
   const sum = roh.reduce((x, y) => x + y, 0) || 1;
   const faktor = (mengeKwh || form.jahresmenge) / sum / 1000;
@@ -15948,8 +16172,8 @@ const GAS_WINTER = [0, 1, 2, 9, 10, 11];        /* Januar bis März und Oktober 
 /* Preiskurve Erdgas für ein Lieferjahr.
    p = { cal, sommer, winter, q: [preis × 4] }, alles €/MWh; nur cal ist Pflicht.
    profil (optional): Faktor je Monat × Tagesart aus Day-Ahead-Preisen. */
-function gaskurve(jahr, p, profil) {
-  const tage = gasTage(jahr);
+function gaskurve(jahr, p, profil, land = "") {
+  const tage = gasTage(jahr, land);
   const cal = +p.cal;
   if (!(cal > 0)) throw new Error("Für " + jahr + " fehlt der Cal-Preis Erdgas.");
   const dM = Array(12).fill(0);
@@ -15987,14 +16211,14 @@ function gaskurve(jahr, p, profil) {
 }
 
 /* Tagesprofil aus Day-Ahead-Preisen Erdgas: Faktor je Monat × Tagesart, relativ zum Monatsmittel */
-function profilAusGasPreisen(reihe /* [{ tag: "JJJJ-MM-TT", preis }] */) {
+function profilAusGasPreisen(reihe /* [{ tag: "JJJJ-MM-TT", preis }] */, land = "") {
   const roh = Array.from({ length: 12 }, () => [[0, 0], [0, 0], [0, 0]]);
   const mon = Array.from({ length: 12 }, () => [0, 0]);
   reihe.forEach(({ tag, preis }) => {
     if (!tag || !isFinite(preis)) return;
     const [j, m, d] = String(tag).slice(0, 10).split("-").map(Number);
     if (!j || !m || !d) return;
-    const art = tagesart(j, m - 1, d);
+    const art = tagesart(j, m - 1, d, land);
     roh[m - 1][art][0] += preis; roh[m - 1][art][1]++;
     mon[m - 1][0] += preis; mon[m - 1][1]++;
   });
@@ -16038,7 +16262,7 @@ function analyseJahrGas(form, bw, jahr) {
   if (!form || !j) return null;
   const menge = zahlOder(j.menge) || form.jahresmenge;
   const last = gasJahresLast(form, jahr, menge);
-  const kurve = gaskurve(jahr, gasPreiseAus(j), bw.profil || null);
+  const kurve = gaskurve(jahr, gasPreiseAus(j), bw.profil || null, form.land || "");
   const e = jahresBewertungGas(last, kurve);
   const z = (v) => +String(v || "").replace(",", ".") || 0;
   const gekauft = (bw.tranchen || []).filter((t) => +t.jahr === +jahr && t.status === "gekauft");
@@ -16057,7 +16281,7 @@ const gasPreiseAus = (j) => ({ cal: zahlOder(j.cal), sommer: zahlOder(j.sommer),
 
 
 /* Gas-Lastgänge einlesen: alle Dateien zu Tagesmengen je Gastag zusammenführen */
-async function gasFormAusDateien(dateien, einheit) {
+async function gasFormAusDateien(dateien, einheit, land = "") {
   const alle = new Map();
   let spitzeKw = 0, ohneDatum = 0, schritt = 24;
   const namen = [];
@@ -16068,9 +16292,9 @@ async function gasFormAusDateien(dateien, einheit) {
     spitzeKw += r.spitzeKw; ohneDatum += r.ohneDatum; schritt = Math.min(schritt, r.schritt);
     namen.push(d.name);
   }
-  const f = gasForm(alle);
+  const f = gasForm(alle, land);
   const reihe = [...alle.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  return { mittel: f.mittel, jahresmenge: f.jahresmenge, gas: true,
+  return { mittel: f.mittel, jahresmenge: f.jahresmenge, gas: true, land,
     info: { gas: true, jahresmenge: f.jahresmenge, spitzeTag: f.spitzeTag, spitzeKw, tage: f.tage, schritt, ohneDatum,
       dateien: namen, grafiken: [{ name: namen.join(", "), profil: f.monate, einheit: "kWh", gasReihe: reihe }] } };
 }
@@ -16788,24 +17012,34 @@ function BeschaffungKarte({ a, user, mitarbeiter, beschaffung, setBeschaffung, o
 }
 
 /* ---------- Lastgänge einlesen (mehrere Lieferstellen werden addiert) ---------- */
-async function lastformAusDateien(dateien, einheit) {
-  let summe = null, info = { gesamt: 0, jahresmenge: 0, spitze: 0, stunden: 0, ohneDatum: 0, dateien: [] };
+async function lastformAusDateien(dateien, einheit, land = "") {
+  const formen = [];
+  const info = { gesamt: 0, jahresmenge: 0, spitze: 0, stunden: 0, ohneDatum: 0, dateien: [], grafiken: [] };
   for (const d of dateien) {
     const stand = await lastgangAuswerten(d);
     const faktor = einheit === "kW" ? 1 / stand.proStunde : 1;
     const werte = stand.werte.map((w) => w * faktor);
-    const form = lastform(werte, stand.zeitpunkte, stand.proStunde, zeitLesen);
-    if (!summe) summe = form.mittel.map((mo) => mo.map((ar) => ar.slice()));
-    else form.mittel.forEach((mo, m) => mo.forEach((ar, x) => ar.forEach((v, h) => { summe[m][x][h] += v; })));
+    const form = lastform(werte, stand.zeitpunkte, stand.proStunde, zeitLesen, land);
+    formen.push(form);
     info.gesamt += form.gesamt; info.jahresmenge += form.jahresmenge;
     info.spitze += stand.spitze * faktor; info.stunden = Math.max(info.stunden, form.stunden);
     info.ohneDatum += form.ohneDatum;
     info.dateien.push(d.name);
+    /* Grafiken aus den umgerechneten Werten: bei Leistungswerten (kW) sonst viermal zu hoch */
     let bilder = null;
-    try { bilder = stand.verlaeufe ? lastgangGrafiken(stand) : null; } catch (_) { bilder = null; }
-    (info.grafiken = info.grafiken || []).push({ name: d.name, bilder, profil: stand.profil, einheit: einheit === "kW" ? "kW" : "kWh" });
+    try { bilder = stand.verlaeufe ? lastgangGrafiken({ ...stand, verlaeufe: lastgangVerlaeufe(werte, stand.zeitpunkte, stand.proStunde) }) : null; } catch (_) { bilder = null; }
+    info.grafiken.push({ name: d.name, bilder, profil: stand.profil.map((x) => x * faktor), einheit: einheit === "kW" ? "kW" : "kWh" });
   }
-  return { mittel: summe, jahresmenge: info.jahresmenge, info };
+  /* Viertelstunden nur, wenn alle Lastgänge Viertelstunden haben */
+  const viertel = formen.every((f) => f.proTag === 96);
+  const fs = viertel ? formen : formen.map(formAufStunden);
+  const summe = fs[0].mittel.map((mo) => mo.map((ar) => ar.slice()));
+  fs.slice(1).forEach((f) => f.mittel.forEach((mo, m) => mo.forEach((ar, x) => ar.forEach((v, q) => { summe[m][x][q] += v; }))));
+  /* tatsächliche Werte je Zeitschritt addieren (für die Ausgleichsenergie) */
+  const ist = new Map();
+  fs.forEach((f) => f.ist.forEach((x) => { const a = ist.get(x.t); if (a) a.kwh += x.kwh; else ist.set(x.t, { ...x }); }));
+  info.proTag = viertel ? 96 : 24;
+  return { mittel: summe, jahresmenge: info.jahresmenge, proTag: info.proTag, land, ist: [...ist.values()].sort((a, b) => a.t - b.t), info };
 }
 
 /* Day-Ahead-Preise: Datei (CSV/Excel mit Zeit und Preis) oder Energy-Charts im Browser */
@@ -16931,15 +17165,18 @@ const AMPEL_TEXT = ["Im Plan", "Beobachten", "Handlungsbedarf"];
    (gekaufte Tranchen), offene Short- und Long-Mengen mit Marktwert. Rechnet aus dem
    eingelesenen Lastgang und den eingetragenen Preisen, nichts davon wird gespeichert. */
 const MONATSNAMEN_LANG = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
-function analyseJahr(form, bw, jahr) {
+function analyseJahr(form, bw, jahr, spot) {
   const j = (bw.jahre || []).find((x) => +x.jahr === +jahr);
   if (!form || !j) return null;
   const menge = zahlOder(j.menge) || form.jahresmenge;
   const last = jahresLast(form, jahr, menge);
-  const kurve = preiskurve(jahr, { base: zahlOder(j.base), peak: zahlOder(j.peak),
-    q: (j.q || []).map((q) => ({ base: zahlOder(q && q.base), peak: zahlOder(q && q.peak) })) }, bw.profil || null);
-  const e = jahresBewertung(last, kurve);
-  /* geschlossene Leistung: Anteil gekaufter Tranchen an Base- und Peakleistung */
+  const opt = { land: form.land || "", proTag: form.proTag || 24 };
+  const kurve = bw.preisbasis === "spot"
+    ? (spot ? { preis: preiseAufJahr(spot, jahr, opt.land, opt.proTag).preis } : null)
+    : preiskurve(jahr, preiseStromAus(j), bw.profil || null, opt);
+  if (!kurve) return null;
+  const e = jahresBewertung(last, kurve, bw.preisbasis === "spot" ? { ...hedgeVon(bw.hedge), prozent: "0" } : bw.hedge);
+  /* geschlossene Leistung: Anteil gekaufter Tranchen an der Base- und Peakleistung der Absicherung */
   const z = (v) => +String(v || "").replace(",", ".") || 0;
   const gekauft = (bw.tranchen || []).filter((t) => +t.jahr === +jahr && t.status === "gekauft");
   let anteil = 0, wertBaseProMWh = 0, wertPeakProMWh = 0;
@@ -16949,14 +17186,14 @@ function analyseJahr(form, bw, jahr) {
     anteil += a; wertBaseProMWh += a * pb; wertPeakProMWh += a * pp;
   });
   anteil = Math.min(1, anteil);
-  const zu = last.stunden.map((s) => anteil * (e.baseMW + (s.peak ? e.peakMW : 0)));
-  /* Preis je Stunde der geschlossenen Menge: Base-Anteil zum Basepreis, Peak-Anteil zum Peakpreis */
-  const preisZu = last.stunden.map((s) => {
-    const b = e.baseMW * wertBaseProMWh, p = s.peak ? e.peakMW * wertPeakProMWh : 0;
-    const mw = anteil * (e.baseMW + (s.peak ? e.peakMW : 0));
-    return mw ? (b + p) / mw : 0;
+  const dt = last.dt;
+  const zu = last.stunden.map((s, i) => anteil * (e.hb[i] + e.hp[i]) * dt);
+  /* Preis je Zeitschritt der geschlossenen Menge: Base-Anteil zum Basepreis, Peak-Anteil zum Peakpreis */
+  const preisZu = last.stunden.map((s, i) => {
+    const mw = e.hb[i] + e.hp[i];
+    return mw && anteil ? (e.hb[i] * wertBaseProMWh + e.hp[i] * wertPeakProMWh) / (anteil * mw) : 0;
   });
-  return { j, e, stunden: last.stunden, last: last.last, preis: kurve.preis, zu, preisZu, anteil };
+  return { j, e, stunden: last.stunden, last: last.last, preis: kurve.preis, zu, preisZu, anteil, dt, proTag: opt.proTag };
 }
 
 function analyseSumme(a, passt) {
@@ -16971,7 +17208,7 @@ function analyseSumme(a, passt) {
   return { last, lastWert, zu, zuWert, short, shortWert, long, longWert, n };
 }
 
-function AnalyseGrafik({ form, bw, gas }) {
+function AnalyseGrafik({ form, bw, gas, spot, spotStand }) {
   const jahre = (bw.jahre || []).map((j) => j.jahr);
   const [jahr, setJahr] = useState(jahre[0]);
   /* Zeitraum: ganzes Jahr, ein Quartal, ein Monat oder ein Tag */
@@ -16979,10 +17216,12 @@ function AnalyseGrafik({ form, bw, gas }) {
   const [quartal, setQuartal] = useState(0);
   const [monat, setMonat] = useState(0);
   const [tag, setTag] = useState(1);
-  const a = useMemo(() => { try { return (gas ? analyseJahrGas : analyseJahr)(form, bw, jahr); } catch (_) { return null; } },
-    [form, jahr, JSON.stringify(bw.jahre), JSON.stringify(bw.tranchen), bw.profil ? 1 : 0, gas]);
+  const a = useMemo(() => { try { return gas ? analyseJahrGas(form, bw, jahr) : analyseJahr(form, bw, jahr, spot); } catch (_) { return null; } },
+    [form, jahr, JSON.stringify(bw.jahre), JSON.stringify(bw.tranchen), bw.profil ? 1 : 0, gas, JSON.stringify(bw.hedge || {}), bw.preisbasis, spotStand]);
   if (!form) return <p className="text-sm" style={{ color: C.muted }}>Zuerst den Lastgang einlesen.</p>;
-  if (!a) return <p className="text-sm" style={{ color: C.muted }}>{gas ? "Für " + jahr + " fehlt der Cal-Preis." : "Für " + jahr + " fehlen Base- und Peakpreis."}</p>;
+  if (!a) return <p className="text-sm" style={{ color: C.muted }}>{gas ? "Für " + jahr + " fehlt der Cal-Preis."
+    : bw.preisbasis === "spot" ? "Für die Spotbewertung zuerst „Bewerten“ tippen, damit die Spot-PFC geladen ist." : "Für " + jahr + " fehlen Base- und Peakpreis."}</p>;
+  const dt = a.dt || 1;   /* Stunden je Zeitschritt: Energie ÷ dt = Leistung */
   const tageImMonat = new Date(jahr, monat + 1, 0).getDate();
   const tagOk = Math.min(tag, tageImMonat);
   const passt = (x) => ansicht === "jahr" ? true : ansicht === "quartal" ? Math.floor(x.m / 3) === quartal
@@ -17010,8 +17249,8 @@ function AnalyseGrafik({ form, bw, gas }) {
   const col = Array.from({ length: spalten }, (_, c) => {
     const ab = Math.floor(c * proSpalte), bis2 = Math.max(ab + 1, Math.floor((c + 1) * proSpalte));
     let lmax = 0, zmin = Infinity, zmax = 0, lmin = Infinity;
-    for (let k = ab; k < bis2; k++) { const i = idx[k]; lmax = Math.max(lmax, a.last[i]); lmin = Math.min(lmin, a.last[i]);
-      zmin = Math.min(zmin, a.zu[i]); zmax = Math.max(zmax, a.zu[i]); }
+    for (let k = ab; k < bis2; k++) { const i = idx[k]; lmax = Math.max(lmax, a.last[i] / dt); lmin = Math.min(lmin, a.last[i] / dt);
+      zmin = Math.min(zmin, a.zu[i] / dt); zmax = Math.max(zmax, a.zu[i] / dt); }
     return { lmax, lmin, zmin: isFinite(zmin) ? zmin : 0, zmax };
   });
   const oben = Math.max(...col.map((c) => Math.max(c.lmax, c.zmax)), 0.001) * 1.08;
@@ -17025,7 +17264,7 @@ function AnalyseGrafik({ form, bw, gas }) {
     const st = a.stunden[i], vor = k ? a.stunden[idx[k - 1]] : null;
     if (ansicht === "jahr" || ansicht === "quartal") { if (!vor || st.m !== vor.m) marken.push({ k, text: MONATE_KURZ[st.m] }); }
     else if (ansicht === "monat") { if ((!vor || st.t !== vor.t) && (st.t === 1 || st.t % 5 === 0)) marken.push({ k, text: st.t + "." }); }
-    else if (st.h % 3 === 0) marken.push({ k, text: String(st.h).padStart(2, "0") + ":00" });
+    else if (st.h % 3 === 0 && (st.q == null || st.q % ((a.proTag || 24) / 24) === 0)) marken.push({ k, text: String(st.h).padStart(2, "0") + ":00" });
   });
   const pr = (wert, menge) => (menge ? wert / menge : 0);
   const zeile = (t, menge, wert, farbe, hell) => (
@@ -17092,7 +17331,7 @@ function AnalyseGrafik({ form, bw, gas }) {
       <svg viewBox={"0 0 " + B + " " + H} className="w-full rounded" style={{ background: "#fff", border: "1px solid " + C.line }}>
         {raster.map((v, i) => (
           <g key={i}><line x1={L} x2={B - R} y1={y(v)} y2={y(v)} stroke="#E3E8EE" />
-            <text x={L - 6} y={y(v) + 4} fontSize="11" textAnchor="end" fill="#6B7787">{num(v, 2)}</text></g>
+            <text x={L - 6} y={y(v) + 4} fontSize="11" textAnchor="end" fill="#6B7787">{num(v, oben < 0.12 ? 3 : 2)}</text></g>
         ))}
         {col.map((c, k) => (
           <g key={k}>
@@ -17123,10 +17362,11 @@ function AnalyseGrafik({ form, bw, gas }) {
         <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3" style={{ background: "#6CB43B", opacity: 0.35 }} />geschlossen, nicht verbraucht (Long)</span>
         <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3" style={{ background: "#C0392B" }} />Last über den Tranchen, offen (Short)</span>
         <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "2px solid #0A1626" }} />{gas ? "Tagesmenge (in Quartals- und Monatsansicht)" : "Last (in Monats- und Tagesansicht)"}</span>
+        {!gas && a.proTag === 96 && <span>Tagesansicht in Viertelstunden</span>}
       </div>
       <p className="text-xs mt-1" style={{ color: C.muted }}>
-        {gas ? "Tagesmengen je Gastag, aus dem Lastgang auf die Jahresmenge hochgerechnet; geschlossen ist der gekaufte Anteil der Monatsbänder. Marktwerte zur heutigen Preiskurve;"
-          : "Stundenwerte des Lieferjahres, aus dem Lastgang auf die Jahresmenge hochgerechnet. In der Jahresansicht ist je Bildpunkt der höchste und niedrigste Wert gezeichnet. Marktwerte zur heutigen Preiskurve;"}
+        {gas ? "Tagesmengen je Gastag, aus dem Lastgang auf die Jahresmenge hochgerechnet; geschlossen ist der gekaufte Anteil der Monatsbänder. Marktwerte zur heutigen Preiskurve; "
+          : (a.proTag === 96 ? "Viertelstundenwerte" : "Stundenwerte") + " des Lieferjahres (Leistung in MW), aus dem Lastgang auf die Jahresmenge hochgerechnet. In der Jahresansicht ist je Bildpunkt der höchste und niedrigste Wert gezeichnet. Marktwerte zur heutigen Preiskurve; "}
         die Long-Menge ist als Erlös negativ ausgewiesen.
       </p>
     </div>
@@ -17181,19 +17421,22 @@ function MonatsBalken({ profil, einheit, farbe }) {
 }
 
 /* Typischer Tag des Lieferjahres (MW je Stunde) mit der Base/Peak-Absicherung */
-function AbsicherungsGrafik({ jahre }) {
+function AbsicherungsGrafik({ jahre, hedge }) {
   const [jahrIdx, setJahrIdx] = useState(0);
   const [art, setArt] = useState(0);
   const j = jahre[Math.min(jahrIdx, jahre.length - 1)];
   const werte = (j.tagesprofil || [])[art] || [];
   if (!werte.length) return null;
   const B = 760, H = 230, L = 46, R = 12, O = 16, U = 30;
+  const n = werte.length, proH = n / 24;   /* 24 Stunden oder 96 Viertelstunden */
   const oben = Math.max(...werte, j.baseMW + j.peakMW, 0.001) * 1.12;
   const x = (h) => L + (h * (B - L - R)) / 24;
   const y = (v) => O + (H - O - U) * (1 - v / oben);
   const peakTag = art === 0; /* Peak gilt Montag bis Freitag 8 bis 20 Uhr */
   const absich = (h) => j.baseMW + (peakTag && h >= 8 && h < 20 ? j.peakMW : 0);
   const stufen = Array.from({ length: 24 }, (_, h) => "L" + x(h) + "," + y(absich(h)) + " L" + x(h + 1) + "," + y(absich(h))).join(" ");
+  const hg = hedgeVon(hedge);
+  const mehrere = hg.produkt !== "cal";
   const raster = [0, 0.25, 0.5, 0.75, 1].map((f) => (oben / 1.12) * f);
   const Knopf = ({ an, onClick, children }) => (
     <button onClick={onClick} className="text-xs px-2 py-1 rounded"
@@ -17215,9 +17458,9 @@ function AbsicherungsGrafik({ jahre }) {
             <text x={L - 6} y={y(v) + 4} fontSize="11" textAnchor="end" fill="#6B7787">{num(v * 1000, 0)}</text>
           </g>
         ))}
-        {werte.map((v, h) => (
-          <rect key={h} x={x(h) + 2} y={y(v)} width={(B - L - R) / 24 - 4} height={Math.max(0, y(0) - y(v))} rx="2" fill={C.strom} opacity="0.85">
-            <title>{String(h).padStart(2, "0") + ":00 · " + num(v * 1000, 0) + " kW"}</title>
+        {werte.map((v, q) => (
+          <rect key={q} x={x(q / proH) + (proH > 1 ? 0.5 : 2)} y={y(v)} width={(B - L - R) / n - (proH > 1 ? 1 : 4)} height={Math.max(0, y(0) - y(v))} rx={proH > 1 ? 0.5 : 2} fill={C.strom} opacity="0.85">
+            <title>{String(Math.floor(q / proH)).padStart(2, "0") + ":" + String((q % proH) * (60 / proH)).padStart(2, "0") + " · " + num(v * 1000, 0) + " kW"}</title>
           </rect>
         ))}
         <path d={"M" + x(0) + "," + y(absich(0)) + " " + stufen} fill="none" stroke="#6CB43B" strokeWidth="3" />
@@ -17228,8 +17471,8 @@ function AbsicherungsGrafik({ jahre }) {
         <text x={L - 6} y={O - 4} fontSize="11" textAnchor="end" fill="#6B7787">kW</text>
       </svg>
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs mt-2" style={{ color: C.muted }}>
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: C.strom }} />mittlere Last {j.jahr}</span>
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "3px solid #6CB43B" }} />Absicherung Base + Peak</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: C.strom }} />mittlere Last {j.jahr}{proH > 1 ? " je Viertelstunde" : ""}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "3px solid #6CB43B" }} />{(HEDGE_ARTEN.find((x2) => x2.id === hg.art) || HEDGE_ARTEN[0]).name} Base + Peak{mehrere ? " (Jahresmittel der " + (hg.produkt === "monat" ? "Monats" : "Quartals") + "bänder)" : ""}</span>
         <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "2px dashed #0A1626" }} />Base {num(j.baseMW * 1000, 0)} kW</span>
         {peakTag && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3" style={{ background: "#F3F6FA", border: "1px solid " + C.line }} />Peakzeit 8–20 Uhr</span>}
       </div>
@@ -17274,6 +17517,13 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
   const [kundeAendern, setKundeAendern] = useState(false);
   const lastRef = React.useRef(null);   /* eingelesene Lastform, nur im Speicher */
   const profilRef = React.useRef(null);
+  const spotRef = React.useRef(null);   /* Spot-PFC aus der Datei, nur im Speicher */
+  const [spotStand, setSpotStand] = useState(0);
+  const land = b.bundesland || "";
+  const hedge = hedgeVon(bw.hedge);
+  const basis = bw.preisbasis === "spot" ? "spot" : "termin";
+  const nr = gas ? 0 : 1;   /* Strom hat den zusätzlichen Abschnitt „Preisbasis und Absicherung“ */
+  const [periodenJahr, setPeriodenJahr] = useState(null);
 
   /* Kurzstand (gesichert, Preis, Ampel) in der Zusammenfassung mitführen: Vorgang und Liste lesen ihn */
   /* Lieferbeginn je Lieferjahr: 1. Januar, im ersten Jahr der vereinbarte Beginn */
@@ -17321,14 +17571,14 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
     lastRef.current = null; setLastInfo(null); setFehler("");
     setVorschlag((v) => ({ ...v, produkt: gas ? "Cal" : "Base/Peak" }));
     if (quellen.length) einlesen();
-  }, [b.id, sparte]);
+  }, [b.id, sparte, land]);
 
   const einlesen = async () => {
     setFehler(""); setLaedt("Lastgang wird eingelesen …");
     try {
       const d = quellen.filter((q) => gewaehlt.includes(q.id)).map((q) => q.datei);
       if (!d.length) throw new Error("Bitte mindestens einen Lastgang wählen oder hochladen.");
-      const r = gas ? await gasFormAusDateien(d, bw.einheit || "kWh") : await lastformAusDateien(d, bw.einheit || "kWh");
+      const r = gas ? await gasFormAusDateien(d, bw.einheit || "kWh", land) : await lastformAusDateien(d, bw.einheit || "kWh", land);
       lastRef.current = r;
       setLastInfo(r.info);
       return r;
@@ -17347,7 +17597,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
           reihe = s2.werte.map((w, i) => { const t = zeitLesen(s2.zeitpunkte[i]); return t ? { tag: tagSchluessel(t), preis: w } : null; }).filter(Boolean);
         } else reihe = await gasSpotLaden(jahr + "-01-01", jahr + "-12-31");
         if (reihe.length < 200) throw new Error("Zu wenige Tagespreise (" + reihe.length + "). Bitte ein ganzes Jahr verwenden.");
-        setBw({ profil: rundeTief(profilAusGasPreisen(reihe)), profilQuelle: (art === "datei" ? datei.name : "THE Day-Ahead " + jahr)
+        setBw({ profil: rundeTief(profilAusGasPreisen(reihe, land)), profilQuelle: (art === "datei" ? datei.name : "THE Day-Ahead " + jahr)
           + " · " + num(reihe.length) + " Gastage" });
       } catch (e) { setFehler(e.message || String(e)); }
       finally { setLaedt(""); }
@@ -17357,7 +17607,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
       const jahr = new Date().getFullYear() - 1;
       const reihe = art === "datei" ? await preisreiheAusDatei(datei) : await preisreiheEnergyCharts(jahr);
       if (reihe.length < 24 * 60) throw new Error("Zu wenige Stundenpreise (" + reihe.length + "). Bitte ein ganzes Jahr verwenden.");
-      const profil = profilAusPreisen(reihe);
+      const profil = profilAusPreisen(reihe, land);
       profilRef.current = profil;
       setBw({ profil: rundeTief(profil), profilQuelle: (art === "datei" ? datei.name : "Energy-Charts Day-Ahead " + jahr)
         + " · " + num(reihe.length) + " Stunden" });
@@ -17378,7 +17628,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         const jahre = bw.jahre.map((j) => {
           const menge = zahlOder(j.menge) || form.jahresmenge || verbrauchStrom;
           const last = gasJahresLast(form, j.jahr, menge);
-          const kurve = gaskurve(j.jahr, gasPreiseAus(j), bw.profil || null);
+          const kurve = gaskurve(j.jahr, gasPreiseAus(j), bw.profil || null, form.land || "");
           const e = jahresBewertungGas(last, kurve);
           return { jahr: j.jahr, mengeKwh: menge, menge: e.menge, preis: e.preis, hedgePreis: e.hedgePreis,
                    strukturProMWh: Math.abs(e.strukturProMWh) < 1e-6 ? 0 : e.strukturProMWh, calPreis: e.calPreis,
@@ -17391,23 +17641,39 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
           profil: !!bw.profil, jahre } }, "Bewertung berechnet");
         return;
       }
+      /* Spot-PFC und Ausgleichsenergiepreise aus den Dateien */
+      let spot = null, ae = null;
+      if (bw.spotDatei) { spot = spotRef.current || (spotRef.current = await preisreiheRohAusDatei(bw.spotDatei)); setSpotStand((x) => x + 1); }
+      if (basis === "spot" && !spot) throw new Error("Für die Spotbewertung bitte zuerst die Spot-PFC hochladen.");
+      if (bw.mitAE) {
+        if (!bw.aeDatei) throw new Error("Für das Ausgleichsenergie-Risiko bitte die Ausgleichsenergiepreise hochladen.");
+        ae = aeRisiko(form, await preisreiheRohAusDatei(bw.aeDatei));
+      }
+      const opt = { land: form.land || "", proTag: form.proTag || 24 };
       const jahre = bw.jahre.map((j) => {
         const menge = zahlOder(j.menge) || form.jahresmenge || verbrauchStrom;
         const last = jahresLast(form, j.jahr, menge);
-        const kurve = preiskurve(j.jahr, { base: zahlOder(j.base), peak: zahlOder(j.peak),
-          q: (j.q || []).map((q) => ({ base: zahlOder(q && q.base), peak: zahlOder(q && q.peak) })) }, bw.profil || null);
-        const e = jahresBewertung(last, kurve);
-        /* mittlere Last je Stunde (MW) nach Tagesart, für die Grafik */
-        const tp = [0, 1, 2].map(() => Array.from({ length: 24 }, () => [0, 0]));
-        last.stunden.forEach((x, k) => { tp[x.art][x.h][0] += last.last[k]; tp[x.art][x.h][1]++; });
+        const sp = spot ? preiseAufJahr(spot, j.jahr, opt.land, opt.proTag) : null;
+        const kurve = basis === "spot" ? { preis: sp.preis, hinweise: [] } : preiskurve(j.jahr, preiseStromAus(j), bw.profil || null, opt);
+        const e = jahresBewertung(last, kurve, basis === "spot" ? { ...hedge, prozent: "0" } : hedge);
+        const spotPreis = sp ? last.last.reduce((x, l, k) => x + l * sp.preis[k], 0) / (e.menge || 1) : null;
+        /* mittlere Leistung (MW) je Schritt des Tages nach Tagesart, für die Grafik */
+        const tp = [0, 1, 2].map(() => Array.from({ length: opt.proTag }, () => [0, 0]));
+        last.stunden.forEach((x, k) => { tp[x.art][x.q][0] += last.last[k] / last.dt; tp[x.art][x.q][1]++; });
         const tagesprofil = tp.map((a) => a.map(([sum, n]) => (n ? Math.round((sum / n) * 1000) / 1000 : 0)));
-        return { jahr: j.jahr, mengeKwh: menge, menge: e.menge, preis: e.preis, hedgePreis: e.hedgePreis,
+        return { jahr: j.jahr, mengeKwh: menge, menge: e.menge, preis: e.preis, hedgePreis: e.hedgePreis, hedgeQuote: e.hedgeQuote,
                  strukturProMWh: e.strukturProMWh, baseMW: e.baseMW, peakMW: e.peakMW, benutzung: e.benutzung,
                  peakAnteil: e.peakAnteil, gewichtBase: e.gewichtBase, spitze: e.spitze,
-                 monate: { base: rundeTief(kurve.monate.base), peak: rundeTief(kurve.monate.peak) }, tagesprofil };
+                 spotPreis, spotExakt: sp ? sp.exakt : null, aeProMWh: ae ? ae.proMWh : 0, basis,
+                 hinweise: kurve.hinweise || [], perioden: rundeTief(e.perioden.map((x) => [x.baseMW, x.peakMW, x.menge, x.preis, x.basePreis, x.peakPreis])),
+                 periodenNamen: e.perioden.map((x) => x.name),
+                 monate: kurve.monate ? { base: rundeTief(kurve.monate.base), peak: rundeTief(kurve.monate.peak) } : null, tagesprofil };
       });
       setBw({ ergebnis: { ...(bw.ergebnis || {}), berechnet: heute(), marktStand: bw.marktStand || heute(),
-        profil: !!bw.profil, jahre } }, "Bewertung berechnet");
+        profil: !!bw.profil, basis, hedge, land: opt.land, proTag: opt.proTag,
+        ae: ae ? { abweichung: rundeTief(ae.abweichung), abwAnteil: rundeTief(ae.abwAnteil), proMWh: rundeTief(ae.proMWh),
+          monatHoechst: rundeTief(ae.monatHoechst), treffer: rundeTief(ae.treffer) } : null,
+        jahre } }, "Bewertung berechnet");
     } catch (e) { setFehler(e.message || String(e)); }
     finally { setLaedt(""); }
   };
@@ -17560,6 +17826,15 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
             </label>
           ))}
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+          <Select label="Sitz des Kunden (Bundesland, für die Feiertage)" value={land}
+            onChange={(v) => { if (!darf) return; lastRef.current = null; setLastInfo(null);
+              onAendern({ ...b, bundesland: v, verlauf: [...(b.verlauf || []), { d: heute(), t: "Bundesland: " + (BUNDESLAENDER.find((x) => x[0] === v) || ["", "–"])[1], w: user.name }] }); }}
+            options={BUNDESLAENDER.map(([value, label]) => ({ value, label }))} />
+          <p className="text-xs self-end pb-1" style={{ color: C.muted }}>
+            Landesfeiertage zählen wie Sonntage, im Lastgang und im Lieferjahr. Schulferien und Wetter sind noch nicht berücksichtigt.
+          </p>
+        </div>
         {darf && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <Datei label={quellen.length ? "Weiteren Lastgang hochladen (CSV oder Excel)" : "Lastgang hochladen (CSV oder Excel)"} datei={null}
@@ -17588,7 +17863,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
             {[["Jahresmenge (hochgerechnet)", num(lastInfo.jahresmenge) + " kWh"],
               ["Spitzenlast", num(lastInfo.spitze, 1) + " kW"],
               ["Benutzungsstunden", num(lastInfo.spitze ? lastInfo.jahresmenge / lastInfo.spitze : 0) + " h"],
-              ["Erfasste Stunden", num(lastInfo.stunden)]].map(([t, v]) => (
+              ["Erfasste Stunden", num(lastInfo.stunden) + (lastInfo.proTag === 96 ? " · Viertelstunden" : " · Stundenwerte")]].map(([t, v]) => (
               <div key={t}><div className="text-xs mb-1" style={{ color: C.muted }}>{t}</div>{v}</div>
             ))}
             {lastInfo.ohneDatum > 0 && <p className="col-span-2 sm:col-span-4 text-xs" style={{ color: C.warn }}>
@@ -17666,15 +17941,28 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         </div>
         </>) : (<>
         <p className="text-xs mb-3" style={{ color: C.muted }}>
-          Settlementpreise in €/MWh eintragen, zum Beispiel von eex.com unter Strom, Futures, German Power.
-          Quartale sind freiwillig; ohne sie verteilt das Portal den Jahrespreis nach einer üblichen Saisonform.
+          Settlementpreise in €/MWh eintragen, zum Beispiel von eex.com unter Strom, Futures, German Power. Je Produkt reichen
+          zwei von Base, Peak und Offpeak, der dritte Preis wird gerechnet. Feinere Produkte haben Vorrang: Monat vor Quartal
+          vor Saison vor Cal; was fehlt, verteilt das Portal nach einer üblichen Saisonform. Sind alle Monate eingetragen,
+          braucht es keinen Cal-Preis.
         </p>
         <div className="mb-4 max-w-xs">
           <Feld label="Stand der Preise" type="date" value={bw.marktStand || ""} gesperrt={!darf}
             onChange={(v) => setBw({ marktStand: v })} />
         </div>
         <div className="space-y-4">
-          {bw.jahre.map((j, i) => (
+          {bw.jahre.map((j, i) => {
+            const zeile = (name, wert, setze, key) => (
+              <React.Fragment key={key}>
+                <span className="self-center text-xs">{name}</span>
+                {["base", "peak", "offpeak"].map((f) => (
+                  <KleinFeld key={f} darf={darf} value={(wert || {})[f]} onChange={(v) => setze({ ...(wert || {}), [f]: v })} />
+                ))}
+              </React.Fragment>
+            );
+            const setListe = (feld, n, k, w) => setJahr(i, { [feld]: Array.from({ length: n }, (_, x) => (x === k ? w : (j[feld] || [])[x] || {})) });
+            const anzahlWeitere = [j.sommer, j.winter, ...(j.q || []), ...(j.mo || [])].filter((x) => x && (x.base || x.peak || x.offpeak)).length;
+            return (
             <div key={j.jahr} className="rounded p-3" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm">Lieferjahr {j.jahr}</span>
@@ -17683,35 +17971,36 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
                     onClick={() => setBw({ jahre: bw.jahre.filter((_, k2) => k2 !== i) })}>entfernen</button>
                 )}
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <label className="block"><span className="block text-xs mb-1" style={{ color: C.muted }}>Cal Base</span>
                   <KleinFeld darf={darf} value={j.base} onChange={(v) => setJahr(i, { base: v })} placeholder="€/MWh" /></label>
                 <label className="block"><span className="block text-xs mb-1" style={{ color: C.muted }}>Cal Peak</span>
                   <KleinFeld darf={darf} value={j.peak} onChange={(v) => setJahr(i, { peak: v })} placeholder="€/MWh" /></label>
+                <label className="block"><span className="block text-xs mb-1" style={{ color: C.muted }}>Cal Offpeak</span>
+                  <KleinFeld darf={darf} value={j.offpeak} onChange={(v) => setJahr(i, { offpeak: v })} placeholder="€/MWh" /></label>
                 <label className="block"><span className="block text-xs mb-1" style={{ color: C.muted }}>Menge kWh</span>
                   <KleinFeld darf={darf} value={j.menge} onChange={(v) => setJahr(i, { menge: v })}
                     placeholder={num((lastInfo && lastInfo.jahresmenge) || verbrauchStrom)} /></label>
               </div>
-              <button className="text-xs mt-2" style={{ color: C.strom }}
+              <button className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded" style={{ background: C.strom, color: "#fff" }}
                 onClick={() => setQuartale({ ...quartale, [j.jahr]: !quartale[j.jahr] })}>
-                {quartale[j.jahr] ? "Quartale ausblenden" : "Quartalspreise eintragen"}
+                <Layers size={13} /> {quartale[j.jahr] ? "Weitere Produkte ausblenden" : "Saison, Quartale und Monate" + (anzahlWeitere ? " (" + anzahlWeitere + " eingetragen)" : "")}
               </button>
               {quartale[j.jahr] && (
-                <div className="grid grid-cols-3 gap-2 mt-2 text-xs" data-strom="1">
-                  <span /><span style={{ color: C.muted }}>Base</span><span style={{ color: C.muted }}>Peak</span>
-                  {[0, 1, 2, 3].map((q) => (
-                    <React.Fragment key={q}>
-                      <span className="self-center">Q{q + 1}</span>
-                      <KleinFeld darf={darf} value={((j.q || [])[q] || {}).base}
-                        onChange={(v) => setJahr(i, { q: [0, 1, 2, 3].map((x) => (x === q ? { ...((j.q || [])[x] || {}), base: v } : (j.q || [])[x] || {})) })} />
-                      <KleinFeld darf={darf} value={((j.q || [])[q] || {}).peak}
-                        onChange={(v) => setJahr(i, { q: [0, 1, 2, 3].map((x) => (x === q ? { ...((j.q || [])[x] || {}), peak: v } : (j.q || [])[x] || {})) })} />
-                    </React.Fragment>
-                  ))}
+                <div className="grid gap-x-2 gap-y-1.5 mt-3 text-xs" style={{ gridTemplateColumns: "minmax(52px,auto) 1fr 1fr 1fr" }} data-strom="1">
+                  <span /><span style={{ color: C.muted }}>Base</span><span style={{ color: C.muted }}>Peak</span><span style={{ color: C.muted }}>Offpeak</span>
+                  {zeile("Sommer", j.sommer, (w) => setJahr(i, { sommer: w }), "so")}
+                  {zeile("Winter", j.winter, (w) => setJahr(i, { winter: w }), "wi")}
+                  {[0, 1, 2, 3].map((q) => zeile("Q" + (q + 1), (j.q || [])[q], (w) => setListe("q", 4, q, w), "q" + q))}
+                  {MONATE_KURZ.map((m, k) => zeile(m, (j.mo || [])[k], (w) => setListe("mo", 12, k, w), "m" + k))}
+                  <span className="col-span-4 pt-1" style={{ color: C.muted }}>
+                    Sommer = April bis September, Winter = Januar bis März und Oktober bis Dezember des Lieferjahres.
+                  </span>
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
         </>)}
       </Abschnitt>
@@ -17722,6 +18011,13 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
             + "bekommen Werktage und Wochenenden ihren üblichen Abstand; die Monatsmittel bleiben genau bei der Kurve."
             : "Ohne Profil rechnet das Portal mit Peak- und Offpeakpreisen je Monat. Mit den Day-Ahead-Preisen eines "
             + "vergangenen Jahres bekommt die Kurve ihren Tagesverlauf; die Mittelwerte bleiben genau bei den eingetragenen Preisen."}
+        </p>
+        <p className="text-xs mb-3" style={{ color: C.muted }}>
+          So entsteht ein späteres Lieferjahr (z. B. 2028): Das Preisniveau kommt aus den Terminpreisen dieses Jahres. Aus dem
+          Profil wird nur die Form übernommen (Verhältnis zum Monatsmittel je Tagesart{gas ? "" : " und Stunde"}) und auf den
+          Kalender des Lieferjahres gelegt, mit dessen Wochentagen und Feiertagen. Der Lastgang wird ebenso nicht 1:1 übernommen:
+          Aus ihm entsteht die typische Last je Monat, Tagesart und {gas ? "Gastag" : "Viertelstunde bzw. Stunde"}, die auf das Lieferjahr gelegt und auf die
+          Jahresmenge hochgerechnet wird. Eine Prognose (Wachstum, Wetter, Ferien) rechnet das Portal nicht.
         </p>
         {bw.profilQuelle && (
           <p className="text-sm mb-3 flex items-center gap-2"><Check size={14} style={{ color: C.ok }} /> {bw.profilQuelle}
@@ -17738,6 +18034,62 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         )}
       </Abschnitt>
 
+      {!gas && (
+        <Abschnitt titel="4 · Preisbasis und Absicherung">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Select label="Preisbasis der Bewertung" value={basis} onChange={(v) => darf && setBw({ preisbasis: v })}
+              options={[{ value: "termin", label: "Terminmarkt (PFC aus den Terminpreisen)" }, { value: "spot", label: "Spotmarkt (Spot-PFC aus Datei)" }]} />
+            <div>
+              {bw.spotDatei ? (
+                <div className="flex items-center gap-2 text-sm pt-5"><DateiChip datei={bw.spotDatei} label="Spot-PFC" klein />
+                  {darf && <button className="text-xs" style={{ color: C.muted }} onClick={() => { spotRef.current = null; setBw({ spotDatei: null }, "Spot-PFC entfernt"); }}>entfernen</button>}</div>
+              ) : darf ? (
+                <Datei label={"Spot-PFC (Stunden oder Viertelstunden, €/MWh)" + (basis === "spot" ? "" : ", freiwillig zum Vergleich")} datei={null}
+                  onSet={(d) => { if (d) { spotRef.current = null; setBw({ spotDatei: d }, "Spot-PFC hochgeladen"); } }} />
+              ) : <p className="text-xs pt-5" style={{ color: C.muted }}>Keine Spot-PFC hinterlegt.</p>}
+            </div>
+          </div>
+          <p className="text-xs mt-2 mb-4" style={{ color: C.muted }}>
+            Terminmarkt: Bewertung zur Kurve aus Abschnitt 2 und 3, mit Absicherung. Spotmarkt: Der Lastgang wird zu den Preisen
+            der Spot-PFC bewertet, ohne Absicherung. Deckt die Datei das Lieferjahr ab, gelten die Preise zum selben Zeitpunkt,
+            sonst ihre Form je Monat, Tagesart und Viertelstunde.
+          </p>
+          <label className="flex items-start gap-2 text-sm mb-2">
+            <input type="checkbox" className="mt-1" disabled={!darf} checked={!!bw.mitAE} onChange={(e) => setBw({ mitAE: e.target.checked })} />
+            <span>Ausgleichsenergie-Risiko einrechnen
+              <span className="block text-xs" style={{ color: C.muted }}>
+                Prognose = typische Last, Abweichung = tatsächlicher Lastgang − Prognose, bewertet mit den Ausgleichsenergiepreisen
+                (z. B. reBAP) zum selben Zeitpunkt. Die Preise sollten den Zeitraum des Lastgangs abdecken.
+              </span></span>
+          </label>
+          {bw.mitAE && (
+            <div className="mb-4">
+              {bw.aeDatei ? (
+                <div className="flex items-center gap-2 text-sm"><DateiChip datei={bw.aeDatei} label="Ausgleichsenergie" klein />
+                  {darf && <button className="text-xs" style={{ color: C.muted }} onClick={() => setBw({ aeDatei: null }, "Ausgleichsenergiepreise entfernt")}>entfernen</button>}</div>
+              ) : darf && (
+                <Datei label="Ausgleichsenergiepreise (Viertelstunden, €/MWh)" datei={null}
+                  onSet={(d) => d && setBw({ aeDatei: d }, "Ausgleichsenergiepreise hochgeladen")} />
+              )}
+            </div>
+          )}
+          {basis === "termin" && (<>
+            <div className="text-sm mb-2 mt-4">Absicherung (Hedge)</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Select label="Hedgeart" value={hedge.art} onChange={(v) => darf && setBw({ hedge: { ...hedge, art: v } })}
+                options={HEDGE_ARTEN.map((x) => ({ value: x.id, label: x.name }))} />
+              <Select label="Produkte" value={hedge.produkt} onChange={(v) => darf && setBw({ hedge: { ...hedge, produkt: v } })}
+                options={HEDGE_PRODUKTE.map((x) => ({ value: x.id, label: x.name }))} />
+              <Feld label="Anteil des Vorschlags %" value={hedge.prozent} gesperrt={!darf} onChange={(v) => setBw({ hedge: { ...hedge, prozent: v } })} />
+            </div>
+            <p className="text-xs mt-2" style={{ color: C.muted }}>
+              {(HEDGE_ARTEN.find((x) => x.id === hedge.art) || HEDGE_ARTEN[0]).text} Mit {hedge.produkt === "cal" ? "einem Jahresband" : hedge.produkt === "quartal" ? "vier Quartalsbändern" : "zwölf Monatsbändern"}
+              {" "}je Base und Peak; bewertet zur Kurve des jeweiligen Zeitraums. Ein Anteil unter 100 % sichert nur diesen Teil, der Rest bleibt offen.
+            </p>
+          </>)}
+        </Abschnitt>
+      )}
+
       {darf && (
         <div className="flex flex-wrap items-center gap-3">
           <Btn icon={Calculator} onClick={bewerten} disabled={!!laedt}>Bewerten</Btn>
@@ -17747,7 +18099,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
       {fehler && <p className="text-sm" style={{ color: C.warn }}>{fehler}</p>}
 
       {erg && erg.jahre && (
-        <Abschnitt titel={"4 · Bewertung" + (gas ? " Erdgas" : "")} rechts={<span className="text-xs" style={{ color: C.muted }}>
+        <Abschnitt titel={(4 + nr) + " · Bewertung" + (gas ? " Erdgas" : "")} rechts={<span className="text-xs" style={{ color: C.muted }}>
           berechnet {datum(erg.berechnet)} · Preise vom {datum(erg.marktStand)}{erg.profil ? (gas ? " · mit Tagesprofil" : " · mit Stundenprofil") : ""}</span>}>
           {gas ? (<>
           {erg.jahre.some((j) => Math.abs(j.abweichung || 0) > 0.05) && (
@@ -17804,16 +18156,33 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
             dieser Monatsbänder gegenüber einem gleichmäßigen Jahresband (Cal). Struktur: Wert der Abweichung der einzelnen
             Gastage vom Monatsband. Lastgang gesamt = Cal + Saisonanteil + Struktur.
           </p>
-          </>) : (<>
+          </>) : (() => {
+          const hg = hedgeVon(erg.hedge);
+          const spotErg = erg.basis === "spot";
+          const mitSpot = erg.jahre.some((j) => j.spotPreis != null);
+          const mitAE = !!erg.ae;
+          const gesamt = (j) => lastgangPreis(j) + (mitAE ? j.aeProMWh || 0 : 0);
+          const hinweise = erg.jahre.flatMap((j) => j.hinweise || []);
+          const pj = erg.jahre.find((j) => j.jahr === periodenJahr) || erg.jahre[0];
+          const spalten = [
+            ["Menge MWh", (j) => num(j.menge, 0)],
+            ...(spotErg ? [] : [["Base MW", (j) => num(j.baseMW, 3)], ["Peak MW", (j) => num(j.peakMW, 3)],
+              ["Absicherung", (j) => num((j.hedgeQuote == null ? 1 : j.hedgeQuote) * 100, 0) + " %"], ["Hedge €/MWh", (j) => num(j.hedgePreis, 2)],
+              ["Struktur/Rest €/MWh", (j) => num(j.strukturProMWh, 2)]]),
+            ...(mitSpot ? [["Spot €/MWh", (j) => j.spotPreis == null ? "–" : num(j.spotPreis, 2)]] : []),
+            ...(mitAE ? [["Ausgleichsenergie €/MWh", (j) => num(j.aeProMWh || 0, 2)]] : []),
+            ["Lastgang €/MWh", (j) => num(gesamt(j), 2)]];
+          return (<>
+          {hinweise.length > 0 && (
+            <div className="text-sm mb-3 space-y-1" style={{ color: C.warn }}>{hinweise.map((h, i) => <div key={i}>{h}</div>)}</div>
+          )}
           <div className="sm:hidden space-y-3">
             {erg.jahre.map((j) => (
               <div key={j.jahr} className="rounded p-3" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
                 <div className="text-sm mb-2">Lieferjahr {j.jahr}</div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm" style={tz}>
-                  {[["Menge", num(j.menge, 0) + " MWh"], ["Absicherung", num(j.baseMW, 3) + " Base · " + num(j.peakMW, 3) + " Peak MW"],
-                    ["Base/Peak", num(j.hedgePreis, 2) + " €/MWh"], ["Struktur", num(j.strukturProMWh, 2) + " €/MWh"],
-                    ["Lastgang gesamt", num(j.hedgePreis + j.strukturProMWh, 2) + " €/MWh"], ["Benutzungsstunden", num(j.benutzung) + " h"]].map(([t, v]) => (
-                    <div key={t}><div className="text-xs" style={{ color: C.muted }}>{t}</div>{v}</div>
+                  {spalten.map(([t, f]) => (
+                    <div key={t}><div className="text-xs" style={{ color: C.muted }}>{t}</div>{f(j)}</div>
                   ))}
                 </div>
               </div>
@@ -17824,41 +18193,74 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
               <thead>
                 <tr className="text-xs text-left" style={{ color: C.muted }}>
                   <th className="py-1 pr-3 font-normal">Lieferjahr</th>
-                  <th className="py-1 pr-3 font-normal text-right">Menge MWh</th>
-                  <th className="py-1 pr-3 font-normal text-right">Base MW</th>
-                  <th className="py-1 pr-3 font-normal text-right">Peak MW</th>
-                  <th className="py-1 pr-3 font-normal text-right">Base/Peak €/MWh</th>
-                  <th className="py-1 pr-3 font-normal text-right">Struktur €/MWh</th>
-                  <th className="py-1 font-normal text-right">Lastgang €/MWh</th>
+                  {spalten.map(([t]) => <th key={t} className="py-1 pr-3 font-normal text-right">{t}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {erg.jahre.map((j) => (
                   <tr key={j.jahr} style={{ borderTop: "1px solid " + C.line }}>
                     <td className="py-2 pr-3">{j.jahr}</td>
-                    <td className="py-2 pr-3 text-right">{num(j.menge, 0)}</td>
-                    <td className="py-2 pr-3 text-right">{num(j.baseMW, 3)}</td>
-                    <td className="py-2 pr-3 text-right">{num(j.peakMW, 3)}</td>
-                    <td className="py-2 pr-3 text-right">{num(j.hedgePreis, 2)}</td>
-                    <td className="py-2 pr-3 text-right">{num(j.strukturProMWh, 2)}</td>
-                    <td className="py-2 text-right">{num(j.hedgePreis + j.strukturProMWh, 2)}</td>
+                    {spalten.map(([t, f]) => <td key={t} className="py-2 pr-3 text-right">{f(j)}</td>)}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {erg.jahre[0] && erg.jahre[0].tagesprofil && <AbsicherungsGrafik jahre={erg.jahre} />}
-          </>)}
-          {!gas && <p className="text-xs mt-3" style={{ color: C.muted }}>
-            Base und Peak: Absicherung mit Jahresprodukten (Base = mittlere Offpeaklast, Peak = Mehrlast in den Peakstunden).
-            Struktur: Wert der Abweichung zwischen Lastgang und dieser Absicherung. Benutzungsstunden {erg.jahre.map((j) => num(j.benutzung)).join(" / ")} h,
-            Peakanteil {erg.jahre.map((j) => num(j.peakAnteil * 100)).join(" / ")} %.
-          </p>}
+          {mitAE && (
+            <p className="text-xs mt-3" style={{ color: C.text }}>
+              Ausgleichsenergie: Abweichung von der Prognose {num(erg.ae.abweichung, 1)} MWh im Lastgang ({num(erg.ae.abwAnteil * 100, 1)} % der Menge),
+              Kosten {num(erg.ae.proMWh, 2)} €/MWh, ungünstigster Monat {num(erg.ae.monatHoechst, 2)} €/MWh.
+              {erg.ae.treffer < 0.9 ? " Nur " + num(erg.ae.treffer * 100, 0) + " % der Zeitpunkte hatten einen Preis zur selben Zeit; für den Rest gilt der Mittelwert je Monat, Tagesart und Zeitschritt." : ""}
+            </p>
+          )}
+          {!spotErg && pj && (pj.perioden || []).length > 1 && (
+            <div className="mt-4">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <span className="text-xs" style={{ color: C.muted }}>Absicherung je {hg.produkt === "monat" ? "Monat" : "Quartal"}</span>
+                <span className="flex-1" />
+                {erg.jahre.length > 1 && erg.jahre.map((j) => (
+                  <button key={j.jahr} onClick={() => setPeriodenJahr(j.jahr)} className="text-xs px-2 py-1 rounded"
+                    style={{ background: j.jahr === pj.jahr ? C.ink : "#fff", color: j.jahr === pj.jahr ? "#fff" : C.text, border: "1px solid " + C.line }}>{j.jahr}</button>
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[520px]" style={tz}>
+                  <thead><tr style={{ color: C.muted }}>
+                    {["Zeitraum", "Base MW", "Peak MW", "Base €/MWh", "Peak €/MWh", "Hedge MWh", "Hedge €/MWh"].map((t, i) =>
+                      <th key={t} className={"py-1 pr-3 font-normal " + (i ? "text-right" : "text-left")}>{t}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {pj.perioden.map((x, i) => (
+                      <tr key={i} style={{ borderTop: "1px solid " + C.line }}>
+                        <td className="py-1.5 pr-3">{(pj.periodenNamen || [])[i]} {pj.jahr}</td>
+                        <td className="py-1.5 pr-3 text-right">{num(x[0], 3)}</td><td className="py-1.5 pr-3 text-right">{num(x[1], 3)}</td>
+                        <td className="py-1.5 pr-3 text-right">{num(x[4], 2)}</td><td className="py-1.5 pr-3 text-right">{num(x[5], 2)}</td>
+                        <td className="py-1.5 pr-3 text-right">{num(x[2], 1)}</td><td className="py-1.5 pr-3 text-right">{num(x[3], 2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {!spotErg && erg.jahre[0] && erg.jahre[0].tagesprofil && <AbsicherungsGrafik jahre={erg.jahre} hedge={hg} />}
+          <p className="text-xs mt-3" style={{ color: C.muted }}>
+            {spotErg
+              ? "Spotbewertung: Lastgang × Spot-PFC, ohne Absicherung."
+              : (HEDGE_ARTEN.find((x) => x.id === hg.art) || HEDGE_ARTEN[0]).name + " mit " + (hg.produkt === "monat" ? "Monatsprodukten" : hg.produkt === "quartal" ? "Quartalsprodukten" : "Cal-Produkten")
+                + ", " + num(zahlOder(hg.prozent) == null ? 100 : zahlOder(hg.prozent), 0) + " % des Vorschlags. Struktur/Rest: Marktwert der Last minus Marktwert der Absicherung, je MWh Last"
+                + " (Abweichung im Verlauf und nicht abgesicherte Menge). Lastgang = Absicherung × Hedgepreis + Struktur/Rest."}
+            {mitAE ? " Dazu die Ausgleichsenergie." : ""} Benutzungsstunden {erg.jahre.map((j) => num(j.benutzung)).join(" / ")} h,
+            Peakanteil {erg.jahre.map((j) => num(j.peakAnteil * 100)).join(" / ")} %{erg.proTag === 96 ? ", gerechnet in Viertelstunden" : ""}
+            {erg.land ? ", Feiertage " + (BUNDESLAENDER.find((x) => x[0] === erg.land) || ["", ""])[1] : ""}.
+          </p>
+          </>);
+          })()}
         </Abschnitt>
       )}
 
       {erg && erg.jahre && (
-        <Abschnitt titel="5 · Tranchenplan">
+        <Abschnitt titel={(5 + nr) + " · Tranchenplan"}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             <Feld label="Höchstpreis (Budgetgrenze) €/MWh" value={bw.hoechstpreis || ""} gesperrt={!darf}
               onChange={(v) => setBw({ hoechstpreis: v })} />
@@ -17940,15 +18342,16 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
           })}
           <p className="text-xs" style={{ color: C.muted }}>
             {gas ? "Energiepreis aktuell: gekaufte Tranchen zu ihrem Preis, offener Rest zum heutigen Preis der Monatsbänder, dazu die Strukturkosten."
-              : "Energiepreis aktuell: gekaufte Tranchen zu ihrem Preis, offener Rest zum heutigen Base/Peak-Preis, dazu die Strukturkosten."}
+              : "Energiepreis aktuell: gekaufte Tranchen zu ihrem Preis, offener Rest der Absicherung zum heutigen Hedgepreis, dazu Struktur und nicht abgesicherte Menge"
+                + (bw.mitAE ? " sowie die Ausgleichsenergie." : ".")}
             Ohne Netzentgelte, Abgaben, Umlagen und Aufschläge des Versorgers.
           </p>
         </Abschnitt>
       )}
 
       {erg && erg.jahre && (
-        <Abschnitt titel="6 · Analyse: Last und geschlossene Positionen">
-          <AnalyseGrafik key={sparte} form={lastRef.current} bw={bw} gas={gas} />
+        <Abschnitt titel={(6 + nr) + " · Analyse: Last und geschlossene Positionen"}>
+          <AnalyseGrafik key={sparte} form={lastRef.current} bw={bw} gas={gas} spot={spotRef.current} spotStand={spotStand} />
         </Abschnitt>
       )}
 
@@ -18011,8 +18414,19 @@ function beschaffungPdf(b, mitarbeiter) {
         z.push("Cal " + num(j.calPreis, 2) + " €/MWh · Saisonanteil " + (j.saisonProMWh >= 0 ? "+" : "") + num(j.saisonProMWh, 2)
           + " €/MWh · Struktur " + num(j.strukturProMWh, 2) + " €/MWh · Lastgang gesamt " + num(j.hedgePreis + j.strukturProMWh, 2) + " €/MWh");
       } else {
-        z.push("Menge " + num(j.menge, 0) + " MWh · Absicherung " + num(j.baseMW, 3) + " MW Base und " + num(j.peakMW, 3) + " MW Peak");
-        z.push("Base/Peak heute " + num(j.hedgePreis, 2) + " €/MWh · Struktur " + num(j.strukturProMWh, 2) + " €/MWh · Benutzungsstunden " + num(j.benutzung) + " h");
+        const hg = hedgeVon(erg.hedge);
+        if (erg.basis === "spot") {
+          z.push("Menge " + num(j.menge, 0) + " MWh · Spotbewertung ohne Absicherung");
+          z.push("Lastgang zur Spot-PFC " + num(lastgangPreis(j), 2) + " €/MWh" + (erg.ae ? " · Ausgleichsenergie " + num(j.aeProMWh || 0, 2) + " €/MWh" : "")
+            + " · Benutzungsstunden " + num(j.benutzung) + " h");
+        } else {
+          z.push("Menge " + num(j.menge, 0) + " MWh · " + (HEDGE_ARTEN.find((x) => x.id === hg.art) || HEDGE_ARTEN[0]).name + " mit "
+            + (hg.produkt === "monat" ? "Monatsprodukten" : hg.produkt === "quartal" ? "Quartalsprodukten" : "Cal-Produkten") + ", " + num((j.hedgeQuote == null ? 1 : j.hedgeQuote) * 100, 0)
+            + " % abgesichert · im Mittel " + num(j.baseMW, 3) + " MW Base und " + num(j.peakMW, 3) + " MW Peak");
+          z.push("Absicherung heute " + num(j.hedgePreis, 2) + " €/MWh · Struktur/Rest " + num(j.strukturProMWh, 2) + " €/MWh"
+            + (erg.ae ? " · Ausgleichsenergie " + num(j.aeProMWh || 0, 2) + " €/MWh" : "") + " · Lastgang gesamt "
+            + num(lastgangPreis(j) + (erg.ae ? j.aeProMWh || 0 : 0), 2) + " €/MWh · Benutzungsstunden " + num(j.benutzung) + " h");
+        }
       }
       z.push("Gesichert " + num(st.gekauftAnteil * 100) + " %" + (st.gekauftAnteil ? " zu " + num(st.gekauftPreis, 2) + " €/MWh" : "")
         + " · Energiepreis aktuell " + num(st.preis, 2) + " €/MWh (± " + (bw.stress || 0) + " %: " + num(st.preisTief, 2) + " bis " + num(st.preisHoch, 2) + ")");
