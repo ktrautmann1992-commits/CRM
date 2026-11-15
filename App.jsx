@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.35 · 15.11.2026 · Beschaffung: alle Terminprodukte, Hedgearten, Viertelstunden, Bundesland, Spot und Ausgleichsenergie";
+const VERSION = "v5.35 · 15.11.2026 · Neues Smartmeter-Titelbild, Beschaffung: alle Terminprodukte, Hedgearten, Viertelstunden, Bundesland, Spot und Ausgleichsenergie";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2804,7 +2804,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     doc.addPage(); smTitel = doc.getNumberOfPages();
     let bild = null;
     try {
-      const r = await fetch("/assets/smartmeter-1/titel.jpg");
+      const r = await fetch("/assets/smartmeter-2/titel.jpg");
       if (r.ok) {
         const blob = await r.blob();
         bild = await new Promise((ok, f) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = f; fr.readAsDataURL(blob); });
@@ -3658,7 +3658,7 @@ const UMLAGEN_VORGABE = {
   gas: [["Energiesteuer", "0,55"], ["Konvertierungsumlage", "0,018"], ["Konzessionsabgabe", "0,03"]],
 };
 /* Smartmeter-Angebot: Texte und Positionsvorlagen. Pflegen Kalkulation und GF (Einstellung „smartmeter“),
-   je Angebot änderbar. Titelbild liegt unter /assets/smartmeter-1/titel.jpg (Abbildung ähnlich). */
+   je Angebot änderbar. Titelbild liegt unter /assets/smartmeter-2/titel.jpg (Abbildung ähnlich). */
 const SMARTMETER_VORGABE = {
   titel1: "Ihre Energie.", titel2: "Jederzeit im Blick.",
   unterzeile: "Intelligente Messsysteme für Ihre Lieferstellen, mit digitalem Portal zur Verbrauchsanalyse.",

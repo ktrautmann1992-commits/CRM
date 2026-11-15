@@ -86,7 +86,7 @@ await cp("daten/strom-de-lu.json", "dist/assets/strom-de-lu-" + STROM_STAND + ".
 const PLZ_STAND = "1";
 await cp("daten/plz-de.json", "dist/assets/plz-de-" + PLZ_STAND + ".json");
 /* Titelbild des Smartmeter-Angebots (Abbildung ähnlich). Bei neuem Bild Stand hier und in App.jsx erhöhen. */
-const SMARTMETER_STAND = "1";
+const SMARTMETER_STAND = "2";
 await mkdir("dist/assets/smartmeter-" + SMARTMETER_STAND, { recursive: true });
 await cp("druckvorlagen/smartmeter/titel.jpg", "dist/assets/smartmeter-" + SMARTMETER_STAND + "/titel.jpg");
 
