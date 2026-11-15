@@ -30,7 +30,7 @@ const eur = (x: number) =>
   x.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 
 /* Schlichte Mail im EGC-Design: Navy-Kopf, grüne Linie, Knopf zum Portal */
-function html(titel: string, absaetze: string[], vorgangId: string) {
+function html(titel: string, absaetze: string[], fuss: string) {
   return `<!doctype html><html><body style="margin:0;background:#EFF1F4;font-family:Helvetica,Arial,sans-serif;color:#16202C">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EFF1F4;padding:24px 12px">
 <tr><td align="center">
@@ -41,7 +41,7 @@ function html(titel: string, absaetze: string[], vorgangId: string) {
 <h1 style="font-size:19px;margin:0 0 14px;color:#0A1626">${esc(titel)}</h1>
 ${absaetze.map((p) => `<p style="font-size:15px;line-height:1.5;margin:0 0 12px">${p}</p>`).join("\n")}
 <p style="margin:20px 0 8px"><a href="${PORTAL}" style="display:inline-block;background:#0A1626;color:#ffffff;text-decoration:none;padding:11px 18px;border-radius:6px;font-size:15px">Im Vertriebsportal öffnen</a></p>
-<p style="font-size:13px;color:#6B7787;margin:12px 0 0">Vorgang ${esc(vorgangId)}</p>
+<p style="font-size:13px;color:#6B7787;margin:12px 0 0">${esc(fuss)}</p>
 </td></tr>
 <tr><td style="padding:14px 24px;border-top:1px solid #D8DDE4;font-size:12px;color:#6B7787">
 Automatische Nachricht aus dem Vertriebsportal von EGC Energie.
@@ -63,6 +63,41 @@ Deno.serve(async (req) => {
   });
   const { data: ok } = await db.rpc("benachrichtigung_geheimnis_ok", { p: req.headers.get("x-geheimnis") || "" });
   if (ok !== true) return antwort(401, { fehler: "Nicht berechtigt" });
+
+  /* Termin, den ein Teamleiter einem Mitarbeiter gegeben hat (Migration 20261115_13) */
+  if (ereignisse.some((e) => e.art === "termin" || e.art === "termin_geaendert")) {
+    const { data: zeile } = await db.from("termine").select("id, daten").eq("id", id).maybeSingle();
+    if (!zeile) return antwort(404, { fehler: "Termin nicht gefunden" });
+    const t = zeile.daten || {};
+    const { data: leute } = await db.from("mitarbeiter").select("id, daten").in("id", [t.fuerId, t.vonId].filter(Boolean));
+    const empf = (leute || []).find((m: Mitarbeiter) => m.id === t.fuerId) as Mitarbeiter | undefined;
+    const von = (leute || []).find((m: Mitarbeiter) => m.id === t.vonId) as Mitarbeiter | undefined;
+    if (!empf || empf.daten?.status !== "aktiv" || !/\S+@\S+\.\S+/.test(String(empf.daten?.email || "")))
+      return antwort(200, { ok: true, gesendet: 0 });
+    const geaendert = ereignisse.some((e) => e.art === "termin_geaendert");
+    const k = t.kunde || {};
+    const tag = /^\d{4}-\d{2}-\d{2}$/.test(String(t.datum || "")) ? String(t.datum).split("-").reverse().join(".") : esc(t.datum);
+    const adresse = [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    const zeilen = [
+      ["Wann", `${tag}${t.zeit ? ", " + esc(t.zeit) + " Uhr" : ""}${t.dauer ? " (" + esc(t.dauer) + " Min.)" : ""}`],
+      ["Ort oder Form", esc(t.ort)],
+      ["Firma", esc(k.firma)],
+      ["Ansprechpartner", esc(k.ansprechpartner)],
+      ["Adresse", adresse ? `<a href="https://maps.google.com/?q=${encodeURIComponent(adresse)}">${esc(adresse)}</a>` : ""],
+      ["Telefon", k.telefon ? `<a href="tel:${esc(String(k.telefon).replace(/[^\d+]/g, ""))}">${esc(k.telefon)}</a>` : ""],
+      ["E-Mail", k.email ? `<a href="mailto:${esc(k.email)}">${esc(k.email)}</a>` : ""],
+    ].filter(([, w]) => w).map(([n, w]) => `<strong>${n}:</strong> ${w}`).join("<br>");
+    const vonName = esc(von?.daten?.name || t.vonName || "Dein Teamleiter");
+    const text = [
+      geaendert ? `${vonName} hat deinen Termin <strong>${esc(t.titel)}</strong> geändert.`
+        : `${vonName} hat dir einen Termin gegeben: <strong>${esc(t.titel)}</strong>.`,
+      zeilen,
+      ...(t.notiz ? [`<strong>Infos und Hinweise:</strong><br>${esc(t.notiz).replace(/\n/g, "<br>")}`] : []),
+      "Du findest den Termin im Kalender des Vertriebsportals.",
+    ];
+    return versenden([{ an: [empf.daten.email], betreff: (geaendert ? "Termin geändert: " : "Neuer Termin: ") + (k.firma || t.titel || "")
+      + (t.datum ? " am " + tag : ""), titel: geaendert ? "Dein Termin wurde geändert" : "Du hast einen neuen Termin", text }], "Termin");
+  }
   const { data: vorgang } = await db.from("anfragen").select("id, daten").eq("id", id).maybeSingle();
   if (!vorgang) return antwort(404, { fehler: "Vorgang nicht gefunden" });
   const a = vorgang.daten || {};
@@ -125,6 +160,11 @@ Deno.serve(async (req) => {
     }
   }
 
+  return versenden(mails, "Vorgang " + id);
+});
+
+/* Versand über das Strato-Postfach; jede Person bekommt eine eigene Mail */
+async function versenden(mails: { an: string[]; betreff: string; titel: string; text: string[] }[], fuss: string) {
   const benutzer = Deno.env.get("SMTP_BENUTZER") || "portal@egc-energie.de";
   const passwort = Deno.env.get("SMTP_PASSWORT");
   if (!passwort) return antwort(500, { fehler: "SMTP_PASSWORT fehlt" });
@@ -139,10 +179,10 @@ Deno.serve(async (req) => {
     for (const an of [...new Set(m.an)]) {
       try {
         await post.sendMail({ from: `"EGC Energie Vertriebsportal" <${benutzer}>`, to: an,
-          subject: m.betreff, html: html(m.titel, m.text, id) });
+          subject: m.betreff, html: html(m.titel, m.text, fuss) });
         gesendet++;
       } catch (e) { fehler.push(String((e as Error)?.message || e).slice(0, 200)); }
     }
   }
   return antwort(fehler.length ? 207 : 200, { ok: !fehler.length, gesendet, fehler });
-});
+}

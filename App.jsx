@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.36 · 15.11.2026 · Termine vom Teamleiter mit Kundendaten, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.36 · 15.11.2026 · Termine vom Teamleiter mit Kundendaten und Hinweisen, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -11439,8 +11439,9 @@ function meldungenFuer(user, mitarbeiter, anfragen, leads, tickets, probleme, sm
     (leads || []).filter((l) => l.zugewiesen === user.id && !l.gelesen)
       .forEach((l) => zu("lead", l.id, "Neuer Lead: " + l.firma, { ansicht: "leads" }, l.angelegt));
     (termine || []).filter((t) => t.fuerId === user.id && t.vonId && t.vonId !== user.id && !t.erledigt && (t.datum || "") >= heute())
-      .forEach((t) => zu("termin", t.id, "Termin von " + (t.vonName || "deinem Teamleiter") + ": " + ((t.kunde || {}).firma || t.titel)
-        + " am " + datum(t.datum) + (t.zeit ? " um " + t.zeit + " Uhr" : ""), { ansicht: "kalender" }, t.angelegt || t.datum));
+      .forEach((t) => zu("termin", t.id + ":" + (t.datum || "") + (t.zeit || "") + String(t.notiz || "").length,
+        "Termin von " + (t.vonName || "deinem Teamleiter") + ": " + ((t.kunde || {}).firma || t.titel)
+        + " am " + datum(t.datum) + (t.zeit ? " um " + t.zeit + " Uhr" : "") + (t.notiz ? " · mit Hinweisen" : ""), { ansicht: "kalender" }, t.angelegt || t.datum));
     (akquise || []).filter((l) =>
       (Array.isArray(l.zugewiesen) ? l.zugewiesen : l.zugewiesen ? [l.zugewiesen] : [])
         .includes(user.id)).forEach((l) => {
@@ -14024,6 +14025,8 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
     setNeuOffen(false);
   };
   const setTermin = (id, teil) => setTermine(termine.map((x) => (x.id === id ? { ...x, ...teil } : x)));
+  /* Hinweise eines vergebenen Termins nachträglich ändern */
+  const [hinweisEdit, setHinweisEdit] = useState(null); /* { id, text } */
 
   const beschreibung = (t) => [terminKunde(t), t.notiz].filter(Boolean).join("\n");
   const googleLink = (t) => {
@@ -14061,7 +14064,7 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
     const k = t.kunde || {};
     const adresse = [k.strasse, [k.plz, k.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ");
     return (
-      <div className="px-4 py-3" style={{ borderTop: i ? "1px solid " + C.line : "none",
+      <div key={t.id} className="px-4 py-3" style={{ borderTop: i ? "1px solid " + C.line : "none",
            background: t.datum === heute() ? "#F1F7F0" : "transparent", opacity: t.erledigt ? 0.6 : 1 }}>
         <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
           <span className="text-sm w-28 shrink-0" style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -14075,8 +14078,26 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
             )}
             <div className="text-xs" style={{ color: C.muted }}>
               {[t.ort, t.ausLead ? "aus Lead" : "", t.vonId && t.vonId !== user.id ? "von " + (t.vonName || name(t.vonId)) : "",
-                vergebenAn ? "für " + name(t.fuerId) : "", t.notiz].filter(Boolean).join(" · ")}
+                vergebenAn ? "für " + name(t.fuerId) : "", t.vonId ? "" : t.notiz].filter(Boolean).join(" · ")}
             </div>
+            {hinweisEdit && hinweisEdit.id === t.id && (
+              <div className="mt-2 space-y-2">
+                <textarea value={hinweisEdit.text} rows={4} onChange={(e) => setHinweisEdit({ ...hinweisEdit, text: e.target.value })}
+                  className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+                <div className="flex gap-2">
+                  <Btn icon={Check} onClick={() => { setTermin(t.id, { notiz: hinweisEdit.text }); setHinweisEdit(null); }}>Speichern und mitteilen</Btn>
+                  <Btn variante="hell" onClick={() => setHinweisEdit(null)}>Abbrechen</Btn>
+                </div>
+              </div>
+            )}
+            {t.vonId && t.notiz && !(hinweisEdit && hinweisEdit.id === t.id) && (
+              <div className="mt-2 rounded px-3 py-2 text-sm whitespace-pre-wrap" style={{ background: "#FFF8E6", border: "1px solid #F0DCA8" }}>
+                <span className="block text-xs mb-0.5" style={{ color: C.gas }}>
+                  {t.vonId === user.id ? "Deine Hinweise an " + name(t.fuerId) : "Hinweise von " + (t.vonName || name(t.vonId))}
+                </span>
+                {t.notiz}
+              </div>
+            )}
             {(adresse || k.telefon || k.email) && (
               <div className="flex flex-wrap gap-2 mt-2">
                 {adresse && <a href={"https://maps.google.com/?q=" + encodeURIComponent(adresse)} target="_blank" rel="noreferrer"
@@ -14091,7 +14112,11 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {vergebenAn && (
+              <button onClick={() => setHinweisEdit({ id: t.id, text: t.notiz || "" })} className="text-xs px-2 py-1 rounded"
+                style={{ border: "1px solid " + C.line, color: C.gas }}>{t.notiz ? "Hinweise ändern" : "Hinweise ergänzen"}</button>
+            )}
             {!t.ausLead && !vergebenAn && (
               <button onClick={() => setTermin(t.id, { erledigt: !t.erledigt })} className="text-xs px-2 py-1 rounded"
                 style={{ border: "1px solid " + C.line, color: t.erledigt ? C.muted : C.ok }}>{t.erledigt ? "wieder offen" : "erledigt"}</button>
@@ -14146,9 +14171,21 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
             </div>
             <Feld label="Telefon" type="tel" value={f.kunde.telefon} onChange={(v) => setK("telefon", v)} />
             <Feld label="E-Mail" type="email" value={f.kunde.email} onChange={(v) => setK("email", v)} />
-            <Feld label="Notiz für den Termin" value={f.notiz} onChange={(v) => setF({ ...f, notiz: v })} breit
-              placeholder="z. B. Abrechnung mitbringen lassen, Interesse an PV" />
           </div>
+          <label className="block">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>
+              {fuer === user.id ? "Notiz zum Termin" : "Infos und Hinweise für " + name(fuer)}
+            </span>
+            <textarea value={f.notiz} rows={4} onChange={(e) => setF({ ...f, notiz: e.target.value })}
+              placeholder={fuer === user.id ? "z. B. Abrechnung mitbringen lassen"
+                : "z. B. Kunde hat zwei Standorte, Abrechnungen Strom und Gas mitnehmen, Interesse an PV, Chef heißt Herr Muster und ist ab 10 Uhr da"}
+              className="w-full px-3 py-2 text-sm rounded outline-none" style={{ border: "1px solid " + C.line }} />
+            {fuer !== user.id && (
+              <span className="block text-xs mt-1" style={{ color: C.muted }}>
+                {name(fuer)} sieht den Termin mit allen Angaben in seinem Kalender, bekommt eine Meldung im Portal und eine E-Mail.
+              </span>
+            )}
+          </label>
           <Btn icon={Check} onClick={anlegen} disabled={!f.titel.trim() && !f.kunde.firma.trim()}>
             {fuer === user.id ? "Termin speichern" : "Termin an " + name(fuer) + " geben"}
           </Btn>
@@ -14162,7 +14199,8 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
         </div>
       ) : (
         <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
-          {alle.map((t, i) => <Zeile key={t.id} t={t} i={i} />)}
+          {/* als Funktion aufgerufen, nicht als Baustein: so behalten Eingabefelder beim Tippen den Fokus */}
+          {alle.map((t, i) => Zeile({ t, i }))}
         </div>
       )}
 
@@ -14170,7 +14208,7 @@ function Kalender({ termine, setTermine, user, leads, mitarbeiter }) {
         <div>
           <div className="text-sm mb-2">An dein Team vergeben</div>
           <div className="rounded overflow-hidden" style={{ background: C.card, border: "1px solid " + C.line }}>
-            {vergeben.map((t, i) => <Zeile key={t.id} t={t} i={i} vergebenAn />)}
+            {vergeben.map((t, i) => Zeile({ t, i, vergebenAn: true }))}
           </div>
         </div>
       )}
