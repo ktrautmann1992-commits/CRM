@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.36 · 16.11.2026 · Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.37 · 16.11.2026 · Vollmacht am Handy ausfüllbar, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1419,6 +1419,90 @@ const ladeJsPdf = () => {
   return jsPdfLaden;
 };
 
+/* Ausfüllbare Felder (PDF-Formular) in ein fertiges PDF setzen, ohne zusätzlichen Baustein.
+   Das PDF bleibt unverändert; Felder, Seiten mit Feldverweisen und der Katalog werden als
+   Ergänzung angehängt (wie beim Speichern in einem PDF-Editor). jsPDFs eigene Formularfelder
+   sind unvollständig (keine Schriftangabe, Kästchen vorab angekreuzt), darum von Hand.
+   felder: [{ art: "text" | "kreuz", name, seite (ab 1), x, y, w, h (mm, von oben links), gr, mehrzeilig }] */
+function pdfMitFeldern(bytes, felder) {
+  if (!felder || !felder.length) return bytes;
+  let roh = "";
+  for (let i = 0; i < bytes.length; i += 8192) roh += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  const sx = roh.lastIndexOf("startxref");
+  const prev = parseInt(roh.slice(sx + 9), 10);
+  const tr = roh.slice(roh.lastIndexOf("trailer"), sx);
+  const groesse = +tr.match(/\/Size (\d+)/)[1], wurzel = +tr.match(/\/Root (\d+) 0 R/)[1];
+  const info = tr.match(/\/Info (\d+) 0 R/), kennung = tr.match(/\/ID\s*(\[[^\]]*\])/);
+  const objekt = (n) => {
+    const m = roh.match(new RegExp("(?:^|[\\r\\n])" + n + " 0 obj\\s*(<<[\\s\\S]*?>>)\\s*endobj"));
+    if (!m) throw new Error("PDF-Objekt " + n + " nicht gefunden");
+    return m[1];
+  };
+  const katalog = objekt(wurzel);
+  const seiten = objekt(+katalog.match(/\/Pages (\d+) 0 R/)[1]).match(/\/Kids\s*\[([^\]]*)\]/)[1]
+    .match(/\d+ 0 R/g).map((r) => +r.split(" ")[0]);
+  const neu = [];                       /* [nummer, inhalt] */
+  let naechste = groesse;
+  const anlegen = (inhalt) => { const n = naechste++; neu.push([n, inhalt]); return n; };
+  const str = (t) => "(" + String(t).replace(/[\\()]/g, (c) => "\\" + c).replace(/[^\x20-\x7e]/g, "_") + ")";
+  const strom = (kopf, inhalt) => kopf.replace(/>>$/, "/Length " + inhalt.length + ">>") + "\nstream\n" + inhalt + "\nendstream";
+  const helv = anlegen("<</Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding>>");
+  const zadb = anlegen("<</Type /Font /Subtype /Type1 /BaseFont /ZapfDingbats>>");
+  const k = 72 / 25.4, f2 = (z) => z.toFixed(2);
+  const jeSeite = {}, alle = [];
+  felder.forEach((f) => {
+    const sNr = seiten[f.seite - 1];
+    if (!sNr) return;
+    const mb = (objekt(sNr).match(/\/MediaBox\s*\[([^\]]*)\]/) || [0, "0 0 595.28 841.89"])[1].trim().split(/\s+/).map(Number);
+    const ph = mb[3];
+    const r = [f.x * k, ph - (f.y + f.h) * k, (f.x + f.w) * k, ph - f.y * k];
+    const rect = "/Rect [" + r.map(f2).join(" ") + "]";
+    let n;
+    if (f.art === "kreuz") {
+      const b = f2(r[2] - r[0]), h = f2(r[3] - r[1]);
+      /* Häkchen als Linie im EGC-Grün, nicht als Schriftzeichen: sieht in jedem Programm gleich aus */
+      const bw = r[2] - r[0], bh = r[3] - r[1];
+      const ja = anlegen(strom("<</Type /XObject /Subtype /Form /BBox [0 0 " + b + " " + h + "]>>",
+        "q 0.42 0.71 0.23 RG " + f2(bh * 0.16) + " w 1 J 1 j " + f2(bw * 0.2) + " " + f2(bh * 0.52) + " m " +
+        f2(bw * 0.42) + " " + f2(bh * 0.26) + " l " + f2(bw * 0.84) + " " + f2(bh * 0.8) + " l S Q"));
+      const aus = anlegen(strom("<</Type /XObject /Subtype /Form /BBox [0 0 " + b + " " + h + "]>>", ""));
+      n = anlegen("<</Type /Annot /Subtype /Widget /FT /Btn /F 4 /T " + str(f.name) + " " + rect + " /P " + sNr + " 0 R" +
+        " /V /Off /AS /Off /AP <</N <</Yes " + ja + " 0 R /Off " + aus + " 0 R>>>>>>");
+    } else {
+      n = anlegen("<</Type /Annot /Subtype /Widget /FT /Tx /F 4 /T " + str(f.name) + " " + rect + " /P " + sNr + " 0 R" +
+        " /V () /DA (/Helv " + f2(f.gr || 9) + " Tf 0.09 0.13 0.17 rg)" + (f.mehrzeilig ? " /Ff 4096" : "") + " /MK <<>>>>");
+    }
+    (jeSeite[sNr] = jeSeite[sNr] || []).push(n); alle.push(n);
+  });
+  const ersetzt = [];
+  Object.entries(jeSeite).forEach(([sNr, liste]) => {
+    const alt = objekt(sNr), refs = liste.map((n) => n + " 0 R").join(" ");
+    ersetzt.push([+sNr, /\/Annots\s*\[/.test(alt) ? alt.replace(/\/Annots\s*\[/, "/Annots [" + refs + " ")
+      : alt.replace(/>>\s*$/, "/Annots [" + refs + "]\n>>")]);
+  });
+  const form = anlegen("<</Fields [" + alle.map((n) => n + " 0 R").join(" ") + "] /NeedAppearances true" +
+    " /DA (/Helv 0 Tf 0 g) /DR <</Font <</Helv " + helv + " 0 R /ZaDb " + zadb + " 0 R>>>>>>");
+  ersetzt.push([wurzel, katalog.replace(/\/AcroForm\s*\d+ 0 R/, "").replace(/>>\s*$/, "/AcroForm " + form + " 0 R\n>>")]);
+  let anhang = "\n", pos = roh.length + 1;
+  const xref = [];
+  [...ersetzt, ...neu].forEach(([n, inhalt]) => {
+    const teil = n + " 0 obj\n" + inhalt + "\nendobj\n";
+    xref.push([n, pos]); anhang += teil; pos += teil.length;
+  });
+  anhang += "xref\n" + xref.sort((a, b) => a[0] - b[0]).map(([n, o]) => n + " 1\n" + String(o).padStart(10, "0") + " 00000 n \n").join("") +
+    "trailer\n<<\n/Size " + naechste + "\n/Root " + wurzel + " 0 R\n" + (info ? "/Info " + info[1] + " 0 R\n" : "") +
+    (kennung ? "/ID " + kennung[1] + "\n" : "") + "/Prev " + prev + "\n>>\nstartxref\n" + pos + "\n%%EOF\n";
+  const aus = new Uint8Array(bytes.length + anhang.length);
+  aus.set(bytes);
+  for (let i = 0; i < anhang.length; i++) aus[bytes.length + i] = anhang.charCodeAt(i) & 255;
+  return aus;
+}
+const bytesAlsDataUrl = (u8) => {
+  let s = "";
+  for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return "data:application/pdf;base64," + btoa(s);
+};
+
 /* ------------------------------------------------------------------ */
 /*  Dienstleistungsvertrag (Energiebeschaffung und Erstattungsprüfung) */
 /*  Gilt für alle Kunden. Nur Kalkulation und Geschäftsführung         */
@@ -2419,12 +2503,24 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     strich(WEISS); doc.setLineWidth(0.45);
     doc.line(x + 0.7, y - 1.2, x + 1.35, y - 0.5); doc.line(x + 1.35, y - 0.5, x + 2.6, y - 2.0);
   };
-  const unterschriften = (y, felder, einzug = 0) => {
+  /* Ausfüllbare Felder (PDF-Formular): am iPhone in der Dateien-App oder in jedem PDF-Editor
+     direkt beschreibbar. Nur dort, wo noch nichts eingedruckt ist. Namen ohne Umlaute. */
+  const feldZahl = {}, formFelder = [];
+  const feldName = (name) => { const n = feldZahl[name] = (feldZahl[name] || 0) + 1; return n > 1 ? name + " " + n : name; };
+  const seiteJetzt = () => doc.internal.getCurrentPageInfo().pageNumber;
+  const feld = (name, x, y, w, h = 4.4, { mehrzeilig = false, gr = 8.5 } = {}) =>
+    formFelder.push({ art: "text", name: feldName(name), seite: seiteJetzt(), x, y, w, h, gr, mehrzeilig });
+  const ankreuzen = (name, x, y, s = 2.8) =>
+    formFelder.push({ art: "kreuz", name: feldName(name), seite: seiteJetzt(), x, y, w: s, h: s });
+  /* mitFeldern: Ort/Datum und Name werden ausfüllbar; die Unterschrift bleibt frei zum Zeichnen */
+  const unterschriften = (y, felder, einzug = 0, mitFeldern = null) => {
     const b = (BR - 2 * einzug - 8 * (felder.length - 1)) / felder.length;
     strich(TEXT); doc.setLineWidth(0.3);
     felder.forEach((f, i) => {
       const x = RA + einzug + i * (b + 8);
       doc.line(x, y, x + b, y); schrift(7.5); farbe(GRAU); text(f, x, y + 4);
+      if (mitFeldern && /^(Ort|Name)/.test(f))
+        feld(mitFeldern + (/^Ort/.test(f) ? " Ort Datum" : " Name"), x, y - 6, b, 5.4, { gr: 10 });
     });
     return y + 10;
   };
@@ -2945,7 +3041,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   schrift(8); farbe(GRAU);
   [["Berater:", berater.name], ["E-Mail:", berater.email], ["Kontakt:", berater.telefon]].forEach(([k, w], i) => {
     text(k, RA + halb + 4, y + 5 + i * 4.6); schrift(8.5, true); farbe(TEXT);
-    if (blanko) { strich(LINIE); doc.setLineWidth(0.2); doc.line(RA + halb + 22, y + 5.5 + i * 4.6, W - RA, y + 5.5 + i * 4.6); }
+    if (blanko) { strich(LINIE); doc.setLineWidth(0.2); doc.line(RA + halb + 22, y + 5.5 + i * 4.6, W - RA, y + 5.5 + i * 4.6);
+      feld(["Berater Name", "Berater E-Mail", "Berater Telefon"][i], RA + halb + 22, y + 1.6 + i * 4.6, halb - 22, 3.9, { gr: 8 }); }
     else text(w || "–", RA + halb + 22, y + 5 + i * 4.6);
     schrift(8); farbe(GRAU);
   });
@@ -2956,11 +3053,14 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
    ["Telefon / E-Mail", [kunde.telefon, kunde.email].filter(Boolean).join(" · ")], ["Geburtsdatum", ""]].forEach(([k, w], i) => {
     if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.1, "F"); }
     schrift(8); farbe(GRAU); text(k, RA + 2, y + 3.6); schrift(8.5); farbe(TEXT); text(w || "", RA + 50, y + 3.6);
+    if (!w) feld(["Kunde Firma", "Kunde Strasse", "Kunde PLZ Ort", "Kunde Telefon E-Mail", "Kunde Geburtsdatum"][i],
+      RA + 49, y + 0.35, (i === 4 ? halb - 2 : BR - 1) - 49, 4.4);
     /* letzte Zeile geteilt: rechts Steuernummer bzw. USt-IdNr. (nur manche Versorger), damit es bei zwei Seiten bleibt */
     if (i === 4) {
       const xs = RA + halb + 4;
       schrift(8); farbe(GRAU); text("Steuer-Nr. / USt-IdNr.", xs, y + 3.6);
-      if (blanko || !kunde.steuernummer) { strich(LINIE); doc.setLineWidth(0.2); doc.line(xs + 33, y + 4.1, W - RA - 2, y + 4.1); }
+      if (blanko || !kunde.steuernummer) { strich(LINIE); doc.setLineWidth(0.2); doc.line(xs + 33, y + 4.1, W - RA - 2, y + 4.1);
+        feld("Kunde Steuernummer", xs + 32, y + 0.35, W - RA - 2 - xs - 32, 4.4); }
       else { schrift(8.5); farbe(TEXT); text(String(kunde.steuernummer), xs + 33, y + 3.6); }
     }
     y += 5.1;
@@ -2968,7 +3068,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   y += 4;
   y = ueberschrift("Lieferadressen", RA, y);
   if (blanko) {
-    strich(TEXT); doc.setLineWidth(0.3); doc.rect(RA, y - 2.8, 2.8, 2.8, "S");
+    strich(TEXT); doc.setLineWidth(0.3); doc.rect(RA, y - 2.8, 2.8, 2.8, "S"); ankreuzen("Lieferstellenliste", RA, y - 2.8);
     schrift(8); farbe(TEXT); text("siehe Lieferstellenliste (Anlage)", RA + 4, y); y += 5;
   }
   for (const l of a.lieferstellen) {
@@ -2977,10 +3077,10 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     schrift(8.5, true); farbe(NAVY);
     if (blanko) {
       strich(TEXT); doc.setLineWidth(0.3);
-      doc.rect(RA, y - 2.6, 2.8, 2.8, "S"); text("Strom", RA + 4, y);
-      doc.rect(RA + 18, y - 2.6, 2.8, 2.8, "S"); text("Erdgas", RA + 22, y);
+      doc.rect(RA, y - 2.6, 2.8, 2.8, "S"); text("Strom", RA + 4, y); ankreuzen("Strom", RA, y - 2.6);
+      doc.rect(RA + 18, y - 2.6, 2.8, 2.8, "S"); text("Erdgas", RA + 22, y); ankreuzen("Erdgas", RA + 18, y - 2.6);
       schrift(7.8); farbe(GRAU); text("Lieferadresse:", RA + 40, y);
-      strich(LINIE); doc.line(RA + 60, y + 0.5, W - RA, y + 0.5);
+      strich(LINIE); doc.line(RA + 60, y + 0.5, W - RA, y + 0.5); feld("Lieferadresse", RA + 59, y - 3.4, BR - 59, 4.2);
     } else
     text((l.medium === "gas" ? "Erdgas" : "Strom") + (l.bezeichnung ? " · " + l.bezeichnung : "") + "  ·  " +
       [l.strasse, [l.plz, l.ort].filter(Boolean).join(" ")].filter(Boolean).join(", "), RA, y);
@@ -2991,12 +3091,16 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 4.8, "F"); }
       schrift(7.8); farbe(GRAU); text(r[0], RA + 2, y + 3.4); text(r[2], RA + halb + 2, y + 3.4);
       farbe(TEXT); text(blanko ? "" : r[1] || "", RA + 32, y + 3.4); text(blanko ? "" : r[3] || "", RA + halb + 32, y + 3.4);
+      const fn = [["Versorger", "Kundennummer"], ["Verbrauch kWh", "Zaehlernummer"], ["Lieferbeginn", "MaLo"]][i];
+      if (blanko || !r[1]) feld(fn[0], RA + 31, y + 0.25, halb - 33, 4.3, { gr: 8 });
+      if (blanko || !r[3]) feld(fn[1], RA + halb + 31, y + 0.25, halb - 31, 4.3, { gr: 8 });
       y += 4.8;
     });
     y += 4;
   }
   schrift(8.5, true); farbe(TEXT); text("IBAN:", RA, y + 4);
   strich(TEXT); doc.setLineWidth(0.3); doc.line(RA + 14, y + 4.5, W - RA, y + 4.5);
+  feld("IBAN", RA + 13, y + 0.2, BR - 13, 4.2, { gr: 9 });
   y += 10;
 
   /* Zusatzbemerkungen: vorgefüllter Text der Kalkulation, darunter Linien zum Ausfüllen von Hand */
@@ -3010,6 +3114,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   if (zb) { farbe(TEXT); yb = absatz(zb, RA + 3, yb, BR - 6, 8.5, 3.8) + 1; }
   strich(LINIE); doc.setLineWidth(0.2);
   for (let yy = yb + 3; yy < y + boxH - 1; yy += 6) doc.line(RA + 3, yy, W - RA - 3, yy);
+  feld("Zusatzbemerkungen", RA + 1.5, yb - 3, BR - 3, y + boxH - 1 - (yb - 3), { mehrzeilig: true });
   y += boxH + 6;
   if (y + 74 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
   strich(TEXT); doc.setLineWidth(0.3); doc.rect(RA, y - 3, 3.4, 3.4, "S");
@@ -3021,7 +3126,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   });
   y += 4;
   y = ueberschrift("Unterschriften Vollmacht / Lastschriftmandat / Datenschutz", RA, y);
-  unterschriften(y + 12, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
+  unterschriften(y + 12, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"], 0, "Vollmacht");
 
   y = neueSeite("DATENSCHUTZ");
   EGC_AUFTRAG.datenschutz.forEach(([t, inhalt]) => {
@@ -3031,7 +3136,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   });
   if (y + 24 > H - 22) y = neueSeite("DATENSCHUTZ");
   y = ueberschrift("Unterschrift Einwilligung", RA, y + 4);
-  y = unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"]);
+  y = unterschriften(y + 14, ["Ort, Datum", "Name, Vorname (Klarschrift)", "Unterschrift & Firmenstempel"], 0, "Datenschutz");
   } /* Ende Service- & Beratungsauftrag */
 
   /* ---------- Nächste Schritte ---------- */
@@ -3080,16 +3185,15 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     doc.setPage(i); schrift(7); farbe(GRAU); text("Seite " + i + " von " + n, W - RA, H - 6.4, { align: "right" });
   }
 
-  if (blanko) {
-    const roh = doc.output("datauristring");
-    return { name: "Service-und-Beratungsauftrag_Blanko.pdf", typ: "application/pdf",
-             groesse: Math.round(roh.length * 0.75), url: "data:application/pdf;base64," + roh.split(",")[1] };
-  }
-  const roh = doc.output("datauristring");
-  const url = "data:application/pdf;base64," + roh.split(",")[1];
+  /* Vollmacht ausfüllbar machen; misslingt das, bleibt es beim PDF zum Ausfüllen von Hand */
+  let pdfBytes = new Uint8Array(doc.output("arraybuffer"));
+  try { pdfBytes = pdfMitFeldern(pdfBytes, formFelder); } catch (e) { console.warn("Formularfelder nicht gesetzt", e); }
+  const url = bytesAlsDataUrl(pdfBytes);
+  if (blanko)
+    return { name: "Service-und-Beratungsauftrag_Blanko.pdf", typ: "application/pdf", groesse: pdfBytes.length, url };
   const name = "Angebot_" + (kunde.firma || a.id).replace(/[^\wäöüÄÖÜß]+/g, "_") + "_" +
     (v.produkt || "").replace(/[^\wäöüÄÖÜß]+/g, "") + ".pdf";
-  return { name, typ: "application/pdf", groesse: Math.round(roh.length * 0.75), url };
+  return { name, typ: "application/pdf", groesse: pdfBytes.length, url };
 }
 
 /* ------------------------------------------------------------------ */
