@@ -127,8 +127,12 @@ je Schritt. Hedgearten `HEDGE_ARTEN` (Menge, Preis, Preis-Menge, Bottom-up) mit
 Produkt Cal/Quartal/Monat und Prozentanteil; Lastgangpreis =
 `hedgeQuote × hedgePreis + strukturProMWh` (`lastgangPreis`). Feiertage je
 Bundesland (`b.bundesland`, ohne Wahl nur bundesweite). Spot-PFC und
-Ausgleichsenergiepreise als Dateien im Auftrag (`spotDatei`, `aeDatei`),
-AE-Risiko = (Ist − typische Last) × AE-Preis (`aeRisiko`).
+AE-PFC als Dateien im Auftrag (`spotDatei`, `aeDatei`). Hedgearten nach Vorgabe der
+Beschaffung: Menge (Short-Menge = Long-Menge je Zone), Preis/Wert (Short-Wert = Long-Wert
+je Zone), Preis-Menge (Wert über den Zeitraum ausgeglichen, sonst kleinste
+Mengenabweichung je Zone), Bottom-up (bis zur kleinsten Last, nie Long). Skalierung
+80–120 % als Vergleich (`szenarien`). AE (`aeNaeherung`): Referenzlastgang um ± n Stunden
+verschoben als Ist, Deltamengen × AE-PFC, Mittel der Beträge × Wahrscheinlichkeitsfaktor.
 
 **Strom und Erdgas:** Ein Auftrag hat `sparten` (`["strom"]`, `["gas"]` oder
 beide; ältere Aufträge ohne Feld gelten als Strom). Strom liegt in

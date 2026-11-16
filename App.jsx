@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.36 · 15.11.2026 · Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.36 · 16.11.2026 · Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -16124,17 +16124,19 @@ function profilAusPreisen(reihe /* [{ t: Date, preis }] */, land = "") {
   }))));
 }
 
-/* Hedgearten (Strom). Je Zeitraum des gewählten Produkts (Cal, Quartal, Monat) entsteht eine Base- und eine
-   Peakleistung; Peak = Mehrleistung in den Peakstunden über Base (nicht negativ).
-   menge:      Base = mittlere Offpeaklast, Peak = mittlere Peaklast − Base (Energie je Zone gedeckt)
-   preis:      wertgleich: Hedge hat je Zone denselben Marktwert wie die Last (Σ Last·Preis / Σ Preis)
-   preismenge: kleinste Abweichung, mit dem Preis gewichtet (Σ Preis²·Last / Σ Preis²)
-   bottomup:   Sockel: 5-%-Wert der Last je Zone; was darüber liegt, bleibt offen (Spot) */
+/* Hedgearten (Strom), Definitionen der Beschaffung. Je Zeitraum des gewählten Produkts (Cal, Quartal, Monat)
+   entsteht eine Base- und eine Peakleistung; Peak = Mehrleistung in den Peakstunden über Base (nicht negativ).
+   menge:      Menge der offenen Positionen = Menge der geschlossenen: je Zone Short-Menge = Long-Menge, kein Preisbezug
+   preis:      Werthedge: Wert der offenen = Wert der geschlossenen Positionen, je Zone zur Preiskurve
+   preismenge: Long und Short preislich ausgeglichen (über den Zeitraum), dabei so nah wie möglich am Mengenhedge
+   bottomup:   bis zur kleinsten Last mit Base und Peak auffüllen, keine Long-Position; alles darüber bleibt offen */
 const HEDGE_ARTEN = [
-  { id: "menge", name: "Mengenhedge", text: "Base = mittlere Offpeaklast, Peak = Mehrlast in den Peakstunden. Die Hedgemenge entspricht der Last." },
-  { id: "preis", name: "Preishedge", text: "Wertgleich: Die Absicherung hat je Zeitzone denselben Marktwert wie der Lastgang; die Menge kann abweichen." },
-  { id: "preismenge", name: "Preis-Mengen-Hedge", text: "Kleinste Abweichung zwischen Last und Absicherung, jede Stunde mit ihrem Preis gewichtet: teure Stunden zählen mehr." },
-  { id: "bottomup", name: "Bottom-up-Hedge", text: "Nur der Sockel, der fast immer verbraucht wird (5-%-Wert der Last je Zeitzone); der Rest bleibt offen für den Spotmarkt." }];
+  { id: "menge", name: "Mengenhedge", text: "Menge der offenen Positionen = Menge der geschlossenen Positionen (Short-Menge = Long-Menge je Zeitzone), ohne Preisbezug." },
+  { id: "preis", name: "Preishedge (Werthedge)", text: "Wert der offenen Positionen = Wert der geschlossenen Positionen, je Zeitzone zur Preiskurve; die Mengen können abweichen." },
+  { id: "preismenge", name: "Preis-Mengen-Hedge", text: "Long und Short sind preislich ausgeglichen, und unter dieser Bedingung liegt die Absicherung so nah wie möglich am Mengenhedge: der Sweet Spot zwischen beiden." },
+  { id: "bottomup", name: "Bottom-up-Hedge", text: "Die Last wird bis zur kleinsten Last mit Base und Peak aufgefüllt, „bis unters Dach“, ohne dass Long-Positionen entstehen. Alles darüber bleibt offene Position." }];
+/* Skalierungen für den Vergleich (Prozent des gewählten Hedges) */
+const HEDGE_STUFEN = [80, 90, 100, 110, 120];
 const HEDGE_PRODUKTE = [{ id: "cal", name: "Cal (ein Jahresband)" }, { id: "quartal", name: "Quartale" }, { id: "monat", name: "Monate" }];
 const hedgeVon = (h) => ({ art: "menge", produkt: "cal", prozent: "100", ...(h || {}) });
 
@@ -16153,30 +16155,45 @@ function jahresBewertung(last, kurve, hedge) {
   const anzahl = hg.produkt === "monat" ? 12 : hg.produkt === "quartal" ? 4 : 1;
   const zonen = Array.from({ length: anzahl }, () => [[], []]); /* [offpeak, peak] je Zeitraum: Indizes */
   st.forEach((s, i) => zonen[gruppe(s)][s.peak ? 1 : 0].push(i));
-  const quantil = (werte, p) => { if (!werte.length) return 0; const a = werte.slice().sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(p * a.length))]; };
-  /* Leistung (MW), die eine Zone abdeckt */
-  const zonenMW = (idx) => {
-    if (!idx.length) return 0;
-    const l = idx.map((i) => L[i] / dt), p = idx.map((i) => Pr[i]);
-    const mittel = l.reduce((x, y) => x + y, 0) / l.length;
-    if (hg.art === "preis") { const sp = p.reduce((x, y) => x + y, 0); return sp > 0 ? l.reduce((x, v, k) => x + v * p[k], 0) / sp : mittel; }
-    if (hg.art === "preismenge") { const sq = p.reduce((x, y) => x + y * y, 0); return sq > 0 ? l.reduce((x, v, k) => x + v * p[k] * p[k], 0) / sq : mittel; }
-    if (hg.art === "bottomup") return quantil(l, 0.05);
-    return mittel;
+  /* Leistung (MW) je Zone: Offpeak-Stunden x, Peak-Stunden y; Base = x, Peak = y − x */
+  const zonenWerte = (idx) => {
+    let n = 0, l = 0, lp = 0, sp = 0, min = Infinity;
+    idx.forEach((i) => { const v = L[i] / dt; n++; l += v; lp += v * Pr[i]; sp += Pr[i]; if (v < min) min = v; });
+    return { n, l, lp, sp, min: n ? min : 0 };
   };
   const perioden = zonen.map(([off, pk], g) => {
-    const b = zonenMW(off);
-    const pkGes = pk.length ? zonenMW(pk) : b;
-    return { g, baseMW: b * quote, peakMW: Math.max(0, pkGes - b) * quote };
+    const o = zonenWerte(off), q = zonenWerte(pk);
+    let x, y;
+    if (hg.art === "preis") {
+      x = o.sp > 0 ? o.lp / o.sp : o.l / (o.n || 1);
+      y = q.n ? (q.sp > 0 ? q.lp / q.sp : q.l / q.n) : x;
+    } else if (hg.art === "preismenge") {
+      /* Wertgleichheit über den Zeitraum (a·x + c·y = W), dabei kleinste Mengenabweichung je Zone */
+      const a = o.sp, c = q.sp, W = o.lp + q.lp, No = o.n || 1, Np = q.n || 1;
+      const nenner = (a * a) / (No * No) + (q.n ? (c * c) / (Np * Np) : 0);
+      const mu = nenner > 0 ? (W - (a * o.l) / No - (q.n ? (c * q.l) / Np : 0)) / nenner : 0;
+      x = o.l / No + (mu * a) / (No * No);
+      y = q.n ? q.l / Np + (mu * c) / (Np * Np) : x;
+    } else if (hg.art === "bottomup") {
+      x = Math.min(o.min, q.n ? q.min : Infinity);
+      y = q.n ? q.min : x;
+    } else {
+      x = o.l / (o.n || 1);
+      y = q.n ? q.l / q.n : x;
+    }
+    return { g, baseMW: Math.max(0, x) * quote, peakMW: Math.max(0, y - x) * quote };
   });
   const hb = new Float64Array(L.length), hp = new Float64Array(L.length);
   let hedgeMenge = 0, hedgeWert = 0, baseSum = 0, peakSum = 0, baseEnergie = 0;
+  let shortMenge = 0, longMenge = 0, shortWert = 0, longWert = 0;
   st.forEach((s, i) => {
     const pe = perioden[gruppe(s)];
     hb[i] = pe.baseMW; hp[i] = s.peak ? pe.peakMW : 0;
     const e = (hb[i] + hp[i]) * dt;
     hedgeMenge += e; hedgeWert += e * Pr[i]; baseEnergie += hb[i] * dt;
     baseSum += hb[i]; if (s.peak) peakSum += hp[i];
+    const d = L[i] - e;
+    if (d > 0) { shortMenge += d; shortWert += d * Pr[i]; } else { longMenge -= d; longWert -= d * Pr[i]; }
   });
   /* Kennzahlen je Zeitraum für die Tabelle: Leistung, Menge und Preise der Kurve */
   const periodenInfo = perioden.map((pe) => {
@@ -16199,39 +16216,30 @@ function jahresBewertung(last, kurve, hedge) {
     struktur: rest, strukturProMWh: menge ? rest / menge : 0,
     gewichtBase: hedgeMenge ? baseEnergie / hedgeMenge : 1,
     perioden: periodenInfo, hedge: hg, hb, hp, dt,
+    shortMenge, longMenge, shortWert, longWert,
   };
 }
-/* Ausgleichsenergie-Risiko aus dem eingelesenen Lastgang.
-   Prognose je Zeitschritt = typische Last (Mittel aus Monat × Tagesart × Schritt), Abweichung = tatsächliche Last − Prognose.
-   Bewertet mit dem Ausgleichsenergiepreis (z. B. reBAP) zum selben Zeitpunkt: Unterdeckung kostet, Überdeckung bringt Erlös.
-   Weil sich die Abweichungen je Klasse aufheben, misst das Ergebnis die Kosten der Abweichung gegenüber einem festen Preis. */
-function aeRisiko(form, reihe) {
-  if (!form || !form.ist || !form.ist.length) throw new Error("Für die Ausgleichsenergie bitte zuerst den Lastgang mit Zeitstempeln einlesen.");
-  const proH = (form.proTag || 24) / 24, schrittMs = 3600000 / proH;
-  const genau = new Map(), klasse = new Map();
-  const add = (map, k, v) => { const a = map.get(k); if (a) { a[0] += v; a[1]++; } else map.set(k, [v, 1]); };
-  reihe.forEach(({ t, preis }) => {
-    const q = t.getHours() * proH + Math.floor(t.getMinutes() / (60 / proH));
-    const ab = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime() + q * schrittMs;
-    add(genau, ab, preis);
-    add(klasse, t.getMonth() + "-" + tagesart(t.getFullYear(), t.getMonth(), t.getDate(), form.land || "") + "-" + q, preis);
-  });
-  let menge = 0, abw = 0, kosten = 0, treffer = 0;
-  const monK = Array(12).fill(0), monM = Array(12).fill(0);
-  form.ist.forEach((x) => {
-    const g = genau.get(x.t);
-    const k = g || klasse.get(x.m + "-" + x.art + "-" + x.q);
-    if (g) treffer++;
-    if (!k) return;
-    const preis = k[0] / k[1];
-    const d = (x.kwh - form.mittel[x.m][x.art][x.q]) / 1000;
-    menge += x.kwh / 1000; abw += Math.abs(d); kosten += d * preis;
-    monK[x.m] += d * preis; monM[x.m] += x.kwh / 1000;
-  });
-  if (!menge) throw new Error("Die Ausgleichsenergiepreise passen zeitlich nicht zum Lastgang.");
-  const monate = monK.map((k, m) => (monM[m] ? k / monM[m] : null)).filter((x) => x != null);
-  return { menge, abweichung: abw, abwAnteil: abw / menge, kosten, proMWh: kosten / menge,
-           treffer: treffer / form.ist.length, monatHoechst: monate.length ? Math.max(...monate) : 0 };
+/* Ausgleichsenergie, Näherung nach der Methode der Beschaffung:
+   Die typische Last des Lieferjahres (Referenzlastgang) wird um einige Stunden nach vorn und nach hinten verschoben
+   und als Ist-Lastgang angenommen; das simuliert die Prognoseunschärfe. Die Deltamengen (Ist − Referenz) werden mit
+   der AE-PFC bewertet. Ergebnis = Mittel der Beträge beider Richtungen × Wahrscheinlichkeitsfaktor, je MWh Last. */
+function aeNaeherung(last, aePreis, stunden, faktorProzent) {
+  const L = last.last, n = L.length, dt = last.dt || 1;
+  const k = Math.max(1, Math.round((+stunden || 2) / dt));
+  const menge = L.reduce((x, y) => x + y, 0) || 1;
+  const richtung = (v) => {
+    let kosten = 0, delta = 0;
+    for (let i = 0; i < n; i++) {
+      const d = L[(i - v + n) % n] - L[i];
+      kosten += d * aePreis[i]; delta += Math.abs(d);
+    }
+    return { kosten, delta };
+  };
+  const vor = richtung(k), nach = richtung(-k);
+  const roh = (Math.abs(vor.kosten) + Math.abs(nach.kosten)) / 2 / menge;
+  const f = Math.max(0, zahlOder(faktorProzent) == null ? 100 : zahlOder(faktorProzent)) / 100;
+  return { roh, proMWh: roh * f, faktor: f, stunden: k * dt,
+           deltaAnteil: (vor.delta + nach.delta) / 2 / menge, vor: vor.kosten / menge, nach: nach.kosten / menge };
 }
 
 /* Energiepreis des Lastgangs: Anteil der Absicherung × Hedgepreis + Struktur und offene Menge (je MWh Last) */
@@ -17869,8 +17877,8 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
       if (bw.spotDatei) { spot = spotRef.current || (spotRef.current = await preisreiheRohAusDatei(bw.spotDatei)); setSpotStand((x) => x + 1); }
       if (basis === "spot" && !spot) throw new Error("Für die Spotbewertung bitte zuerst die Spot-PFC hochladen.");
       if (bw.mitAE) {
-        if (!bw.aeDatei) throw new Error("Für das Ausgleichsenergie-Risiko bitte die Ausgleichsenergiepreise hochladen.");
-        ae = aeRisiko(form, await preisreiheRohAusDatei(bw.aeDatei));
+        if (!bw.aeDatei) throw new Error("Für die Ausgleichsenergie bitte die AE-PFC hochladen.");
+        ae = await preisreiheRohAusDatei(bw.aeDatei);
       }
       const opt = { land: form.land || "", proTag: form.proTag || 24 };
       const jahre = bw.jahre.map((j) => {
@@ -17880,6 +17888,17 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         const kurve = basis === "spot" ? { preis: sp.preis, hinweise: [] } : preiskurve(j.jahr, preiseStromAus(j), bw.profil || null, opt);
         const e = jahresBewertung(last, kurve, basis === "spot" ? { ...hedge, prozent: "0" } : hedge);
         const spotPreis = sp ? last.last.reduce((x, l, k) => x + l * sp.preis[k], 0) / (e.menge || 1) : null;
+        /* Ausgleichsenergie: Näherung über den verschobenen Referenzlastgang, bewertet mit der AE-PFC */
+        const aeJ = ae ? aeNaeherung(last, preiseAufJahr(ae, j.jahr, opt.land, opt.proTag).preis, bw.aeStunden, bw.aeFaktor) : null;
+        /* Skalierung des gewählten Hedges zum Vergleich: 80 bis 120 % und der eingestellte Wert */
+        const stress = (zahlOder(bw.stress) || 0) / 100;
+        const gewaehlt = zahlOder(hedge.prozent) == null ? 100 : zahlOder(hedge.prozent);
+        const stufen = basis === "spot" ? [] : [...new Set([...HEDGE_STUFEN, Math.round(gewaehlt)])].sort((x, y) => x - y);
+        const szenarien = stufen.map((pz) => {
+          const x = pz === gewaehlt ? e : jahresBewertung(last, kurve, { ...hedge, prozent: String(pz) });
+          const netto = (x.shortWert - x.longWert) / (x.menge || 1);
+          return rundeTief([pz, x.hedgeMenge, x.shortMenge, x.longMenge, x.hedgePreis, netto, Math.abs(netto) * stress, lastgangPreis(x)]);
+        });
         /* mittlere Leistung (MW) je Schritt des Tages nach Tagesart, für die Grafik */
         const tp = [0, 1, 2].map(() => Array.from({ length: opt.proTag }, () => [0, 0]));
         last.stunden.forEach((x, k) => { tp[x.art][x.q][0] += last.last[k] / last.dt; tp[x.art][x.q][1]++; });
@@ -17887,15 +17906,17 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         return { jahr: j.jahr, mengeKwh: menge, menge: e.menge, preis: e.preis, hedgePreis: e.hedgePreis, hedgeQuote: e.hedgeQuote,
                  strukturProMWh: e.strukturProMWh, baseMW: e.baseMW, peakMW: e.peakMW, benutzung: e.benutzung,
                  peakAnteil: e.peakAnteil, gewichtBase: e.gewichtBase, spitze: e.spitze,
-                 spotPreis, spotExakt: sp ? sp.exakt : null, aeProMWh: ae ? ae.proMWh : 0, basis,
+                 spotPreis, spotExakt: sp ? sp.exakt : null, aeProMWh: aeJ ? aeJ.proMWh : 0, basis, szenarien,
+                 ae: aeJ ? { roh: rundeTief(aeJ.roh), deltaAnteil: rundeTief(aeJ.deltaAnteil), vor: rundeTief(aeJ.vor), nach: rundeTief(aeJ.nach) } : null,
                  hinweise: kurve.hinweise || [], perioden: rundeTief(e.perioden.map((x) => [x.baseMW, x.peakMW, x.menge, x.preis, x.basePreis, x.peakPreis])),
                  periodenNamen: e.perioden.map((x) => x.name),
                  monate: kurve.monate ? { base: rundeTief(kurve.monate.base), peak: rundeTief(kurve.monate.peak) } : null, tagesprofil };
       });
       setBw({ ergebnis: { ...(bw.ergebnis || {}), berechnet: heute(), marktStand: bw.marktStand || heute(),
         profil: !!bw.profil, basis, hedge, land: opt.land, proTag: opt.proTag,
-        ae: ae ? { abweichung: rundeTief(ae.abweichung), abwAnteil: rundeTief(ae.abwAnteil), proMWh: rundeTief(ae.proMWh),
-          monatHoechst: rundeTief(ae.monatHoechst), treffer: rundeTief(ae.treffer) } : null,
+        ae: ae ? { stunden: zahlOder(bw.aeStunden) || 2, faktor: zahlOder(bw.aeFaktor) == null ? 100 : zahlOder(bw.aeFaktor),
+          letzte: (zahlOder(bw.aeLetzteBetrag) && zahlOder(bw.aeLetzteMenge)) ? rundeTief(zahlOder(bw.aeLetzteBetrag) / zahlOder(bw.aeLetzteMenge)) : null } : null,
+        stress: zahlOder(bw.stress) || 0,
         jahre } }, "Bewertung berechnet");
     } catch (e) { setFehler(e.message || String(e)); }
     finally { setLaedt(""); }
@@ -18264,7 +18285,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
               options={[{ value: "termin", label: "Terminmarkt (PFC aus den Terminpreisen)" }, { value: "spot", label: "Spotmarkt (Spot-PFC aus Datei)" }]} />
             <div>
               {bw.spotDatei ? (
-                <div className="flex items-center gap-2 text-sm pt-5"><DateiChip datei={bw.spotDatei} label="Spot-PFC" klein />
+                <div className="flex flex-wrap items-center gap-2 text-sm min-w-0 pt-5"><DateiChip datei={bw.spotDatei} label="Spot-PFC" klein />
                   {darf && <button className="text-xs" style={{ color: C.muted }} onClick={() => { spotRef.current = null; setBw({ spotDatei: null }, "Spot-PFC entfernt"); }}>entfernen</button>}</div>
               ) : darf ? (
                 <Datei label={"Spot-PFC (Stunden oder Viertelstunden, €/MWh)" + (basis === "spot" ? "" : ", freiwillig zum Vergleich")} datei={null}
@@ -18279,21 +18300,27 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
           </p>
           <label className="flex items-start gap-2 text-sm mb-2">
             <input type="checkbox" className="mt-1" disabled={!darf} checked={!!bw.mitAE} onChange={(e) => setBw({ mitAE: e.target.checked })} />
-            <span>Ausgleichsenergie-Risiko einrechnen
+            <span>Ausgleichsenergie einrechnen
               <span className="block text-xs" style={{ color: C.muted }}>
-                Prognose = typische Last, Abweichung = tatsächlicher Lastgang − Prognose, bewertet mit den Ausgleichsenergiepreisen
-                (z. B. reBAP) zum selben Zeitpunkt. Die Preise sollten den Zeitraum des Lastgangs abdecken.
+                Der Referenzlastgang wird um einige Stunden nach vorn und nach hinten verschoben und als Ist-Lastgang angenommen
+                (Prognoseunschärfe). Die Deltamengen werden mit der AE-PFC bewertet und mit dem Wahrscheinlichkeitsfaktor skaliert.
               </span></span>
           </label>
           {bw.mitAE && (
-            <div className="mb-4">
+            <div className="mb-4 space-y-3">
               {bw.aeDatei ? (
-                <div className="flex items-center gap-2 text-sm"><DateiChip datei={bw.aeDatei} label="Ausgleichsenergie" klein />
-                  {darf && <button className="text-xs" style={{ color: C.muted }} onClick={() => setBw({ aeDatei: null }, "Ausgleichsenergiepreise entfernt")}>entfernen</button>}</div>
+                <div className="flex flex-wrap items-center gap-2 text-sm min-w-0"><DateiChip datei={bw.aeDatei} label="AE-PFC" klein />
+                  {darf && <button className="text-xs" style={{ color: C.muted }} onClick={() => setBw({ aeDatei: null }, "AE-PFC entfernt")}>entfernen</button>}</div>
               ) : darf && (
-                <Datei label="Ausgleichsenergiepreise (Viertelstunden, €/MWh)" datei={null}
-                  onSet={(d) => d && setBw({ aeDatei: d }, "Ausgleichsenergiepreise hochgeladen")} />
+                <Datei label="AE-PFC (Stunden oder Viertelstunden, €/MWh)" datei={null}
+                  onSet={(d) => d && setBw({ aeDatei: d }, "AE-PFC hochgeladen")} />
               )}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <Feld label="Verschiebung in Stunden" value={bw.aeStunden ?? "2"} gesperrt={!darf} onChange={(v) => setBw({ aeStunden: v })} />
+                <Feld label="Wahrscheinlichkeitsfaktor %" value={bw.aeFaktor ?? "100"} gesperrt={!darf} onChange={(v) => setBw({ aeFaktor: v })} />
+                <Feld label="Letzte AE-Rechnung €" value={bw.aeLetzteBetrag || ""} gesperrt={!darf} onChange={(v) => setBw({ aeLetzteBetrag: v })} placeholder="freiwillig" />
+                <Feld label="dazu Menge MWh" value={bw.aeLetzteMenge || ""} gesperrt={!darf} onChange={(v) => setBw({ aeLetzteMenge: v })} placeholder="freiwillig" />
+              </div>
             </div>
           )}
           {basis === "termin" && (<>
@@ -18303,11 +18330,20 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
                 options={HEDGE_ARTEN.map((x) => ({ value: x.id, label: x.name }))} />
               <Select label="Produkte" value={hedge.produkt} onChange={(v) => darf && setBw({ hedge: { ...hedge, produkt: v } })}
                 options={HEDGE_PRODUKTE.map((x) => ({ value: x.id, label: x.name }))} />
-              <Feld label="Anteil des Vorschlags %" value={hedge.prozent} gesperrt={!darf} onChange={(v) => setBw({ hedge: { ...hedge, prozent: v } })} />
+              <Feld label="Skalierung des Hedges %" value={hedge.prozent} gesperrt={!darf} onChange={(v) => setBw({ hedge: { ...hedge, prozent: v } })} />
             </div>
+            {darf && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {HEDGE_STUFEN.map((pz) => (
+                  <button key={pz} onClick={() => setBw({ hedge: { ...hedge, prozent: String(pz) } })} className="text-xs px-2.5 py-1 rounded"
+                    style={{ background: String(hedge.prozent) === String(pz) ? C.ink : "#fff", color: String(hedge.prozent) === String(pz) ? "#fff" : C.text, border: "1px solid " + C.line }}>{pz} %</button>
+                ))}
+              </div>
+            )}
             <p className="text-xs mt-2" style={{ color: C.muted }}>
               {(HEDGE_ARTEN.find((x) => x.id === hedge.art) || HEDGE_ARTEN[0]).text} Mit {hedge.produkt === "cal" ? "einem Jahresband" : hedge.produkt === "quartal" ? "vier Quartalsbändern" : "zwölf Monatsbändern"}
-              {" "}je Base und Peak; bewertet zur Kurve des jeweiligen Zeitraums. Ein Anteil unter 100 % sichert nur diesen Teil, der Rest bleibt offen.
+              {" "}je Base und Peak; bewertet zur Kurve des jeweiligen Zeitraums. Die Skalierung vergrößert oder verkleinert den Hedge danach
+              (z. B. 80 % oder 120 %); die Bewertung zeigt alle Stufen von 80 bis 120 % im Vergleich.
             </p>
           </>)}
         </Abschnitt>
@@ -18431,11 +18467,52 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
           </div>
           {mitAE && (
             <p className="text-xs mt-3" style={{ color: C.text }}>
-              Ausgleichsenergie: Abweichung von der Prognose {num(erg.ae.abweichung, 1)} MWh im Lastgang ({num(erg.ae.abwAnteil * 100, 1)} % der Menge),
-              Kosten {num(erg.ae.proMWh, 2)} €/MWh, ungünstigster Monat {num(erg.ae.monatHoechst, 2)} €/MWh.
-              {erg.ae.treffer < 0.9 ? " Nur " + num(erg.ae.treffer * 100, 0) + " % der Zeitpunkte hatten einen Preis zur selben Zeit; für den Rest gilt der Mittelwert je Monat, Tagesart und Zeitschritt." : ""}
+              Ausgleichsenergie: Referenzlastgang um ± {num(erg.ae.stunden, 1)} h verschoben, Deltamenge {erg.jahre.map((j) => num(((j.ae || {}).deltaAnteil || 0) * 100, 1) + " %").join(" / ")} der Menge,
+              bewertet mit der AE-PFC: {erg.jahre.map((j) => num(((j.ae || {}).roh || 0), 2)).join(" / ")} €/MWh, mit Wahrscheinlichkeitsfaktor {num(erg.ae.faktor, 0)} %:
+              {" "}{erg.jahre.map((j) => num(j.aeProMWh || 0, 2)).join(" / ")} €/MWh.
+              {erg.ae.letzte != null ? " Zum Vergleich letzte AE-Rechnung: " + num(erg.ae.letzte, 2) + " €/MWh." : ""}
             </p>
           )}
+          {!spotErg && erg.jahre.some((j) => (j.szenarien || []).length) && (() => {
+            const sj = erg.jahre.find((j) => j.jahr === periodenJahr) || erg.jahre[0];
+            const gew = zahlOder(hg.prozent) == null ? 100 : zahlOder(hg.prozent);
+            return (
+              <div className="mt-4">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-xs" style={{ color: C.muted }}>Skalierung des Hedges im Vergleich, Lieferjahr {sj.jahr}</span>
+                  <span className="flex-1" />
+                  {erg.jahre.length > 1 && erg.jahre.map((j) => (
+                    <button key={j.jahr} onClick={() => setPeriodenJahr(j.jahr)} className="text-xs px-2 py-1 rounded"
+                      style={{ background: j.jahr === sj.jahr ? C.ink : "#fff", color: j.jahr === sj.jahr ? "#fff" : C.text, border: "1px solid " + C.line }}>{j.jahr}</button>
+                  ))}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs min-w-[560px]" style={tz}>
+                    <thead><tr style={{ color: C.muted }}>
+                      {["Skalierung", "Hedge MWh", "Short (offen) MWh", "Long MWh", "Hedge €/MWh", "Netto offen €/MWh", "Risiko bei ± " + num(erg.stress || 0, 0) + " %", "Lastgang €/MWh"].map((t, i) =>
+                        <th key={t} className={"py-1 pr-3 font-normal " + (i ? "text-right" : "text-left")}>{t}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {(sj.szenarien || []).map((z) => (
+                        <tr key={z[0]} style={{ borderTop: "1px solid " + C.line, background: Math.round(z[0]) === Math.round(gew) ? "#F1F7F0" : "transparent" }}>
+                          <td className="py-1.5 pr-3">{num(z[0], 0)} %{Math.round(z[0]) === Math.round(gew) ? " · gewählt" : ""}</td>
+                          <td className="py-1.5 pr-3 text-right">{num(z[1], 1)}</td><td className="py-1.5 pr-3 text-right">{num(z[2], 1)}</td>
+                          <td className="py-1.5 pr-3 text-right">{num(z[3], 1)}</td><td className="py-1.5 pr-3 text-right">{num(z[4], 2)}</td>
+                          <td className="py-1.5 pr-3 text-right">{(z[5] >= 0 ? "+" : "") + num(z[5], 2)}</td><td className="py-1.5 pr-3 text-right">± {num(z[6], 2)}</td>
+                          <td className="py-1.5 pr-3 text-right">{num(z[7], 2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs mt-1" style={{ color: C.muted }}>
+                  Netto offen: Marktwert Short minus Long je MWh Last; positiv = Unterdeckung (Risiko steigender Preise), negativ = Überdeckung
+                  (Risiko fallender Preise). Risiko: Wertänderung der offenen Position, wenn sich die Preise um den Stresstest-Wert ändern.
+                  Der Lastgangpreis zur heutigen Kurve bleibt gleich, die Skalierung verändert das Risiko.
+                </p>
+              </div>
+            );
+          })()}
           {!spotErg && pj && (pj.perioden || []).length > 1 && (
             <div className="mt-4">
               <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -18471,7 +18548,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
             {spotErg
               ? "Spotbewertung: Lastgang × Spot-PFC, ohne Absicherung."
               : (HEDGE_ARTEN.find((x) => x.id === hg.art) || HEDGE_ARTEN[0]).name + " mit " + (hg.produkt === "monat" ? "Monatsprodukten" : hg.produkt === "quartal" ? "Quartalsprodukten" : "Cal-Produkten")
-                + ", " + num(zahlOder(hg.prozent) == null ? 100 : zahlOder(hg.prozent), 0) + " % des Vorschlags. Struktur/Rest: Marktwert der Last minus Marktwert der Absicherung, je MWh Last"
+                + ", Skalierung " + num(zahlOder(hg.prozent) == null ? 100 : zahlOder(hg.prozent), 0) + " %. Struktur/Rest: Marktwert der Last minus Marktwert der Absicherung, je MWh Last"
                 + " (Abweichung im Verlauf und nicht abgesicherte Menge). Lastgang = Absicherung × Hedgepreis + Struktur/Rest."}
             {mitAE ? " Dazu die Ausgleichsenergie." : ""} Benutzungsstunden {erg.jahre.map((j) => num(j.benutzung)).join(" / ")} h,
             Peakanteil {erg.jahre.map((j) => num(j.peakAnteil * 100)).join(" / ")} %{erg.proTag === 96 ? ", gerechnet in Viertelstunden" : ""}
