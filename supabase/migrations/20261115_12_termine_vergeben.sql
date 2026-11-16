@@ -9,7 +9,7 @@ create policy "lesen: eigene und selbst vergebene" on public.termine for select 
     (select intern.aktiv())
     and (
       fuer_id = (select intern.ich())
-      or (daten ->> 'vonId' = (select intern.ich()) and fuer_id = any ((select intern.struktur())))
+      or (daten ->> 'vonId' = (select intern.ich()) and fuer_id = any (intern.struktur()))
     )
   );
 
@@ -21,7 +21,7 @@ create policy "anlegen: für sich oder die eigene Struktur" on public.termine fo
       or (
         (select intern.hat_rolle(variadic array['Teamleiter', 'Leitung Vertrieb']))
         and daten ->> 'vonId' = (select intern.ich())
-        and fuer_id = any ((select intern.struktur()))
+        and fuer_id = any (intern.struktur())
       )
     )
   );
@@ -31,14 +31,14 @@ create policy "ändern: eigene und selbst vergebene" on public.termine for updat
     (select intern.aktiv())
     and (
       fuer_id = (select intern.ich())
-      or (daten ->> 'vonId' = (select intern.ich()) and fuer_id = any ((select intern.struktur())))
+      or (daten ->> 'vonId' = (select intern.ich()) and fuer_id = any (intern.struktur()))
     )
   )
   with check (
     (select intern.aktiv())
     and (
       fuer_id = (select intern.ich())
-      or (daten ->> 'vonId' = (select intern.ich()) and fuer_id = any ((select intern.struktur())))
+      or (daten ->> 'vonId' = (select intern.ich()) and fuer_id = any (intern.struktur()))
     )
   );
 
@@ -47,6 +47,6 @@ create policy "löschen: eigene und selbst vergebene" on public.termine for dele
     (select intern.aktiv())
     and (
       fuer_id = (select intern.ich())
-      or (daten ->> 'vonId' = (select intern.ich()) and fuer_id = any ((select intern.struktur())))
+      or (daten ->> 'vonId' = (select intern.ich()) and fuer_id = any (intern.struktur()))
     )
   );
