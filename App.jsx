@@ -365,7 +365,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.37 · 16.11.2026 · Vollmacht am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.37 · 16.11.2026 · Vollmacht und Angebot am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2514,7 +2514,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const ankreuzen = (name, x, y, s = 2.8) =>
     formFelder.push({ art: "kreuz", name: feldName(name), seite: seiteJetzt(), x, y, w: s, h: s });
   /* mitFeldern: Ort/Datum und Name werden ausfüllbar; die Unterschrift bleibt frei zum Zeichnen */
-  const unterschriften = (y, felder, einzug = 0, mitFeldern = null) => {
+  const unterschriften = (y, felder, einzug = 0, mitFeldern = null, hoehe = 10.6) => {
     const b = (BR - 2 * einzug - 8 * (felder.length - 1)) / felder.length;
     strich(TEXT); doc.setLineWidth(0.3);
     felder.forEach((f, i) => {
@@ -2523,7 +2523,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       if (mitFeldern && /^(Ort|Name)/.test(f))
         feld(mitFeldern + (/^Ort/.test(f) ? " Ort Datum" : " Name"), x, y - 6, b, 5.4, { gr: 10 });
       if (mitFeldern && /^Unterschrift/.test(f))
-        formFelder.push({ art: "unterschrift", name: feldName("Unterschrift " + mitFeldern), seite: seiteJetzt(), x, y: y - 11, w: b, h: 10.6 });
+        formFelder.push({ art: "unterschrift", name: feldName("Unterschrift " + mitFeldern), seite: seiteJetzt(), x, y: y - hoehe - 0.4, w: b, h: hoehe });
     });
     return y + 10;
   };
@@ -2840,7 +2840,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     schrift(8.5); farbe(TEXT);
     text("Hiermit akzeptiere ich das oben stehende Angebot und beauftrage EGC Energie mit dem Abschluss des Energieliefervertrags.",
       RA + 4, y + 12.5, { maxWidth: BR - 8 });
-    unterschriften(y + 24, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"], 4);
+    unterschriften(y + 24, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"], 4, "Angebot", 6);
   }
 
   /* ---------- Lastgang-Analyse für RLM-Lieferstellen mit Lastgang ---------- */
@@ -3014,7 +3014,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     schrift(10, true); farbe(NAVY); text("Smartmeter-Angebot angenommen:", RA + 9.5, ys + 7);
     schrift(8.8); farbe(TEXT);
     text(String(tx.annahme || SMARTMETER_VORGABE.annahme), RA + 4, ys + 12.5, { maxWidth: BR - 8 });
-    unterschriften(ys + 33, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"], 4);
+    unterschriften(ys + 33, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"], 4, "Smartmeter");
     ys += nhS + 7;
     if (ys + 38 < H - 18) {
       schrift(8, true); farbe(GRUEN1); text("SO GEHT ES WEITER", RA, ys, { charSpace: 1 }); ys += 5;
