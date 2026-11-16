@@ -228,8 +228,6 @@ function seedAblage() {
     von: "Karsten", datum: "2026-06-02",
   });
   return [
-    e("dokumente", "Blanko-Maklervollmacht", "PDF", "maklervollmacht_blanko.pdf",
-      "Vom Kunden zu unterschreiben, damit wir Verbrauchsdaten beim Versorger abrufen dürfen."),
     e("dokumente", "Datenabfrage Netzbetreiber", "PDF", "datenabfrage_netzbetreiber.pdf",
       "Formular für Lastgangdaten bei RLM-Zählern."),
     e("dokumente", "Kündigungsschreiben Altvertrag", "Word", "kuendigung_vorlage.docx",
@@ -367,7 +365,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.37 · 16.11.2026 · Vollmacht am Handy ausfüllbar, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.37 · 16.11.2026 · Vollmacht am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1458,7 +1456,10 @@ function pdfMitFeldern(bytes, felder) {
     const r = [f.x * k, ph - (f.y + f.h) * k, (f.x + f.w) * k, ph - f.y * k];
     const rect = "/Rect [" + r.map(f2).join(" ") + "]";
     let n;
-    if (f.art === "kreuz") {
+    if (f.art === "unterschrift") {
+      /* echtes Unterschriftsfeld: DocuSign, Adobe Sign und Acrobat erkennen es als Stelle zum Unterschreiben */
+      n = anlegen("<</Type /Annot /Subtype /Widget /FT /Sig /F 4 /T " + str(f.name) + " " + rect + " /P " + sNr + " 0 R /MK <<>>>>");
+    } else if (f.art === "kreuz") {
       const b = f2(r[2] - r[0]), h = f2(r[3] - r[1]);
       /* Häkchen als Linie im EGC-Grün, nicht als Schriftzeichen: sieht in jedem Programm gleich aus */
       const bw = r[2] - r[0], bh = r[3] - r[1];
@@ -2521,6 +2522,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
       doc.line(x, y, x + b, y); schrift(7.5); farbe(GRAU); text(f, x, y + 4);
       if (mitFeldern && /^(Ort|Name)/.test(f))
         feld(mitFeldern + (/^Ort/.test(f) ? " Ort Datum" : " Name"), x, y - 6, b, 5.4, { gr: 10 });
+      if (mitFeldern && /^Unterschrift/.test(f))
+        formFelder.push({ art: "unterschrift", name: feldName("Unterschrift " + mitFeldern), seite: seiteJetzt(), x, y: y - 11, w: b, h: 10.6 });
     });
     return y + 10;
   };
