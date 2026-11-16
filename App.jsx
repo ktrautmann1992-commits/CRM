@@ -367,7 +367,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.36 · 16.11.2026 · Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.36 · 16.11.2026 · Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2956,6 +2956,13 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
    ["Telefon / E-Mail", [kunde.telefon, kunde.email].filter(Boolean).join(" · ")], ["Geburtsdatum", ""]].forEach(([k, w], i) => {
     if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 5.1, "F"); }
     schrift(8); farbe(GRAU); text(k, RA + 2, y + 3.6); schrift(8.5); farbe(TEXT); text(w || "", RA + 50, y + 3.6);
+    /* letzte Zeile geteilt: rechts Steuernummer bzw. USt-IdNr. (nur manche Versorger), damit es bei zwei Seiten bleibt */
+    if (i === 4) {
+      const xs = RA + halb + 4;
+      schrift(8); farbe(GRAU); text("Steuer-Nr. / USt-IdNr.", xs, y + 3.6);
+      if (blanko || !kunde.steuernummer) { strich(LINIE); doc.setLineWidth(0.2); doc.line(xs + 33, y + 4.1, W - RA - 2, y + 4.1); }
+      else { schrift(8.5); farbe(TEXT); text(String(kunde.steuernummer), xs + 33, y + 3.6); }
+    }
     y += 5.1;
   });
   y += 4;
@@ -4933,6 +4940,11 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
               onChange={(v) => setK("ansprechpartner", v)} fehler={geprueft && !a.kunde.ansprechpartner} />
             <Feld label="Telefon" value={a.kunde.telefon} onChange={(v) => setK("telefon", v)} />
             <Feld label="E-Mail" value={a.kunde.email} onChange={(v) => setK("email", v)} breit />
+            <div className="sm:col-span-2">
+              <Feld label="Steuernummer oder USt-IdNr." value={a.kunde.steuernummer || ""} onChange={(v) => setK("steuernummer", v)}
+                placeholder="z. B. DE123456789 oder 12/345/67890" />
+              <p className="text-xs mt-1" style={{ color: C.muted }}>Freiwillig. Manche Versorger verlangen sie auf der Vollmacht; sie wird dort mit eingedruckt.</p>
+            </div>
             <div className="sm:col-span-2 p-4 rounded"
                  style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
               <span className="block text-xs mb-2" style={{ color: C.muted }}>Wie kam der Kunde zustande?</span>
@@ -7944,6 +7956,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             <Zeile k="Ansprechpartner" v={a.kunde.ansprechpartner} />
             <Zeile k="Telefon" v={a.kunde.telefon} />
             <Zeile k="E-Mail" v={a.kunde.email} />
+            {a.kunde.steuernummer && <Zeile k="Steuer-Nr. / USt-IdNr." v={a.kunde.steuernummer} />}
             <Zeile k="Branche" v={a.kunde.branche} />
             <Zeile k="Akquise" v={(AKQUISE_ART.find((x) => x.value === (a.akquiseArt || "eigen")) || {}).label} />
             <Zeile k="Herkunft" v={[a.herkunft, a.herkunftDetail].filter(Boolean).join(" · ")} />
