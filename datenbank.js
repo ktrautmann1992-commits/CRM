@@ -404,3 +404,19 @@ async function fehlertext(error) {
   } catch (e) { /* kein JSON */ }
   return error.message || "Unbekannter Fehler";
 }
+
+/* Angebot an den Kunden (Server-Funktion „kundenangebot“): senden mit Anmeldung,
+   laden, ansehen und annehmen ohne Anmeldung über den persönlichen Link. */
+export async function kundenangebot(body) {
+  const { data, error } = await sb.functions.invoke("kundenangebot", { body });
+  if (error) throw new Error(await fehlertext(error));
+  return data;
+}
+
+/* Versandte Links eines Vorgangs: geöffnet, angesehen, angenommen (nur lesen) */
+export async function kundenlinksLaden(anfrageId) {
+  const { data, error } = await sb.from("kundenlinks").select("id, anfrage_id, daten, erstellt")
+    .eq("anfrage_id", anfrageId).order("erstellt", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
+}

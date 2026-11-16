@@ -11,7 +11,7 @@ import {
 import {
   sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
   schonBekannt, anmelden, abmelden, meineId, einladungPruefen, einladungEinloesen, dateiInhalt, passwortAendern,
-  passwortVergessen, zugangSetzen,
+  passwortVergessen, zugangSetzen, kundenangebot, kundenlinksLaden,
 } from "./datenbank.js";
 
 /* ------------------------------------------------------------------ */
@@ -58,6 +58,7 @@ function naechsterSchritt(a) {
   if (st === "entwurf") return { art: "tun", text: "Anfrage vervollständigen und an die Kalkulation senden." };
   if (st === "klaerfall") return { art: "dringend", text: "Die Kalkulation braucht noch Unterlagen oder Angaben von dir. Was fehlt, steht direkt darunter." };
   if (st === "angebot" && !a.angebotVersendet) return { art: "tun", text: "Angebot prüfen, an den Kunden schicken und danach „An Kunde versendet“ tippen." };
+  if (st === "angebot" && a.angebotVersendet.perLink) return { art: "tun", text: "Der Kunde hat einen Link zum Unterschreiben. Sobald er unterschreibt, bekommst du eine Mail und bestätigst hier den Auftrag. Nachfassen lohnt sich, sobald er das Angebot geöffnet hat. Sagt er ab: „Kein Angebot angenommen“." };
   if (st === "angebot") return { art: "tun", text: "Sobald der Kunde zusagt: „Angebot angenommen“ tippen, Umfang wählen und Vollmacht mit Angebot hochladen. Sagt er ab: „Kein Angebot angenommen“." };
   if (["eingereicht", "angefragt", "ruecksprache"].includes(st)) return { art: "warten", text: "Nichts zu tun. Die Kalkulation erstellt dein Angebot, du bekommst eine Mail." };
   if (st === "uebermittelt") return { art: "warten", text: "Nichts zu tun. Die Kalkulation reicht den Auftrag beim Versorger ein." };
@@ -365,7 +366,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.37 · 16.11.2026 · Vollmacht und Angebot am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.38 · 17.11.2026 · Angebot per Link an den Kunden: Öffnen sehen, am Handy unterschreiben, Vollmacht und Angebot am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -5871,6 +5872,147 @@ function Kurzinfo({ a, onSchliessen }) {
   );
 }
 
+/* Angebot an den Kunden senden (persönlicher Link) und verfolgen: geöffnet, angesehen, unterschrieben.
+   Name und Unterschrift fragt die Kundenseite immer ab; die übrigen Felder hakt der Vertriebspartner an. */
+const KUNDENFELDER = [
+  ["iban", "IBAN (Lastschriftmandat)"],
+  ["funktion", "Funktion im Unternehmen"],
+  ["geburtsdatum", "Geburtsdatum"],
+  ["steuernummer", "Steuernummer oder USt-IdNr."],
+];
+const zeitDe = (iso) => {
+  try {
+    return new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) + " Uhr";
+  } catch (e) { return iso || ""; }
+};
+
+function KundenVersand({ a, user, onUpdate, onAnnahmeUebernehmen, nurStatus }) {
+  const [links, setLinks] = useState([]);
+  const [offen, setOffen] = useState(false);
+  const [form, setForm] = useState(() => ({
+    an: (a.kunde && a.kunde.email) || "", satz: "",
+    felder: { iban: true, funktion: false, geburtsdatum: false, steuernummer: false, ...(a.kundenFelder || {}) },
+  }));
+  const [sendet, setSendet] = useState(false);
+  const [meldung, setMeldung] = useState("");
+
+  const neuLaden = () => kundenlinksLaden(a.id).then(setLinks).catch(() => {});
+  useEffect(() => {
+    neuLaden();
+    /* solange die Ansicht offen ist, alle 30 Sekunden nachsehen, ob der Kunde geöffnet oder unterschrieben hat */
+    const t = setInterval(neuLaden, 30000);
+    return () => clearInterval(t);
+  }, [a.id]);
+
+  const senden = async () => {
+    setSendet(true); setMeldung("");
+    try {
+      await kundenangebot({ aktion: "senden", anfrageId: a.id, an: form.an.trim(), satz: form.satz, felder: form.felder });
+      onUpdate({ ...a, angebotVersendet: { datum: heute(), von: user.name, perLink: true, an: form.an.trim() },
+        kundenFelder: form.felder,
+        verlauf: [...a.verlauf, { d: heute(), t: "Angebot per E-Mail mit persönlichem Link an " + form.an.trim() + " gesendet", w: user.name }] });
+      setOffen(false); setForm({ ...form, satz: "" });
+      neuLaden();
+    } catch (e) { setMeldung(e.message || "Senden hat nicht geklappt."); }
+    setSendet(false);
+  };
+
+  const angenommen = links.map((l) => l.daten && l.daten.angenommen ? { ...l.daten.angenommen, an: l.daten.an } : null).find(Boolean);
+  const v = angenommen && varianten(a).find((x) => x.id === angenommen.variante);
+  const mailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.an.trim());
+
+  const verlaufListe = links.length > 0 && (
+    <div className="space-y-2 mt-3">
+      {links.slice(0, 3).map((l) => {
+        const d = l.daten || {}, g = d.geoeffnet || [], s = d.angesehen || [];
+        return (
+          <div key={l.id} className="text-sm p-3 rounded" style={{ background: C.paper }}>
+            <div>Gesendet {zeitDe(d.gesendet || l.erstellt)} an {d.an}{d.von ? " (" + d.von + ")" : ""}</div>
+            <div className="mt-1" style={{ color: g.length ? C.ok : C.muted }}>
+              {g.length ? "Geöffnet: " + g.length + "×, zuletzt " + zeitDe(g[g.length - 1]) : "Noch nicht geöffnet"}
+              {s.length ? " · Angebots-PDF angesehen: " + s.length + "×" : ""}
+            </div>
+            {d.angenommen && <div className="mt-1" style={{ color: C.ok }}>Unterschrieben {zeitDe(d.angenommen.zeit)} von {d.angenommen.name}{d.angenommen.funktion ? " (" + d.angenommen.funktion + ")" : ""}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  if (nurStatus) return links.length ? <div>{verlaufListe}</div> : null;
+
+  return (
+    <div>
+      {angenommen && a.status === "angebot" && (
+        <div className="rounded p-4 mb-3" style={{ background: "#EEF6E8", border: "1px solid " + C.ok }}>
+          <div className="flex items-center gap-2 text-sm" style={{ color: C.ok }}><FileSignature size={16} /> Der Kunde hat unterschrieben</div>
+          <p className="text-sm mt-1">
+            {angenommen.name}{angenommen.funktion ? " (" + angenommen.funktion + ")" : ""} hat am {zeitDe(angenommen.zeit)}
+            {v ? " das Angebot „" + (v.produkt || "Angebot") + "“" : " das Angebot"} angenommen.
+          </p>
+          {angenommen.datei && <div className="mt-2"><DateiChip datei={angenommen.datei} label="Unterschriebene Unterlagen" /></div>}
+          <div className="mt-3">
+            <Btn variante="ok" icon={Check} onClick={() => onAnnahmeUebernehmen(v, angenommen.datei)}>Annahme übernehmen und Auftrag bestätigen</Btn>
+          </div>
+          <p className="text-xs mt-2" style={{ color: C.muted }}>Variante und Unterlagen sind dann schon eingetragen. Du prüfst nur noch die übrigen Angaben.</p>
+        </div>
+      )}
+
+      {!offen && !angenommen && (
+        <div className="flex flex-wrap gap-2">
+          <Btn variante="ok" icon={Mail} onClick={() => setOffen(true)}>{links.length ? "Erneut an den Kunden senden" : "Angebot an den Kunden senden"}</Btn>
+        </div>
+      )}
+
+      {offen && (
+        <div className="rounded p-4 mt-1 space-y-4" style={{ background: C.paper, border: "1px solid " + C.line }}>
+          <Feld label="E-Mail des Kunden" type="email" value={form.an} onChange={(x) => setForm({ ...form, an: x })}
+            fehler={form.an && !mailOk} />
+          <label className="block">
+            <span className="block text-xs mb-1" style={{ color: C.muted }}>Persönlicher Satz (optional, steht oben in der Mail)</span>
+            <textarea value={form.satz} onChange={(e) => setForm({ ...form, satz: e.target.value })} rows={3} maxLength={600}
+              placeholder="z. B. vielen Dank für das nette Gespräch gestern. Wie besprochen …"
+              className="w-full px-3 py-2 rounded outline-none" style={{ fontSize: 16, border: "1px solid " + C.line, background: "#fff" }} />
+          </label>
+          <div>
+            <span className="block text-xs mb-2" style={{ color: C.muted }}>Was muss der Kunde eintragen?</span>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm" style={{ color: C.muted }}>
+                <span className="rounded flex items-center justify-center shrink-0" style={{ width: 20, height: 20, background: C.muted }}><Check size={14} color="#fff" /></span>
+                Vor- und Nachname und Unterschrift (immer)
+              </div>
+              {KUNDENFELDER.map(([k, label]) => (
+                <button key={k} onClick={() => setForm({ ...form, felder: { ...form.felder, [k]: !form.felder[k] } })}
+                  className="flex items-center gap-2 text-sm text-left">
+                  <span className="rounded flex items-center justify-center shrink-0"
+                    style={{ width: 20, height: 20, background: form.felder[k] ? C.ok : "#fff", border: "2px solid " + (form.felder[k] ? C.ok : "#9AA5B3") }}>
+                    {form.felder[k] && <Check size={14} color="#fff" />}
+                  </span>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="text-xs p-3 rounded" style={{ background: "#fff", border: "1px solid " + C.line, color: C.muted, lineHeight: 1.6 }}>
+            <div className="mb-1" style={{ color: C.text }}>So kommt die Mail an</div>
+            Von: {user.name} · EGC Energie (über portal@egc-energie.de) · Antworten gehen an dich, du bekommst eine Kopie.<br />
+            Betreff: Ihr Angebot – {(a.kunde && a.kunde.firma) || "Kunde"}<br />
+            {a.kunde && a.kunde.ansprechpartner ? "Guten Tag " + a.kunde.ansprechpartner + "," : "Sehr geehrte Damen und Herren,"}
+            {form.satz.trim() && <><br /><span style={{ color: C.text }}>{form.satz.trim()}</span></>}
+            <br />anbei erhalten Sie Ihr Angebot … Knopf „Angebot ansehen und annehmen“, danach deine Kontaktdaten.
+          </div>
+          {meldung && <p className="text-sm" style={{ color: C.warn }}>{meldung}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Btn variante="ok" icon={Send} onClick={senden} disabled={sendet || !mailOk}>{sendet ? "Wird gesendet …" : "Jetzt senden"}</Btn>
+            <Btn variante="hell" onClick={() => setOffen(false)}>Abbrechen</Btn>
+          </div>
+        </div>
+      )}
+      {verlaufListe}
+    </div>
+  );
+}
+
 function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
                  onBearbeiten, onVerlaengern, onNotieren, tippgeber, beschaffung, setBeschaffung, onBeschaffung }) {
   /* Kalkulation: gesendetes Angebot wieder öffnen und neu senden */
@@ -7582,7 +7724,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
 
           {/* Aufgabe 9: Abschlussmaske nach Annahme */}
           {istPartner && annahme.variante && (
-            <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok, ...reihe(-2) }}>
+            <div id="annahme-formular" className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok, ...reihe(-2) }}>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-sm">Abschluss vorbereiten</span>
                 <button onClick={() => setAnnahme({ ...annahme, variante: null })} style={{ color: C.muted }}>
@@ -7760,28 +7902,41 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           {istPartner && a.status === "angebot" && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + (a.angebotVersendet ? C.line : C.ok), ...reihe(-2) }}>
               {a.angebotVersendet ? (
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                   <span className="text-sm flex items-center gap-2" style={{ color: C.ok }}>
                     <Check size={16} /> An den Kunden versendet am {datum(a.angebotVersendet.datum)}
+                    {a.angebotVersendet.perLink ? " per E-Mail mit persönlichem Link" : ""}
                   </span>
-                  <button className="text-xs underline" style={{ color: C.muted }}
-                    onClick={() => onUpdate({ ...a, angebotVersendet: null,
-                      verlauf: [...a.verlauf, { d: heute(), t: "Versand an den Kunden zurückgenommen", w: user.name }] })}>
-                    Zurücknehmen
-                  </button>
+                  {!a.angebotVersendet.perLink && (
+                    <button className="text-xs underline" style={{ color: C.muted }}
+                      onClick={() => onUpdate({ ...a, angebotVersendet: null,
+                        verlauf: [...a.verlauf, { d: heute(), t: "Versand an den Kunden zurückgenommen", w: user.name }] })}>
+                      Zurücknehmen
+                    </button>
+                  )}
                 </div>
               ) : (
                 <>
                   <div className="text-sm mb-1">Neues Angebot von der Kalkulation</div>
                   <p className="text-sm mb-4" style={{ color: C.muted, maxWidth: "60ch" }}>
-                    Prüfe das Angebot unten und schicke es dem Kunden. Danach hier markieren, dann kannst du
-                    die Annahme des Kunden erfassen.
+                    Prüfe das Angebot unten. Am einfachsten schickst du es dem Kunden direkt von hier: Er bekommt eine
+                    E-Mail mit persönlichem Link, sieht das Angebot an und unterschreibt am Handy. Du siehst, wann er es öffnet.
+                    Du kannst das PDF unten auch herunterladen, selbst schicken oder ausdrucken und danach „Selbst versendet“ tippen.
                   </p>
-                  <Btn icon={Send} onClick={() => onUpdate({ ...a, angebotVersendet: { datum: heute(), von: user.name },
-                    verlauf: [...a.verlauf, { d: heute(), t: "Angebot an den Kunden versendet", w: user.name }] })}>
-                    An Kunde versendet
-                  </Btn>
                 </>
+              )}
+              <KundenVersand a={a} user={user} onUpdate={onUpdate}
+                onAnnahmeUebernehmen={(v, datei) => {
+                  setAnnahme({ ...annahme, variante: v || annahme.variante, unterlagen: datei ? [datei] : annahme.unterlagen });
+                  setTimeout(() => { const z = document.getElementById("annahme-formular"); if (z) z.scrollIntoView({ behavior: "smooth" }); }, 50);
+                }} />
+              {!a.angebotVersendet && (
+                <div className="mt-3">
+                  <Btn variante="hell" icon={Check} onClick={() => onUpdate({ ...a, angebotVersendet: { datum: heute(), von: user.name },
+                    verlauf: [...a.verlauf, { d: heute(), t: "Angebot an den Kunden versendet", w: user.name }] })}>
+                    Selbst versendet
+                  </Btn>
+                </div>
               )}
             </div>
           )}
@@ -8743,7 +8898,7 @@ function DateiBild({ datei, hoehe = 80 }) {
   return <img src={src} alt="Unterschrift" style={{ height: hoehe, background: "#fff" }} />;
 }
 
-function Unterschrift({ onChange, label = "Unterschrift" }) {
+function Unterschrift({ onChange, label = "Unterschrift", onStriche = null, hoehe = 130 }) {
   /* Am iPhone zuverlässig: echte Touch-Ereignisse mit passive:false (verhindert das Scrollen der Seite),
      dazu Maus für den Rechner. Zeigerereignisse brach Safari ab, sobald es ein Scrollen vermutete. */
   const ref = React.useRef(null);
@@ -8751,6 +8906,10 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
   const gemalt = React.useRef(false);
   const meldung = React.useRef(onChange);
   meldung.current = onChange;
+  /* zusätzlich als Linienzüge (Bildschirmpunkte), für das scharfe Einsetzen ins PDF */
+  const striche = React.useRef([]);
+  const melde2 = React.useRef(onStriche);
+  melde2.current = onStriche;
   const [leer, setLeer] = useState(true);
 
   const vorbereiten = () => {
@@ -8781,6 +8940,7 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
       const g = c.getContext("2d");
       const [px, py] = pos(x, y);
       g.beginPath(); g.moveTo(px, py); g.lineTo(px + 0.1, py + 0.1); g.stroke();
+      striche.current.push([[Math.round(px * 10) / 10, Math.round(py * 10) / 10]]);
     };
     const weiter = (x, y) => {
       if (!zieht.current) return;
@@ -8788,12 +8948,16 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
       const [px, py] = pos(x, y);
       g.lineTo(px, py); g.stroke();
       gemalt.current = true;
+      const z = striche.current[striche.current.length - 1];
+      if (z) z.push([Math.round(px * 10) / 10, Math.round(py * 10) / 10]);
     };
     const ende = () => {
       if (!zieht.current) return;
       zieht.current = false;
       gemalt.current = true;
       setLeer(false);
+      if (melde2.current) melde2.current({ striche: striche.current.map((z) => z.slice()) });
+      if (!meldung.current) return;
       /* in festes Format übertragen und als JPEG ablegen */
       const aus = document.createElement("canvas");
       aus.width = UNTERSCHRIFT_B; aus.height = UNTERSCHRIFT_H;
@@ -8828,14 +8992,18 @@ function Unterschrift({ onChange, label = "Unterschrift" }) {
     };
   }, []);
 
-  const loeschen = () => { gemalt.current = false; vorbereiten(); setLeer(true); onChange(null); };
+  const loeschen = () => {
+    gemalt.current = false; striche.current = []; vorbereiten(); setLeer(true);
+    if (onChange) onChange(null);
+    if (onStriche) onStriche(null);
+  };
 
   return (
     <div>
       <span className="block text-xs mb-1" style={{ color: C.muted }}>{label}</span>
       <canvas ref={ref}
         className="w-full rounded"
-        style={{ height: 130, maxWidth: 480, display: "block", touchAction: "none", WebkitUserSelect: "none",
+        style={{ height: hoehe, maxWidth: 480, display: "block", touchAction: "none", WebkitUserSelect: "none",
                  userSelect: "none", WebkitTouchCallout: "none", background: "#fff", border: "1px solid " + C.line }} />
       <div className="flex items-center gap-3 mt-1 text-xs" style={{ color: C.muted }}>
         <span>{leer ? "Mit dem Finger im Feld unterschreiben." : "Unterschrift erfasst."}</span>
@@ -19640,10 +19808,282 @@ class Fehlerschutz extends React.Component {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*  Seite für den Kunden: Angebot ansehen und annehmen                 */
+/*  Aufruf über den persönlichen Link aus der E-Mail (?angebot=…),     */
+/*  ohne Anmeldung. Alles läuft über die Server-Funktion               */
+/*  „kundenangebot“; der Kunde sieht nur, was sie liefert.             */
+/* ------------------------------------------------------------------ */
+const FUNKTIONEN_KUNDE = ["Geschäftsführer/in", "Inhaber/in", "Prokurist/in", "Vorstand", "Sonstige"];
+const STELLEN_TEXT = {
+  "Unterschrift Angebot": "das Angebot",
+  "Unterschrift Smartmeter": "das Smartmeter-Angebot",
+  "Unterschrift Vollmacht": "den Service- & Beratungsauftrag (Vollmacht und Lastschriftmandat)",
+  "Unterschrift Datenschutz": "die Einwilligung zum Datenschutz",
+};
+const ibanPruefen = (roh) => {
+  const i = String(roh || "").replace(/\s+/g, "").toUpperCase();
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(i) || (i.startsWith("DE") && i.length !== 22)) return false;
+  const z = (i.slice(4) + i.slice(0, 4)).replace(/[A-Z]/g, (c) => String(c.charCodeAt(0) - 55));
+  let r = 0;
+  for (const c of z) r = (r * 10 + +c) % 97;
+  return r === 1;
+};
+
+/* außerhalb der Komponente, sonst verlieren Eingaben und Unterschrift bei jedem Tippen ihren Zustand */
+const KundeRahmen = ({ children }) => (
+  <div style={{ minHeight: "100vh", background: C.paper, color: C.text }}>
+    <div style={{ background: C.ink }}>
+      <div className="max-w-xl mx-auto px-4 py-4 flex items-center justify-between">
+        <img src="/assets/logo-weiss.png" alt="EGC Energie" style={{ height: 30 }} />
+        <span className="text-xs" style={{ color: "#B9C3D0" }}>Ihr Angebot</span>
+      </div>
+      <div style={{ height: 4, background: "#6CB43B" }} />
+    </div>
+    <div className="max-w-xl mx-auto px-4 py-5 space-y-4">{children}</div>
+    <div className="max-w-xl mx-auto px-4 pb-8 text-xs" style={{ color: C.muted, lineHeight: 1.6 }}>
+      EGC Energie · {FIRMENDATEN.strasse} · {FIRMENDATEN.ort}<br />
+      Ihre Angaben werden nur zur Bearbeitung Ihres Auftrags verwendet. Beim Öffnen dieser Seite und der Angebote
+      speichern wir den Zeitpunkt, damit Ihr Ansprechpartner weiß, dass das Angebot angekommen ist.
+    </div>
+  </div>
+);
+const KundeKarte = ({ children, rand }) => (
+  <div className="rounded-lg p-4" style={{ background: "#fff", border: "1px solid " + (rand || C.line) }}>{children}</div>
+);
+
+
+function KundenAngebot({ link }) {
+  const [daten, setDaten] = useState(null);
+  const [fehler, setFehler] = useState("");
+  const [wahl, setWahl] = useState("");
+  const [f, setF] = useState({ name: "", funktion: "", funktionFrei: "", iban: "", geburtsdatum: "", steuernummer: "" });
+  const [sig, setSig] = useState(null);
+  const [haken, setHaken] = useState({});
+  const [sendet, setSendet] = useState(false);
+  const [sendFehler, setSendFehler] = useState("");
+  const [fertig, setFertig] = useState(null);
+  const [versucht, setVersucht] = useState(false);
+
+  useEffect(() => {
+    kundenangebot({ aktion: "laden", link })
+      .then((d) => { setDaten(d); if (d.varianten && d.varianten.length === 1) setWahl(d.varianten[0].id); })
+      .catch((e) => setFehler(e.message || "Der Link konnte nicht geöffnet werden."));
+  }, [link]);
+
+  const ansehen = async (v, url0) => {
+    /* Fenster gleich beim Tippen öffnen, sonst blockt das iPhone es als Werbefenster */
+    const w = url0 ? null : window.open("", "_blank");
+    try {
+      const url = url0 || (await kundenangebot({ aktion: "ansehen", link, variante: v.id })).url;
+      if (w) w.location.href = url; else window.location.href = url;
+    } catch (e) { if (w) w.close(); alert(e.message); }
+  };
+
+  const gross = { fontSize: 16 };   /* ab 16 px vergrößert das iPhone beim Tippen nicht */
+  const eingabe = (k, label, props = {}) => {
+    const ungueltig = versucht && feldFehler[k];
+    return (
+      <label className="block">
+        <span className="block text-sm mb-1" style={{ color: C.muted }}>{label}</span>
+        <input value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} {...props}
+          className="w-full px-3 py-3 rounded outline-none"
+          style={{ ...gross, border: "1px solid " + (ungueltig ? C.warn : C.line), background: ungueltig ? "#FCF3F0" : "#fff", color: C.text }} />
+        {ungueltig && <span className="block text-sm mt-1" style={{ color: C.warn }}>{feldFehler[k]}</span>}
+      </label>
+    );
+  };
+
+  if (fehler) return (
+    <KundeRahmen><KundeKarte rand={C.warn}>
+      <div className="text-lg mb-2" style={{ color: C.ink }}>Dieser Link funktioniert nicht</div>
+      <p style={{ color: C.muted }}>{fehler}</p>
+      <p className="mt-3" style={{ color: C.muted }}>Bitte wenden Sie sich an Ihren Ansprechpartner bei EGC Energie oder an {FIRMENDATEN.telefon}.</p>
+    </KundeKarte></KundeRahmen>
+  );
+  if (!daten) return <KundeRahmen><KundeKarte><span style={{ color: C.muted }}>Ihr Angebot wird geladen …</span></KundeKarte></KundeRahmen>;
+
+  const b = daten.berater || {};
+  const v = (daten.varianten || []).find((x) => x.id === wahl) || null;
+  const F = daten.felder || {};
+  const stellen = v ? (v.stellen && v.stellen.length ? v.stellen : ["Unterschrift Angebot"]) : [];
+  const funktion = f.funktion === "Sonstige" ? f.funktionFrei.trim() : f.funktion;
+  const feldFehler = {
+    name: f.name.trim().split(/\s+/).length < 2 ? "Bitte Vor- und Nachname angeben." : "",
+    funktion: F.funktion && !funktion ? "Bitte Ihre Funktion angeben." : "",
+    iban: F.iban && !ibanPruefen(f.iban) ? "Diese IBAN ist nicht gültig. Bitte prüfen." : "",
+    geburtsdatum: F.geburtsdatum && !/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(f.geburtsdatum.trim()) ? "Bitte im Format TT.MM.JJJJ." : "",
+    steuernummer: F.steuernummer && f.steuernummer.trim().length < 6 ? "Bitte Steuernummer oder USt-IdNr. angeben." : "",
+  };
+  const fehlt = [
+    ...(!v ? ["Angebot auswählen"] : []),
+    ...[["name", "Name"], ["funktion", "Funktion"], ["iban", "IBAN"], ["geburtsdatum", "Geburtsdatum"], ["steuernummer", "Steuernummer"]]
+      .filter(([k]) => feldFehler[k]).map(([, t]) => t),
+    ...(!sig ? ["Unterschrift"] : []),
+    ...(stellen.some((s) => !haken[s]) ? ["alle Stellen bestätigen"] : []),
+  ];
+
+  const annehmen = async () => {
+    setVersucht(true);
+    if (fehlt.length) return;
+    setSendet(true); setSendFehler("");
+    try {
+      const r = await kundenangebot({ aktion: "annehmen", link, variante: v.id, name: f.name.trim(), funktion,
+        iban: f.iban, geburtsdatum: f.geburtsdatum.trim(), steuernummer: f.steuernummer.trim(),
+        unterschrift: sig, zustimmung: true });
+      setFertig(r);
+      window.scrollTo(0, 0);
+    } catch (e) { setSendFehler(e.message || "Das hat nicht geklappt. Bitte versuchen Sie es noch einmal."); }
+    setSendet(false);
+  };
+
+  const berater = () => (
+    <KundeKarte>
+      <div className="text-xs mb-1" style={{ color: C.muted }}>Ihr Ansprechpartner</div>
+      <div className="text-base" style={{ color: C.ink }}>{b.name || "EGC Energie"}</div>
+      <div className="flex flex-wrap gap-2 mt-3">
+        {b.telefon && <a href={"tel:" + String(b.telefon).replace(/[^\d+]/g, "")} className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded text-sm"
+          style={{ background: C.ink, color: "#fff" }}><Phone size={15} /> {b.telefon}</a>}
+        {b.email && <a href={"mailto:" + b.email} className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded text-sm"
+          style={{ border: "1px solid " + C.line, color: C.text }}><Mail size={15} /> E-Mail</a>}
+      </div>
+    </KundeKarte>
+  );
+
+  if (fertig || daten.angenommen) {
+    const ang = daten.angenommen;
+    const url = fertig ? fertig.unterschrieben : ang && ang.unterschrieben;
+    return (
+      <KundeRahmen>
+        <KundeKarte rand={C.ok}>
+          <div className="flex items-center gap-2 text-lg mb-2" style={{ color: C.ok }}><Check size={22} /> Vielen Dank!</div>
+          <p>{fertig ? "Sie haben das Angebot angenommen." : "Dieses Angebot wurde am " + datum((ang.zeit || "").slice(0, 10)) + (ang.name ? " von " + ang.name : "") + " angenommen."}</p>
+          <p className="mt-2" style={{ color: C.muted }}>
+            {fertig ? "Eine Kopie der unterschriebenen Unterlagen ist per E-Mail unterwegs. " : ""}
+            Wir reichen den Auftrag beim Versorger ein und melden uns, sobald er bestätigt ist.
+          </p>
+          {url && <div className="mt-4"><button onClick={() => ansehen(null, url)} className="inline-flex items-center gap-2 px-4 py-3 rounded"
+            style={{ ...gross, background: C.ink, color: "#fff" }}><FileText size={17} /> Unterschriebene Unterlagen ansehen</button></div>}
+        </KundeKarte>
+        {berater()}
+      </KundeRahmen>
+    );
+  }
+
+  return (
+    <KundeRahmen>
+      <div>
+        <div className="text-sm" style={{ color: C.muted }}>{daten.ansprechpartner ? "Guten Tag " + daten.ansprechpartner : "Willkommen"}</div>
+        <h1 className="text-2xl mt-1" style={{ color: C.ink, lineHeight: 1.25 }}>
+          {daten.varianten.length > 1 ? "Ihre Angebote" : "Ihr Angebot"}{daten.firma ? " für " + daten.firma : ""}
+        </h1>
+      </div>
+
+      {!daten.offen && (
+        <KundeKarte rand={C.gas}>
+          <p>Dieses Angebot kann nicht mehr online angenommen werden{daten.zuAlt ? ", der Link ist abgelaufen" : ""}.
+            Bitte wenden Sie sich an {b.name || "Ihren Ansprechpartner"}, gern auch telefonisch.</p>
+        </KundeKarte>
+      )}
+
+      <div className="space-y-3">
+        <div className="text-sm" style={{ color: C.muted }}>
+          {daten.varianten.length > 1 ? "1 · Angebote ansehen und eines auswählen" : "1 · Angebot ansehen"}
+        </div>
+        {daten.varianten.map((x) => {
+          const aktiv = wahl === x.id;
+          return (
+            <div key={x.id} className="rounded-lg p-4" style={{ background: "#fff", border: "2px solid " + (aktiv && daten.varianten.length > 1 ? C.ok : C.line) }}>
+              <div className="text-base" style={{ color: C.ink }}>{x.produkt || "Angebot"}</div>
+              <div className="text-sm mt-0.5" style={{ color: C.muted }}>
+                {[x.sparte, x.lieferbeginn ? "Lieferbeginn " + x.lieferbeginn : ""].filter(Boolean).join(" · ")}
+              </div>
+              {x.gueltigBis && <div className="text-sm mt-0.5" style={{ color: x.abgelaufen ? C.warn : C.muted }}>
+                {x.abgelaufen ? "Nur gültig bis " + x.gueltigBis + ", bitte neu anfragen" : "Gültig bis " + x.gueltigBis}</div>}
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button onClick={() => ansehen(x)} className="inline-flex items-center gap-2 px-4 py-3 rounded"
+                  style={{ ...gross, background: C.ink, color: "#fff" }}><FileText size={17} /> Angebot ansehen (PDF)</button>
+                {daten.varianten.length > 1 && daten.offen && !x.abgelaufen && (
+                  <button onClick={() => { setWahl(x.id); setHaken({}); }} className="inline-flex items-center gap-2 px-4 py-3 rounded"
+                    style={{ ...gross, background: aktiv ? C.ok : "#fff", color: aktiv ? "#fff" : C.text, border: "1px solid " + (aktiv ? C.ok : C.line) }}>
+                    {aktiv ? <><Check size={17} /> Ausgewählt</> : "Dieses annehmen"}</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {daten.offen && v && !v.abgelaufen && (
+        <>
+          <div className="text-sm pt-2" style={{ color: C.muted }}>2 · Ihre Angaben</div>
+          <KundeKarte>
+            <div className="space-y-4">
+              {eingabe("name", "Vor- und Nachname (wer unterschreibt)", { autoComplete: "name", autoCapitalize: "words" })}
+              {F.funktion && (
+                <div>
+                  <span className="block text-sm mb-1" style={{ color: C.muted }}>Funktion im Unternehmen</span>
+                  <div className="flex flex-wrap gap-2">
+                    {FUNKTIONEN_KUNDE.map((x) => (
+                      <button key={x} onClick={() => setF({ ...f, funktion: x })} className="px-3 py-2.5 rounded text-sm"
+                        style={{ background: f.funktion === x ? C.ink : "#fff", color: f.funktion === x ? "#fff" : C.text,
+                                 border: "1px solid " + (f.funktion === x ? C.ink : versucht && feldFehler.funktion ? C.warn : C.line) }}>{x}</button>
+                    ))}
+                  </div>
+                  {f.funktion === "Sonstige" && <div className="mt-2">{eingabe("funktionFrei", "Ihre Funktion")}</div>}
+                  {versucht && feldFehler.funktion && f.funktion !== "Sonstige" && <span className="block text-sm mt-1" style={{ color: C.warn }}>{feldFehler.funktion}</span>}
+                </div>
+              )}
+              {F.iban && eingabe("iban", "IBAN für das Lastschriftmandat", { autoComplete: "off", autoCapitalize: "characters", spellCheck: false, placeholder: "DE.. .... .... .... .... .." })}
+              {F.geburtsdatum && eingabe("geburtsdatum", "Geburtsdatum", { inputMode: "numeric", placeholder: "TT.MM.JJJJ" })}
+              {F.steuernummer && eingabe("steuernummer", "Steuernummer oder USt-IdNr.", { autoCapitalize: "characters", spellCheck: false })}
+            </div>
+          </KundeKarte>
+
+          <div className="text-sm pt-2" style={{ color: C.muted }}>3 · Unterschreiben</div>
+          <KundeKarte rand={versucht && !sig ? C.warn : null}>
+            <Unterschrift label="Bitte hier mit dem Finger unterschreiben" hoehe={170} onStriche={setSig} />
+            <p className="text-sm mt-3" style={{ color: C.muted }}>Ihre Unterschrift wird an diesen Stellen eingesetzt. Bitte jede Stelle bestätigen:</p>
+            <div className="space-y-2 mt-2">
+              {stellen.map((s) => (
+                <button key={s} onClick={() => setHaken({ ...haken, [s]: !haken[s] })}
+                  className="w-full flex items-start gap-3 p-3 rounded text-left"
+                  style={{ ...gross, background: haken[s] ? "#EEF6E8" : "#fff", border: "1px solid " + (haken[s] ? C.ok : versucht ? C.warn : C.line) }}>
+                  <span className="shrink-0 rounded flex items-center justify-center mt-0.5"
+                    style={{ width: 24, height: 24, background: haken[s] ? C.ok : "#fff", border: "2px solid " + (haken[s] ? C.ok : "#9AA5B3") }}>
+                    {haken[s] && <Check size={16} color="#fff" />}</span>
+                  <span>Ich unterschreibe {STELLEN_TEXT[s] || s}.</span>
+                </button>
+              ))}
+            </div>
+          </KundeKarte>
+
+          <div className="space-y-2 pb-2">
+            {versucht && fehlt.length > 0 && <p className="text-sm" style={{ color: C.warn }}>Bitte noch ergänzen: {fehlt.join(", ")}.</p>}
+            {sendFehler && <p className="text-sm" style={{ color: C.warn }}>{sendFehler}</p>}
+            <button onClick={annehmen} disabled={sendet} className="w-full inline-flex items-center justify-center gap-2 px-4 py-4 rounded-lg"
+              style={{ fontSize: 17, background: C.ok, color: "#fff", opacity: sendet ? 0.6 : 1 }}>
+              <FileSignature size={19} /> {sendet ? "Wird gespeichert …" : "Angebot verbindlich annehmen"}
+            </button>
+            <p className="text-xs" style={{ color: C.muted }}>
+              Mit dem Tippen nehmen Sie das ausgewählte Angebot an und unterschreiben die oben bestätigten Unterlagen elektronisch.
+              Sie erhalten sofort eine Kopie per E-Mail.
+            </p>
+          </div>
+        </>
+      )}
+      {berater()}
+    </KundeRahmen>
+  );
+}
+
 /* Beispieldaten für den Bautest */
 export const PRUEFDATEN = () => ({ anfragen: seed(), mitarbeiter: USERS, leads: seedLeads() });
 
 export default function App() {
+  /* persönlicher Link eines Kunden: eigene Seite ohne Anmeldung */
+  const kundenlink = (() => { try { return new URLSearchParams(window.location.search).get("angebot") || ""; } catch (e) { return ""; } })();
+  if (/^[0-9a-f]{48}$/.test(kundenlink)) return <Fehlerschutz><KundenAngebot link={kundenlink} /></Fehlerschutz>;
   return <Fehlerschutz><PortalApp /></Fehlerschutz>;
 }
 

@@ -89,6 +89,22 @@ Wichtig an den letzten Schritten:
 
 Diese Reihenfolge nie verkürzen.
 
+## Angebot per Link an den Kunden (v5.38)
+
+Der Vertriebspartner sendet am Vorgang „Angebot an den Kunden senden“: Mail über
+portal@egc-energie.de (Absendername = Partner, Antwort an und Kopie an ihn), optional
+persönlicher Satz, Häkchen was der Kunde eintragen muss (Name und Unterschrift immer;
+IBAN vorab an, Funktion, Geburtsdatum, Steuernummer vorab aus). Der Link
+`/?angebot=<48 Hex>` öffnet `KundenAngebot` ohne Anmeldung. Server-Funktion
+`kundenangebot` (senden, laden, ansehen, annehmen), Tabelle `kundenlinks`
+(Migration `_14_kundenlinks`, schreiben nur die Funktion). Öffnen und PDF-Ansehen werden
+mit Zeit gemerkt, beim ersten Öffnen bekommt der Partner eine Mail. Bei der Annahme setzt
+`stempel.js` Name, Ort/Datum, IBAN usw. und die Fingerunterschrift (Linienzüge) fest in das
+Angebots-PDF (Felder aus `pdfMitFeldern`), hängt eine Bestätigungsseite an und legt es unter
+`anfragen/<id>/` ab. Der Vorgang wird **nicht** vom Server geändert: Der Partner tippt
+„Annahme übernehmen“ (Variante und Unterlagen vorausgefüllt) und bestätigt wie bisher.
+Herunterladen, selbst schicken und drucken bleibt möglich („Selbst versendet“).
+
 ## Beschaffung
 
 Externe Rolle. Abgeschlossene Kunden mit Tranchen- oder PPA-Modell übergibt
