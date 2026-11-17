@@ -366,7 +366,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.39 · 17.11.2026 · Beschaffung: Offpeak-Absicherung bei Tal am Tag, Hinweis auf neue Fassung, Angebot per Link an den Kunden: Öffnen sehen, am Handy unterschreiben, Vollmacht und Angebot am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.39 · 17.11.2026 · Vorgänge löschen (Geschäftsführung), Logo in den E-Mails, Beschaffung: Offpeak-Absicherung bei Tal am Tag, Hinweis auf neue Fassung, Angebot per Link an den Kunden: Öffnen sehen, am Handy unterschreiben, Vollmacht und Angebot am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -6014,7 +6014,7 @@ function KundenVersand({ a, user, onUpdate, onAnnahmeUebernehmen, nurStatus }) {
 }
 
 function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
-                 onBearbeiten, onVerlaengern, onNotieren, tippgeber, beschaffung, setBeschaffung, onBeschaffung }) {
+                 onBearbeiten, onVerlaengern, onNotieren, tippgeber, beschaffung, setBeschaffung, onBeschaffung, onLoeschen }) {
   /* Kalkulation: gesendetes Angebot wieder öffnen und neu senden */
   const [ueberarbeiten, setUeberarbeiten] = useState(false);
   const [vars, setVars] = useState(
@@ -8264,6 +8264,25 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
               </div>
             ))}
           </div>
+
+          {/* Nur die Geschäftsführung: Vorgang endgültig löschen, z. B. Testkunden */}
+          {onLoeschen && user.rolle === "Geschäftsführung" && (
+            <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.warn }}>
+              <div className="text-sm mb-1">Vorgang löschen</div>
+              <p className="text-xs mb-3" style={{ color: C.muted }}>
+                Für Testkunden und Fehleingaben. Der Vorgang verschwindet mit allen Dateien, Angeboten und Provisionsangaben
+                für alle Rollen. Das lässt sich nicht rückgängig machen.
+              </p>
+              <Btn variante="gefahr" icon={Trash2} onClick={() => {
+                const name = (a.kunde && a.kunde.firma) || a.id;
+                if (!window.confirm("„" + name + "“ (" + a.id + ") endgültig löschen?")) return;
+                if (["uebermittelt", "einreichung", "bestaetigt", "abgeschlossen"].includes(a.status)
+                    && !window.confirm("Achtung: Dieser Vorgang ist schon beim Versorger" + (a.status === "abgeschlossen" ? " und abgeschlossen" : "")
+                      + ". Provisionen und Abrechnungen dazu gehen mit verloren. Wirklich löschen?")) return;
+                onLoeschen(a);
+              }}>Vorgang endgültig löschen</Btn>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -20969,7 +20988,18 @@ export function PortalApp({ pruefung } = {}) {
         alleAnfragen={anfragenSicht}
         onZurueck={zurueckGehen} onUpdate={(a) => speichern(a)}
         onBearbeiten={(a) => { setOffen(null); setEntwurf(a); }}
-        onVerlaengern={verlaengern} onNotieren={notieren} />
+        onVerlaengern={verlaengern} onNotieren={notieren}
+        onLoeschen={(x) => {
+          setAnfragen((l) => l.filter((y) => y.id !== x.id));
+          /* Dateien des Vorgangs im Speicher entfernen (nur die Geschäftsführung darf das) */
+          try {
+            sb.storage.from("dateien").list("anfragen/" + x.id, { limit: 1000 }).then(({ data }) => {
+              const pfade = (data || []).map((d) => "anfragen/" + x.id + "/" + d.name);
+              if (pfade.length) sb.storage.from("dateien").remove(pfade);
+            }).catch(() => {});
+          } catch (e) { /* ohne Dateispeicher (Bautest) */ }
+          setOffen(null);
+        }} />
     );
   } else if (listenAnsicht) {
     inhalt = (
