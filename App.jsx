@@ -11,7 +11,7 @@ import {
 import {
   sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
   schonBekannt, anmelden, abmelden, meineId, einladungPruefen, einladungEinloesen, dateiInhalt, passwortAendern,
-  passwortVergessen, zugangSetzen, kundenangebot, kundenlinksLaden,
+  passwortVergessen, zugangSetzen, kundenangebot, kundenlinksLaden, kundenlinksFuer,
 } from "./datenbank.js";
 
 
@@ -6952,14 +6952,44 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
   const schnell = vertrieb || user.rolle === "Geschäftsführung";
   /* annehmen kann man erst, wenn das Angebot beim Kunden ist */
   const annehmbar = menge_.filter((a) => a.status === "angebot" && a.angebotVersendet);
+  /* Was Kunden mit dem Angebotslink gemacht haben: geöffnet, unterschrieben */
+  const [links, setLinks] = useState({});
+  const linkIds = menge_.filter((a) => a.status === "angebot" && a.angebotVersendet && a.angebotVersendet.perLink && istBeteiligt(a, user.id)).map((a) => a.id);
+  useEffect(() => {
+    if (!vertrieb || !linkIds.length) return;
+    let aus = false;
+    const holen = () => kundenlinksFuer(linkIds).then((zeilen) => {
+      if (aus) return;
+      const je = {};
+      zeilen.forEach((z) => {
+        const d = z.daten || {}, alt = je[z.anfrage_id] || {};
+        const g = (d.geoeffnet || []).slice(-1)[0];
+        je[z.anfrage_id] = { angenommen: alt.angenommen || d.angenommen || null,
+          geoeffnet: [alt.geoeffnet, g].filter(Boolean).sort().slice(-1)[0] || null };
+      });
+      setLinks(je);
+    }).catch(() => {});
+    holen();
+    const t = setInterval(holen, 60000);
+    return () => { aus = true; clearInterval(t); };
+  }, [vertrieb, linkIds.join(",")]);
+  const uhr = (iso) => { try { return new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr"; } catch (e) { return ""; } };
+
   /* Zu tun für den Vertriebspartner, das Dringendste zuerst */
   const zuTun = vertrieb ? menge_.filter((a) => istBeteiligt(a, user.id)).map((a) => {
+    const l = links[a.id];
+    if (a.status === "angebot" && l && l.angenommen) return { a, rang: -1, farbe: C.ok, text: "Kunde hat unterschrieben: Auftrag bestätigen" };
+    if (a.status === "angebot" && l && l.geoeffnet) return { a, rang: 1.5, farbe: C.strom, text: "Kunde hat das Angebot geöffnet (" + uhr(l.geoeffnet) + "): jetzt anrufen" };
     if (a.status === "klaerfall") return { a, rang: 0, farbe: C.warn, text: "Unterlagen nachreichen" };
     if (a.status === "angebot" && !a.angebotVersendet) return { a, rang: 1, farbe: C.ok, text: "Angebot an den Kunden schicken" };
     if (a.status === "angebot") return { a, rang: 2, farbe: C.ok, text: "Zusage des Kunden erfassen" };
     if (a.status === "entwurf") return { a, rang: 3, farbe: C.muted, text: "Entwurf fertigstellen und senden" };
     return null;
   }).filter(Boolean).sort((x, y) => x.rang - y.rang) : [];
+  const morgen = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); })();
+  const termineBald = vertrieb ? (termine || [])
+    .filter((t) => (t.fuerId || "") === user.id && !t.ergebnis && [heute(), morgen].includes(t.datum))
+    .sort((x, y) => (x.datum + (x.zeit || "")).localeCompare(y.datum + (y.zeit || ""))) : [];
   const auftragEinreichen = () => annehmbar.length === 1
     ? onOeffnen(annehmbar[0].id)
     : onListe("Auftrag einreichen: Angebot wählen", annehmbar);
@@ -7016,8 +7046,20 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
 
       {vertrieb && (
         <Karte titel="Zu tun für dich"
-          rechts={<span className="text-xs" style={{ color: C.muted }}>{zuTun.length ? zuTun.length + " offen" : "alles erledigt"}</span>}>
-          {zuTun.length === 0 && (
+          rechts={<span className="text-xs" style={{ color: C.muted }}>{zuTun.length + termineBald.length ? (zuTun.length + termineBald.length) + " offen" : "alles erledigt"}</span>}>
+          {termineBald.map((t, i) => (
+            <button key={t.id} onClick={() => onOeffnen(null, "kalender")}
+              className="w-full text-left flex items-center gap-3 px-4 py-3 text-sm"
+              style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              <Calendar size={15} color={C.gas} className="flex-shrink-0" />
+              <span className="flex-1 min-w-0">
+                <span className="block" style={{ color: C.gas }}>Termin {t.datum === heute() ? "heute" : "morgen"}{t.zeit ? " um " + t.zeit + " Uhr" : ""}</span>
+                <span className="block text-xs truncate" style={{ color: C.muted }}>{(t.kunde && t.kunde.firma) || t.titel || "Termin"}{t.ort ? " · " + t.ort : ""}</span>
+              </span>
+              <ChevronRight size={16} color={C.muted} />
+            </button>
+          ))}
+          {zuTun.length === 0 && termineBald.length === 0 && (
             <div className="px-4 py-4 text-sm" style={{ color: C.muted }}>
               Gerade ist nichts von dir gefragt. Sobald ein Angebot kommt oder Unterlagen fehlen, steht es hier.
             </div>
@@ -7025,7 +7067,7 @@ function VertriebsUebersicht({ anfragen, mitarbeiter, user, onOeffnen, onListe, 
           {zuTun.map(({ a, farbe, text }, i) => (
             <button key={a.id} onClick={() => onOeffnen(a.id)}
               className="w-full text-left flex items-center gap-3 px-4 py-3 text-sm"
-              style={{ borderTop: i ? "1px solid " + C.line : "none" }}>
+              style={{ borderTop: i || termineBald.length ? "1px solid " + C.line : "none" }}>
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: farbe }} />
               <span className="flex-1 min-w-0">
                 <span className="block" style={{ color: farbe === C.muted ? C.text : farbe }}>{text}</span>

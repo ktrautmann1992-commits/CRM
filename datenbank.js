@@ -420,3 +420,11 @@ export async function kundenlinksLaden(anfrageId) {
   if (error) throw new Error(error.message);
   return data || [];
 }
+
+/* Kundenlinks mehrerer Vorgänge auf einmal (für die Startseite: geöffnet, unterschrieben) */
+export async function kundenlinksFuer(anfrageIds) {
+  if (!anfrageIds || !anfrageIds.length) return [];
+  const { data, error } = await sb.from("kundenlinks").select("anfrage_id, daten, erstellt").in("anfrage_id", anfrageIds);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
