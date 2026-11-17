@@ -14,7 +14,16 @@ await build({
   stdin: {
     contents: `import React from "react";
       import { renderToString } from "react-dom/server";
-      import { PortalApp, PRUEFDATEN } from "./App.jsx";
+      import { PortalApp, PRUEFDATEN, teilRegistrieren } from "./App.jsx";
+      /* ausgelagerte Programmteile gleich mitladen, damit der Bautest auch sie rendert */
+      import * as T_beschaffung from "./beschaffung.jsx"; teilRegistrieren("beschaffung", T_beschaffung);
+      import * as T_pdf from "./pdf.jsx"; teilRegistrieren("pdf", T_pdf);
+      import * as T_verwaltung from "./verwaltung.jsx"; teilRegistrieren("verwaltung", T_verwaltung);
+      import * as T_innendienst from "./innendienst.jsx"; teilRegistrieren("innendienst", T_innendienst);
+      import * as T_selten from "./selten.jsx"; teilRegistrieren("selten", T_selten);
+      import * as T_kunde from "./kunde.jsx"; teilRegistrieren("kunde", T_kunde);
+      import * as T_vorgang from "./vorgang.jsx"; teilRegistrieren("vorgang", T_vorgang);
+      import * as T_vertrieb from "./vertrieb.jsx"; teilRegistrieren("vertrieb", T_vertrieb);
       export const rendern = (pruefung) => renderToString(React.createElement(PortalApp, { pruefung }));
       export { PRUEFDATEN };`,
     resolveDir: process.cwd(), loader: "jsx",

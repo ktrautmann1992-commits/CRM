@@ -12,8 +12,14 @@ eine Region beschränken. Deutschsprachig, komplett.
 - **Der Nutzer arbeitet ausschließlich am Handy.** Jede Anleitung muss am
   iPhone in Chrome durchführbar sein. Keine Schritte, die einen Rechner
   voraussetzen, ohne das zu sagen.
-- **`App.jsx` ist eine einzige Datei mit über 10.000 Zeilen.** Das ist
-  gewollt. Nicht ohne Auftrag aufteilen.
+- **`App.jsx` ist die Hauptdatei.** Seit v5.40 (auf Wunsch, für die Ladezeit) liegen
+  selten oder nur von einzelnen Rollen gebrauchte Teile in eigenen Dateien, die erst bei
+  Bedarf geladen werden: `beschaffung.jsx`, `pdf.jsx`, `verwaltung.jsx`, `innendienst.jsx`,
+  `selten.jsx`, `vorgang.jsx`, `vertrieb.jsx`, `kunde.jsx`. Sie importieren gemeinsame
+  Bausteine aus `App.jsx` (Exportliste am Dateiende). In `App.jsx` stehen an ihrer Stelle
+  Platzhalter (`teilKomponente`, `teilFunktion`); `TEIL_LADER` listet die Teile, der Bautest
+  registriert sie (`teilRegistrieren`). Neue Teile: Lader, Bautest-Import und Exportliste ergänzen.
+  Nicht weiter aufteilen ohne Auftrag.
 - **Nach jeder Änderung bauen** (siehe unten). Ein Fehler im Build bedeutet
   eine weiße Seite für den gesamten Vertrieb.
 
@@ -26,7 +32,7 @@ npm install && npm run build                                     # vollständige
 ```
 
 Der Bau erzeugt `dist/` mit Inhaltskennung im Dateinamen
-(`app.8d60adf6.js`). `dist/` ist in `.gitignore` und gehört nicht ins
+(`app.8d60adf6.js`, die Teile als `teil-*.js`, ESM mit esbuild `--splitting`). `dist/` ist in `.gitignore` und gehört nicht ins
 Repository — Netlify baut selbst.
 
 **Versionskonstante hochzählen.** In `App.jsx` oben steht:
@@ -49,7 +55,8 @@ Push auf `main` → Netlify baut und veröffentlicht automatisch auf
 
 | Datei | Zweck |
 |---|---|
-| `App.jsx` | Die gesamte Anwendung |
+| `App.jsx` | Hauptprogramm: Start, Navigation, gemeinsame Bausteine, Übersichten |
+| `vorgang.jsx`, `vertrieb.jsx`, … | Ausgelagerte Teile, bei Bedarf geladen (siehe oben) |
 | `main.jsx` | Einstiegspunkt, hängt App in das DOM |
 | `build.mjs` | Bau mit esbuild und Tailwind, Inhaltskennung, `_headers` |
 | `index.html` | Grundgerüst, bindet Manifest und Hintergrunddienst ein |

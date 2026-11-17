@@ -15,7 +15,9 @@ execSync(
 );
 
 execSync(
-  'npx esbuild main.jsx --bundle --minify --format=iife --define:process.env.NODE_ENV=\'"production"\' --outfile=dist/assets/app.js',
+  /* ESM mit Aufteilung: app.js ist klein, gemeinsame Teile und die ausgelagerten Programmteile
+     (Beschaffung, PDF, Verwaltung …) liegen in eigenen Dateien und werden erst bei Bedarf geladen */
+  'npx esbuild main.jsx --bundle --minify --format=esm --splitting --define:process.env.NODE_ENV=\'"production"\' --outdir=dist/assets --entry-names=app --chunk-names=teil-[name]-[hash]',
   { stdio: "inherit" }
 );
 
