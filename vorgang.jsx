@@ -129,6 +129,22 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
   const optionen = anlegenFuer(user, mitarbeiter);
   const stromStellen = a.lieferstellen.filter((l) => l.medium === "strom");
   const gasStellen = a.lieferstellen.filter((l) => l.medium === "gas");
+  /* Wofür soll angeboten werden? Bestimmt, welche Lieferstellen gezeigt werden */
+  const sparte = stromStellen.length && gasStellen.length ? "beide" : gasStellen.length ? "gas" : "strom";
+  const brauchtSparte = (m) => sparte === "beide" || sparte === m;
+  const leerL = (l) => !l.versorger && !l.zaehlernummer && !l.maloId && !l.verbrauch && !dateienVon(l.abrechnung).length;
+  const sparteWaehlen = (neu) => {
+    const behalten = (m) => neu === "beide" || neu === m;
+    const weg = a.lieferstellen.filter((l) => !behalten(l.medium));
+    if (weg.some((l) => !leerL(l)) && !window.confirm("Es gibt schon ausgefüllte " + (neu === "gas" ? "Strom" : "Erdgas")
+      + "-Lieferstellen. Sollen sie entfernt werden?")) return;
+    let ls = a.lieferstellen.filter((l) => behalten(l.medium));
+    ["strom", "gas"].forEach((m) => {
+      if (behalten(m) && !ls.some((l) => l.medium === m))
+        ls = [...ls, { ...leereLieferstelle(m), adresseVon: "kunde", strasse: a.kunde.strasse, plz: a.kunde.plz, ort: a.kunde.ort }];
+    });
+    setA({ ...a, lieferstellen: ls });
+  };
 
   const Schritte = ["Kunde", "Lieferstellen", "Angebotswunsch", "Prüfen & senden"];
 
@@ -199,11 +215,6 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
               onChange={(v) => setK("ansprechpartner", v)} fehler={geprueft && !a.kunde.ansprechpartner} />
             <Feld label="Telefon" value={a.kunde.telefon} onChange={(v) => setK("telefon", v)} />
             <Feld label="E-Mail" value={a.kunde.email} onChange={(v) => setK("email", v)} breit />
-            <div className="sm:col-span-2">
-              <Feld label="Steuernummer oder USt-IdNr." value={a.kunde.steuernummer || ""} onChange={(v) => setK("steuernummer", v)}
-                placeholder="z. B. DE123456789 oder 12/345/67890" />
-              <p className="text-xs mt-1" style={{ color: C.muted }}>Freiwillig. Manche Versorger verlangen sie auf der Vollmacht; sie wird dort mit eingedruckt.</p>
-            </div>
             <div className="sm:col-span-2 p-4 rounded"
                  style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
               <span className="block text-xs mb-2" style={{ color: C.muted }}>Wie kam der Kunde zustande?</span>
@@ -260,18 +271,44 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
               </div>
             </div>
 
-            <div className="sm:col-span-2">
-              <Feld label="Branche" value={a.kunde.branche || ""} onChange={(v) => setK("branche", v)}
-                placeholder="z. B. Hotellerie, Metallverarbeitung, Pflege" breit />
-              <p className="text-xs mt-1" style={{ color: C.muted }}>
-                Freiwillig, hilft der Kalkulation aber sehr: nicht jeder Versorger nimmt jede Branche.
-              </p>
-            </div>
+            <details className="sm:col-span-2 rounded" style={{ border: "1px solid " + C.line }}
+              open={!!(a.kunde.branche || a.kunde.steuernummer)}>
+              <summary className="px-4 py-3 text-sm cursor-pointer" style={{ color: C.text }}>
+                Weitere Angaben (freiwillig): Branche, Steuernummer
+              </summary>
+              <div className="px-4 pb-4 grid gap-4">
+                <div>
+                  <Feld label="Branche" value={a.kunde.branche || ""} onChange={(v) => setK("branche", v)}
+                    placeholder="z. B. Hotellerie, Metallverarbeitung, Pflege" breit />
+                  <p className="text-xs mt-1" style={{ color: C.muted }}>
+                    Hilft der Kalkulation sehr: nicht jeder Versorger nimmt jede Branche.
+                  </p>
+                </div>
+                <div>
+                  <Feld label="Steuernummer oder USt-IdNr." value={a.kunde.steuernummer || ""} onChange={(v) => setK("steuernummer", v)}
+                    placeholder="z. B. DE123456789 oder 12/345/67890" />
+                  <p className="text-xs mt-1" style={{ color: C.muted }}>Manche Versorger verlangen sie auf der Vollmacht; sie wird dort mit eingedruckt.</p>
+                </div>
+              </div>
+            </details>
           </div>
         )}
 
         {schritt === 2 && (
           <div className="space-y-6">
+            <div>
+              <span className="block text-sm mb-2">Wofür soll angeboten werden?</span>
+              <div className="grid grid-cols-3 gap-2">
+                {[["strom", "Strom", Zap, C.strom], ["gas", "Erdgas", Flame, C.gas], ["beide", "Strom und Erdgas", Layers, C.ink]].map(([w, t, Icon, farbe]) => (
+                  <button key={w} onClick={() => sparte !== w && sparteWaehlen(w)}
+                    className="flex flex-col items-center justify-center gap-1 px-2 py-3 rounded text-sm"
+                    style={{ background: sparte === w ? farbe : "#fff", color: sparte === w ? "#fff" : C.text,
+                             border: "2px solid " + (sparte === w ? farbe : C.line), minHeight: 64 }}>
+                    <Icon size={18} /> {t}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="p-4 rounded"
                  style={{ background: a.smartmeter ? "#F1F7F0" : "#F6F8FA", border: "1px solid " + (a.smartmeter ? C.ok : C.line) }}>
               <label className="flex items-start gap-3 text-sm">
@@ -280,12 +317,14 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                 <span>
                   Smartmeter gewünscht
                   <span className="block text-xs mt-0.5" style={{ color: C.muted }}>
-                    Die Kalkulation legt dem Angebot ein Smartmeter-Angebot bei. Dafür brauchst du zu jeder
-                    Lieferstelle die Messlokations-ID (MeLo-ID), sie steht auf der Abrechnung des Kunden.
-                    Wichtig für das Kundengespräch: EGC Energie baut keine Smartmeter ein. Einbau und Betrieb
-                    übernimmt ein zugelassener Smartmeter-Messstellenbetreiber. Er ersetzt den bisherigen
-                    Messstellenbetreiber des Kunden und regelt den Wechsel selbst.
+                    Das Angebot bekommt ein Smartmeter-Angebot dazu. Du brauchst je Lieferstelle die MeLo-ID von der Abrechnung.
                   </span>
+                  {a.smartmeter && (
+                    <span className="block text-xs mt-1" style={{ color: C.muted }}>
+                      Für das Kundengespräch: EGC Energie baut keine Smartmeter ein. Einbau und Betrieb übernimmt ein
+                      zugelassener Smartmeter-Messstellenbetreiber; er ersetzt den bisherigen und regelt den Wechsel selbst.
+                    </span>
+                  )}
                 </span>
               </label>
             </div>
@@ -300,9 +339,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                 <span>
                   Lieferstellenliste hochladen
                   <span className="block text-xs mt-0.5" style={{ color: C.muted }}>
-                    Bei vielen Lieferstellen: Liste des Kunden als Excel- oder CSV-Datei beifügen,
-                    statt jede Stelle einzeln zu erfassen. Eine Blankovorlage findest du unter
-                    Unterlagen im Bereich Dokumente.
+                    Bei vielen Lieferstellen statt Einzeleingabe (Vorlage unter Unterlagen → Dokumente).
                   </span>
                 </span>
               </label>
@@ -320,7 +357,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
             {[
               { medium: "strom", titel: "Strom", stellen: stromStellen },
               { medium: "gas", titel: "Erdgas", stellen: gasStellen },
-            ].map(({ medium, titel, stellen }) => (
+            ].filter(({ medium }) => brauchtSparte(medium)).map(({ medium, titel, stellen }) => (
               <div key={medium}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -358,6 +395,25 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                         )}
                       </div>
                       <div className="p-4 grid sm:grid-cols-2 gap-4">
+                        {/* Rechnung zuerst: bei einer PDF-Rechnung liest das Portal Zählernummer, MaLo und Verbrauch selbst */}
+                        {!l.neueinzug && (
+                          <div className="sm:col-span-2 p-3 rounded space-y-3"
+                               style={{ background: "#EEF6E8", border: "1px solid " + C.ok }}>
+                            <div className="text-sm">Am schnellsten: letzte Versorgerabrechnung hochladen</div>
+                            <p className="text-xs" style={{ color: C.muted }}>
+                              Bei einer PDF-Rechnung liest das Portal Zählernummer, MaLo, Versorger und Verbrauch aus. Du prüfst nur noch.
+                            </p>
+                            <Datei mehrere label="Versorgerabrechnung (PDF oder Foto)" datei={l.abrechnung} annehmen="application/pdf,image/*"
+                              onSet={(f) => setL(l.id, "abrechnung", f)} hinweis="PDF oder Foto hochladen" />
+                            <AbrechnungAuslesen l={l} setL={setL} user={user} />
+                            <div className="sm:w-1/2">
+                              <Select label="Abrechnung aus dem Jahr" value={l.abrechnungJahr || ""}
+                                onChange={(v) => setL(l.id, "abrechnungJahr", v)}
+                                options={[{ value: "", label: "bitte wählen" }, { value: "2025", label: "2025" },
+                                          { value: "2026", label: "2026" }, { value: "2027", label: "2027" }]} />
+                            </div>
+                          </div>
+                        )}
                         <Feld label="Bezeichnung" value={l.bezeichnung}
                           onChange={(v) => setL(l.id, "bezeichnung", v)} placeholder="Haupthaus, Werk 1 …" />
                         <div />
@@ -467,15 +523,6 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                           fehler={geprueft && !l.verbrauch} />
                         <Select label="Zählerart" value={l.zaehlerart}
                           onChange={(v) => setL(l.id, "zaehlerart", v)} options={["SLP", "RLM"]} />
-                        <Datei mehrere label="Versorgerabrechnung (PDF oder Foto)" datei={l.abrechnung} annehmen="application/pdf,image/*"
-                          onSet={(f) => setL(l.id, "abrechnung", f)} hinweis="PDF oder Foto hochladen" />
-                        <AbrechnungAuslesen l={l} setL={setL} user={user} />
-                        {!l.neueinzug && (
-                          <Select label="Abrechnung aus dem Jahr" value={l.abrechnungJahr || ""}
-                            onChange={(v) => setL(l.id, "abrechnungJahr", v)}
-                            options={[{ value: "", label: "bitte wählen" }, { value: "2025", label: "2025" },
-                                      { value: "2026", label: "2026" }, { value: "2027", label: "2027" }]} />
-                        )}
                         <div className="sm:col-span-2 p-3 rounded"
                              style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
                           <label className="flex items-center gap-3 text-sm">
@@ -790,8 +837,11 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 mt-6 pt-5" style={{ borderTop: "1px solid " + C.line }}>
-          {schritt < 4 && <Btn onClick={() => setSchritt(schritt + 1)} icon={ChevronRight}>Weiter</Btn>}
+        {/* fest am unteren Rand: am Handy ohne Scrollen weiter */}
+        <div className="flex flex-wrap gap-2 mt-6 py-3 sticky bottom-0 z-10"
+             style={{ borderTop: "1px solid " + C.line, background: C.paper, boxShadow: "0 -6px 12px -10px rgba(10,22,38,0.25)" }}>
+          {schritt > 1 && <Btn variante="hell" icon={ArrowLeft} onClick={() => { setSchritt(schritt - 1); window.scrollTo(0, 0); }}>Zurück</Btn>}
+          {schritt < 4 && <Btn variante="ok" onClick={() => { setSchritt(schritt + 1); window.scrollTo(0, 0); }} icon={ChevronRight}>Weiter</Btn>}
           {schritt === 4 && a.status && !["entwurf", "klaerfall"].includes(a.status) && (
             <Btn icon={Check} onClick={() => onSpeichern(a)}>Änderungen speichern</Btn>
           )}
@@ -801,6 +851,8 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
               Anfrage an Kalkulation senden
             </Btn>
           )}
+        </div>
+        <div className="flex flex-wrap gap-2 mt-3">
           <Btn variante="hell" onClick={() => onSpeichern(a)}>
             {a.status && !["entwurf", "klaerfall"].includes(a.status) ? "Zwischenspeichern" : "Als Entwurf speichern"}
           </Btn>
