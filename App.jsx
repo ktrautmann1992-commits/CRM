@@ -366,7 +366,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.38 · 17.11.2026 · Angebot per Link an den Kunden: Öffnen sehen, am Handy unterschreiben, Vollmacht und Angebot am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.39 · 17.11.2026 · Beschaffung: Offpeak-Absicherung bei Tal am Tag, Hinweis auf neue Fassung, Angebot per Link an den Kunden: Öffnen sehen, am Handy unterschreiben, Vollmacht und Angebot am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -16413,7 +16413,9 @@ function profilAusPreisen(reihe /* [{ t: Date, preis }] */, land = "") {
 }
 
 /* Hedgearten (Strom), Definitionen der Beschaffung. Je Zeitraum des gewählten Produkts (Cal, Quartal, Monat)
-   entsteht eine Base- und eine Peakleistung; Peak = Mehrleistung in den Peakstunden über Base (nicht negativ).
+   entsteht eine Leistung für die Offpeak- und eine für die Peakstunden. Sie wird in Börsenprodukte zerlegt:
+   Base = die kleinere der beiden, dazu Peak (Mehrleistung in den Peakstunden) oder Offpeak (Mehrleistung in den
+   übrigen Stunden). Liegt die Last tagsüber unter der Nachtlast, wird also mit Base + Offpeak abgesichert, nicht Peak 0.
    menge:      Menge der offenen Positionen = Menge der geschlossenen: je Zone Short-Menge = Long-Menge, kein Preisbezug
    preis:      Werthedge: Wert der offenen = Wert der geschlossenen Positionen, je Zone zur Preiskurve
    preismenge: Long und Short preislich ausgeglichen (über den Zeitraum), dabei so nah wie möglich am Mengenhedge
@@ -16469,17 +16471,19 @@ function jahresBewertung(last, kurve, hedge) {
       x = o.l / (o.n || 1);
       y = q.n ? q.l / q.n : x;
     }
-    return { g, baseMW: Math.max(0, x) * quote, peakMW: Math.max(0, y - x) * quote };
+    const lo = Math.max(0, x), lp = Math.max(0, y), base = Math.min(lo, lp);
+    return { g, baseMW: base * quote, peakMW: (lp - base) * quote, offpeakMW: (lo - base) * quote };
   });
   const hb = new Float64Array(L.length), hp = new Float64Array(L.length);
-  let hedgeMenge = 0, hedgeWert = 0, baseSum = 0, peakSum = 0, baseEnergie = 0;
+  let hedgeMenge = 0, hedgeWert = 0, baseSum = 0, peakSum = 0, offSum = 0, offSt = 0, baseEnergie = 0;
   let shortMenge = 0, longMenge = 0, shortWert = 0, longWert = 0;
   st.forEach((s, i) => {
     const pe = perioden[gruppe(s)];
-    hb[i] = pe.baseMW; hp[i] = s.peak ? pe.peakMW : 0;
+    /* hp: Zusatz über Base in diesem Zeitschritt, Peak in den Peakstunden, sonst Offpeak */
+    hb[i] = pe.baseMW; hp[i] = s.peak ? pe.peakMW : pe.offpeakMW;
     const e = (hb[i] + hp[i]) * dt;
-    hedgeMenge += e; hedgeWert += e * Pr[i]; baseEnergie += hb[i] * dt;
-    baseSum += hb[i]; if (s.peak) peakSum += hp[i];
+    hedgeMenge += e; hedgeWert += e * Pr[i]; baseEnergie += (hb[i] + (s.peak ? 0 : hp[i])) * dt;
+    baseSum += hb[i]; if (s.peak) peakSum += hp[i]; else { offSum += hp[i]; offSt++; }
     const d = L[i] - e;
     if (d > 0) { shortMenge += d; shortWert += d * Pr[i]; } else { longMenge -= d; longWert -= d * Pr[i]; }
   });
@@ -16488,18 +16492,18 @@ function jahresBewertung(last, kurve, hedge) {
     const [off, pk] = zonen[pe.g];
     const alle = off.concat(pk);
     const mittelP = (idx) => idx.length ? idx.reduce((x, i) => x + Pr[i], 0) / idx.length : 0;
-    const e = (pe.baseMW * alle.length + pe.peakMW * pk.length) * dt;
-    const w = alle.reduce((x, i) => x + (pe.baseMW + (st[i].peak ? pe.peakMW : 0)) * dt * Pr[i], 0);
+    const e = (pe.baseMW * alle.length + pe.peakMW * pk.length + pe.offpeakMW * off.length) * dt;
+    const w = alle.reduce((x, i) => x + (pe.baseMW + (st[i].peak ? pe.peakMW : pe.offpeakMW)) * dt * Pr[i], 0);
     return { name: hg.produkt === "monat" ? MONATE_KURZ[pe.g] : hg.produkt === "quartal" ? "Q" + (pe.g + 1) : "Cal",
-      baseMW: pe.baseMW, peakMW: pe.peakMW, menge: e, preis: e ? w / e : 0,
-      basePreis: mittelP(alle), peakPreis: mittelP(pk),
+      baseMW: pe.baseMW, peakMW: pe.peakMW, offpeakMW: pe.offpeakMW, menge: e, preis: e ? w / e : 0,
+      basePreis: mittelP(alle), peakPreis: mittelP(pk), offpeakPreis: mittelP(off),
       last: alle.reduce((x, i) => x + L[i], 0) };
   });
   const rest = wert - hedgeWert;
   return {
     menge, wert, preis: menge ? wert / menge : 0,
     spitze: spitze / dt, benutzung: spitze ? menge / (spitze / dt) : 0, peakAnteil: menge ? peakMenge / menge : 0,
-    baseMW: L.length ? baseSum / L.length : 0, peakMW: peakSt ? peakSum / peakSt : 0,
+    baseMW: L.length ? baseSum / L.length : 0, peakMW: peakSt ? peakSum / peakSt : 0, offpeakMW: offSt ? offSum / offSt : 0,
     hedgeMenge, hedgeWert, hedgePreis: hedgeMenge ? hedgeWert / hedgeMenge : 0, hedgeQuote: menge ? hedgeMenge / menge : 0,
     struktur: rest, strukturProMWh: menge ? rest / menge : 0,
     gewichtBase: hedgeMenge ? baseEnergie / hedgeMenge : 1,
@@ -17710,7 +17714,7 @@ function analyseJahr(form, bw, jahr, spot) {
   /* Preis je Zeitschritt der geschlossenen Menge: Base-Anteil zum Basepreis, Peak-Anteil zum Peakpreis */
   const preisZu = last.stunden.map((s, i) => {
     const mw = e.hb[i] + e.hp[i];
-    return mw && anteil ? (e.hb[i] * wertBaseProMWh + e.hp[i] * wertPeakProMWh) / (anteil * mw) : 0;
+    return mw && anteil ? (e.hb[i] * wertBaseProMWh + e.hp[i] * (s.peak ? wertPeakProMWh : wertBaseProMWh)) / (anteil * mw) : 0;
   });
   return { j, e, stunden: last.stunden, last: last.last, preis: kurve.preis, zu, preisZu, anteil, dt, proTag: opt.proTag };
 }
@@ -17948,11 +17952,11 @@ function AbsicherungsGrafik({ jahre, hedge }) {
   if (!werte.length) return null;
   const B = 760, H = 230, L = 46, R = 12, O = 16, U = 30;
   const n = werte.length, proH = n / 24;   /* 24 Stunden oder 96 Viertelstunden */
-  const oben = Math.max(...werte, j.baseMW + j.peakMW, 0.001) * 1.12;
+  const oben = Math.max(...werte, j.baseMW + Math.max(j.peakMW, j.offpeakMW || 0), 0.001) * 1.12;
   const x = (h) => L + (h * (B - L - R)) / 24;
   const y = (v) => O + (H - O - U) * (1 - v / oben);
   const peakTag = art === 0; /* Peak gilt Montag bis Freitag 8 bis 20 Uhr */
-  const absich = (h) => j.baseMW + (peakTag && h >= 8 && h < 20 ? j.peakMW : 0);
+  const absich = (h) => j.baseMW + (peakTag && h >= 8 && h < 20 ? j.peakMW : j.offpeakMW || 0);
   const stufen = Array.from({ length: 24 }, (_, h) => "L" + x(h) + "," + y(absich(h)) + " L" + x(h + 1) + "," + y(absich(h))).join(" ");
   const hg = hedgeVon(hedge);
   const mehrere = hg.produkt !== "cal";
@@ -17991,7 +17995,7 @@ function AbsicherungsGrafik({ jahre, hedge }) {
       </svg>
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs mt-2" style={{ color: C.muted }}>
         <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-sm" style={{ background: C.strom }} />mittlere Last {j.jahr}{proH > 1 ? " je Viertelstunde" : ""}</span>
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "3px solid #6CB43B" }} />{(HEDGE_ARTEN.find((x2) => x2.id === hg.art) || HEDGE_ARTEN[0]).name} Base + Peak{mehrere ? " (Jahresmittel der " + (hg.produkt === "monat" ? "Monats" : "Quartals") + "bänder)" : ""}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "3px solid #6CB43B" }} />{(HEDGE_ARTEN.find((x2) => x2.id === hg.art) || HEDGE_ARTEN[0]).name} {(j.offpeakMW || 0) > 0.0005 ? "Base + Offpeak" : "Base + Peak"}{mehrere ? " (Jahresmittel der " + (hg.produkt === "monat" ? "Monats" : "Quartals") + "bänder)" : ""}</span>
         <span className="inline-flex items-center gap-1.5"><span className="inline-block w-4" style={{ borderTop: "2px dashed #0A1626" }} />Base {num(j.baseMW * 1000, 0)} kW</span>
         {peakTag && <span className="inline-flex items-center gap-1.5"><span className="inline-block w-3 h-3" style={{ background: "#F3F6FA", border: "1px solid " + C.line }} />Peakzeit 8–20 Uhr</span>}
       </div>
@@ -18192,11 +18196,11 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
         last.stunden.forEach((x, k) => { tp[x.art][x.q][0] += last.last[k] / last.dt; tp[x.art][x.q][1]++; });
         const tagesprofil = tp.map((a) => a.map(([sum, n]) => (n ? Math.round((sum / n) * 1000) / 1000 : 0)));
         return { jahr: j.jahr, mengeKwh: menge, menge: e.menge, preis: e.preis, hedgePreis: e.hedgePreis, hedgeQuote: e.hedgeQuote,
-                 strukturProMWh: e.strukturProMWh, baseMW: e.baseMW, peakMW: e.peakMW, benutzung: e.benutzung,
+                 strukturProMWh: e.strukturProMWh, baseMW: e.baseMW, peakMW: e.peakMW, offpeakMW: e.offpeakMW, benutzung: e.benutzung,
                  peakAnteil: e.peakAnteil, gewichtBase: e.gewichtBase, spitze: e.spitze,
                  spotPreis, spotExakt: sp ? sp.exakt : null, aeProMWh: aeJ ? aeJ.proMWh : 0, basis, szenarien,
                  ae: aeJ ? { roh: rundeTief(aeJ.roh), deltaAnteil: rundeTief(aeJ.deltaAnteil), vor: rundeTief(aeJ.vor), nach: rundeTief(aeJ.nach) } : null,
-                 hinweise: kurve.hinweise || [], perioden: rundeTief(e.perioden.map((x) => [x.baseMW, x.peakMW, x.menge, x.preis, x.basePreis, x.peakPreis])),
+                 hinweise: kurve.hinweise || [], perioden: rundeTief(e.perioden.map((x) => [x.baseMW, x.peakMW, x.menge, x.preis, x.basePreis, x.peakPreis, x.offpeakMW, x.offpeakPreis])),
                  periodenNamen: e.perioden.map((x) => x.name),
                  monate: kurve.monate ? { base: rundeTief(kurve.monate.base), peak: rundeTief(kurve.monate.peak) } : null, tagesprofil };
       });
@@ -18714,6 +18718,7 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
           const spalten = [
             ["Menge MWh", (j) => num(j.menge, 0)],
             ...(spotErg ? [] : [["Base MW", (j) => num(j.baseMW, 3)], ["Peak MW", (j) => num(j.peakMW, 3)],
+              ...(erg.jahre.some((j) => j.offpeakMW > 0) ? [["Offpeak MW", (j) => num(j.offpeakMW || 0, 3)]] : []),
               ["Absicherung", (j) => num((j.hedgeQuote == null ? 1 : j.hedgeQuote) * 100, 0) + " %"], ["Hedge €/MWh", (j) => num(j.hedgePreis, 2)],
               ["Struktur/Rest €/MWh", (j) => num(j.strukturProMWh, 2)]]),
             ...(mitSpot ? [["Spot €/MWh", (j) => j.spotPreis == null ? "–" : num(j.spotPreis, 2)]] : []),
@@ -18812,9 +18817,9 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
                 ))}
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-xs min-w-[520px]" style={tz}>
+                <table className="w-full text-xs min-w-[680px]" style={tz}>
                   <thead><tr style={{ color: C.muted }}>
-                    {["Zeitraum", "Base MW", "Peak MW", "Base €/MWh", "Peak €/MWh", "Hedge MWh", "Hedge €/MWh"].map((t, i) =>
+                    {["Zeitraum", "Base MW", "Peak MW", "Offpeak MW", "Base €/MWh", "Peak €/MWh", "Offpeak €/MWh", "Hedge MWh", "Hedge €/MWh"].map((t, i) =>
                       <th key={t} className={"py-1 pr-3 font-normal " + (i ? "text-right" : "text-left")}>{t}</th>)}
                   </tr></thead>
                   <tbody>
@@ -18822,7 +18827,9 @@ function BeschaffungDetail({ b, user, mitarbeiter, onAendern, onZurueck, onLoesc
                       <tr key={i} style={{ borderTop: "1px solid " + C.line }}>
                         <td className="py-1.5 pr-3">{(pj.periodenNamen || [])[i]} {pj.jahr}</td>
                         <td className="py-1.5 pr-3 text-right">{num(x[0], 3)}</td><td className="py-1.5 pr-3 text-right">{num(x[1], 3)}</td>
+                        <td className="py-1.5 pr-3 text-right">{num(x[6] || 0, 3)}</td>
                         <td className="py-1.5 pr-3 text-right">{num(x[4], 2)}</td><td className="py-1.5 pr-3 text-right">{num(x[5], 2)}</td>
+                        <td className="py-1.5 pr-3 text-right">{x[7] != null ? num(x[7], 2) : "–"}</td>
                         <td className="py-1.5 pr-3 text-right">{num(x[2], 1)}</td><td className="py-1.5 pr-3 text-right">{num(x[3], 2)}</td>
                       </tr>
                     ))}
@@ -19010,7 +19017,7 @@ function beschaffungPdf(b, mitarbeiter) {
         } else {
           z.push("Menge " + num(j.menge, 0) + " MWh · " + (HEDGE_ARTEN.find((x) => x.id === hg.art) || HEDGE_ARTEN[0]).name + " mit "
             + (hg.produkt === "monat" ? "Monatsprodukten" : hg.produkt === "quartal" ? "Quartalsprodukten" : "Cal-Produkten") + ", " + num((j.hedgeQuote == null ? 1 : j.hedgeQuote) * 100, 0)
-            + " % abgesichert · im Mittel " + num(j.baseMW, 3) + " MW Base und " + num(j.peakMW, 3) + " MW Peak");
+            + " % abgesichert · im Mittel " + num(j.baseMW, 3) + " MW Base, " + num(j.peakMW, 3) + " MW Peak und " + num(j.offpeakMW || 0, 3) + " MW Offpeak");
           z.push("Absicherung heute " + num(j.hedgePreis, 2) + " €/MWh · Struktur/Rest " + num(j.strukturProMWh, 2) + " €/MWh"
             + (erg.ae ? " · Ausgleichsenergie " + num(j.aeProMWh || 0, 2) + " €/MWh" : "") + " · Lastgang gesamt "
             + num(lastgangPreis(j) + (erg.ae ? j.aeProMWh || 0 : 0), 2) + " €/MWh · Benutzungsstunden " + num(j.benutzung) + " h");
@@ -20084,7 +20091,37 @@ export default function App() {
   /* persönlicher Link eines Kunden: eigene Seite ohne Anmeldung */
   const kundenlink = (() => { try { return new URLSearchParams(window.location.search).get("angebot") || ""; } catch (e) { return ""; } })();
   if (/^[0-9a-f]{48}$/.test(kundenlink)) return <Fehlerschutz><KundenAngebot link={kundenlink} /></Fehlerschutz>;
-  return <Fehlerschutz><PortalApp /></Fehlerschutz>;
+  return <Fehlerschutz><PortalApp /><NeueFassung /></Fehlerschutz>;
+}
+
+/* Hinweis bei neuer Fassung: Ein offener Tab behält sonst die alte Fassung, bis jemand neu lädt.
+   Prüft beim Zurückkehren zum Tab und alle 10 Minuten, ob die Startseite auf eine andere Programmdatei zeigt. */
+function NeueFassung() {
+  const [neu, setNeu] = useState(false);
+  useEffect(() => {
+    const eigene = (() => { const t = document.querySelector('script[src*="/assets/app."]'); return t ? new URL(t.src, location.href).pathname : ""; })();
+    if (!/\/assets\/app\.[0-9a-f]+\.js$/.test(eigene)) return;   /* nur in der ausgelieferten Fassung */
+    let aus = false;
+    const pruefen = () => {
+      if (document.visibilityState === "hidden") return;
+      fetch("/?fassung=" + Date.now(), { cache: "no-store" }).then((r) => r.ok ? r.text() : "").then((html) => {
+        const m = html && html.match(/\/assets\/app\.[0-9a-f]+\.js/);
+        if (!aus && m && m[0] !== eigene) setNeu(true);
+      }).catch(() => {});
+    };
+    const t = setInterval(pruefen, 600000);
+    document.addEventListener("visibilitychange", pruefen);
+    return () => { aus = true; clearInterval(t); document.removeEventListener("visibilitychange", pruefen); };
+  }, []);
+  if (!neu) return null;
+  return (
+    <div style={{ position: "fixed", left: 12, right: 12, bottom: 12, zIndex: 60, display: "flex", justifyContent: "center" }}>
+      <button onClick={() => location.reload()} className="inline-flex items-center gap-2 px-4 py-3 rounded-lg text-sm shadow-lg"
+        style={{ background: C.ink, color: "#fff", border: "2px solid #6CB43B" }}>
+        <RotateCcw size={16} /> Neue Fassung des Portals verfügbar – jetzt neu laden
+      </button>
+    </div>
+  );
 }
 
 /* `pruefung` nur für den Bautest (pruefung.mjs): rendert eine Ansicht mit Beispieldaten,
