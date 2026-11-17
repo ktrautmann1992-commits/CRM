@@ -12,6 +12,7 @@
    - SMTP_BENUTZER               optional, Vorgabe portal@egc-energie.de */
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 import nodemailer from "npm:nodemailer@6.9.16";
+import { mailkopf } from "./mailkopf.ts";
 
 /* Die Adresse portal.egc-energie.de ist nicht eingerichtet (kein Zertifikat): immer die Netlify-Adresse */
 const PORTAL = "https://egc-vertriebsportal.netlify.app";
@@ -35,8 +36,7 @@ function html(titel: string, absaetze: string[], fuss: string) {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EFF1F4;padding:24px 12px">
 <tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:8px;overflow:hidden">
-<tr><td style="background:#0A1626;padding:18px 24px;color:#ffffff;font-size:18px;font-weight:bold">EGC <span style="color:#6CB43B">Energie</span></td></tr>
-<tr><td style="height:4px;background:#6CB43B"></td></tr>
+<!--EGC-KOPF-->
 <tr><td style="padding:24px">
 <h1 style="font-size:19px;margin:0 0 14px;color:#0A1626">${esc(titel)}</h1>
 ${absaetze.map((p) => `<p style="font-size:15px;line-height:1.5;margin:0 0 12px">${p}</p>`).join("\n")}
@@ -172,6 +172,7 @@ async function versenden(mails: { an: string[]; betreff: string; titel: string; 
     host: "smtp.strato.de", port: 465, secure: true, auth: { user: benutzer, pass: passwort },
   });
 
+  const kopf = await mailkopf();
   let gesendet = 0;
   const fehler: string[] = [];
   for (const m of mails) {
@@ -179,7 +180,7 @@ async function versenden(mails: { an: string[]; betreff: string; titel: string; 
     for (const an of [...new Set(m.an)]) {
       try {
         await post.sendMail({ from: `"EGC Energie Vertriebsportal" <${benutzer}>`, to: an,
-          subject: m.betreff, html: html(m.titel, m.text, fuss) });
+          subject: m.betreff, html: html(m.titel, m.text, fuss).replace("<!--EGC-KOPF-->", kopf.html), attachments: kopf.anhaenge });
         gesendet++;
       } catch (e) { fehler.push(String((e as Error)?.message || e).slice(0, 200)); }
     }

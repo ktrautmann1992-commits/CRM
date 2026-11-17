@@ -17,6 +17,7 @@
    Geheimnisse: SMTP_PASSWORT (Postfach portal@egc-energie.de), optional SMTP_BENUTZER. */
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 import nodemailer from "npm:nodemailer@6.9.16";
+import { mailkopf } from "./mailkopf.ts";
 import { stempeln, unterschriftPruefen, unterschriftsstellen } from "./stempel.js";
 
 const PORTAL = "https://egc-vertriebsportal.netlify.app";
@@ -71,10 +72,11 @@ async function mailSenden(m: { an: string; von?: string; antwortAn?: string; kop
   const passwort = Deno.env.get("SMTP_PASSWORT");
   if (!passwort) throw new Error("SMTP_PASSWORT fehlt");
   const post = nodemailer.createTransport({ host: "smtp.strato.de", port: 465, secure: true, auth: { user: benutzer, pass: passwort } });
+  const kopf = await mailkopf();
   await post.sendMail({
     from: `"${String(m.von || "EGC Energie").replace(/["\r\n]/g, "")}" <${benutzer}>`,
     to: m.an, ...(m.antwortAn ? { replyTo: m.antwortAn } : {}), ...(m.kopie ? { cc: m.kopie } : {}),
-    subject: m.betreff, html: m.html, attachments: m.anhaenge || [],
+    subject: m.betreff, html: m.html.replace("<!--EGC-KOPF-->", kopf.html), attachments: [...kopf.anhaenge, ...(m.anhaenge || [])],
   });
 }
 
@@ -84,8 +86,7 @@ function mailHtml(titel: string, teile: string[], knopf: { text: string; url: st
   return `<!doctype html><html><body style="margin:0;background:#EFF1F4;font-family:Helvetica,Arial,sans-serif;color:#16202C">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EFF1F4;padding:20px 10px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:8px;overflow:hidden">
-<tr><td style="background:#0A1626;padding:18px 24px;color:#ffffff;font-size:18px;font-weight:bold">EGC <span style="color:#6CB43B">Energie</span></td></tr>
-<tr><td style="height:4px;background:#6CB43B"></td></tr>
+<!--EGC-KOPF-->
 <tr><td style="padding:24px">
 <h1 style="font-size:19px;margin:0 0 14px;color:#0A1626">${esc(titel)}</h1>
 ${teile.map((t) => (t.startsWith("<table") || t.startsWith("<div") ? t : p(t))).join("\n")}

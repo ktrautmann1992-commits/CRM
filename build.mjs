@@ -54,6 +54,8 @@ execSync("npx esbuild qrcode-baustein.js --bundle --minify --format=iife --outfi
 await cp("logo-weiss.png", "dist/assets/logo-weiss.png");
 /* Logo für die E-Mail-Signatur: wird von den Mailprogrammen über die volle Adresse geladen */
 await cp("signatur-logo.png", "dist/assets/signatur-logo.png");
+/* Kopf der E-Mails aus den Server-Funktionen (Logo auf dunkelblauem Grund), wird beim Versand geladen */
+await cp("mail-kopf.png", "dist/assets/mail-kopf.png");
 /* PDF-Anzeige im Portal (pdf.js, Fassung für ältere Browser), nur bei Bedarf geladen */
 await mkdir("dist/assets/pdfjs-3.11.174", { recursive: true });
 await cp("node_modules/pdfjs-dist/legacy/build/pdf.min.js", "dist/assets/pdfjs-3.11.174/pdf.min.js");

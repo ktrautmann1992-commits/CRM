@@ -13,6 +13,7 @@
    Geheimnisse: SMTP_PASSWORT (Postfach portal@egc-energie.de), optional SMTP_BENUTZER. */
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 import nodemailer from "npm:nodemailer@6.9.16";
+import { mailkopf } from "./mailkopf.ts";
 
 const PORTAL = "https://egc-vertriebsportal.netlify.app";
 const ROLLEN = ["Vertriebspartner", "Teamleiter", "Leitung Vertrieb", "Kalkulation", "Vertragsmanagement",
@@ -50,8 +51,7 @@ async function mailSenden(an: string, betreff: string, titel: string, absaetze: 
   const html = `<!doctype html><html><body style="margin:0;background:#EFF1F4;font-family:Helvetica,Arial,sans-serif;color:#16202C">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EFF1F4;padding:24px 12px"><tr><td align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:8px;overflow:hidden">
-<tr><td style="background:#0A1626;padding:18px 24px;color:#ffffff;font-size:18px;font-weight:bold">EGC <span style="color:#6CB43B">Energie</span></td></tr>
-<tr><td style="height:4px;background:#6CB43B"></td></tr>
+<!--EGC-KOPF-->
 <tr><td style="padding:24px">
 <h1 style="font-size:19px;margin:0 0 14px;color:#0A1626">${esc(titel)}</h1>
 ${absaetze.map((p) => `<p style="font-size:15px;line-height:1.5;margin:0 0 12px">${p}</p>`).join("\n")}
@@ -60,7 +60,8 @@ ${absaetze.map((p) => `<p style="font-size:15px;line-height:1.5;margin:0 0 12px"
 </td></tr>
 <tr><td style="padding:14px 24px;border-top:1px solid #D8DDE4;font-size:12px;color:#6B7787">Automatische Nachricht aus dem Vertriebsportal von EGC Energie.</td></tr>
 </table></td></tr></table></body></html>`;
-  await post.sendMail({ from: `"EGC Energie Vertriebsportal" <${benutzer}>`, to: an, subject: betreff, html });
+  await post.sendMail({ from: `"EGC Energie Vertriebsportal" <${benutzer}>`, to: an, subject: betreff,
+    ...await (async () => { const k = await mailkopf(); return { html: html.replace("<!--EGC-KOPF-->", k.html), attachments: k.anhaenge }; })() });
 }
 
 Deno.serve(async (req) => {
