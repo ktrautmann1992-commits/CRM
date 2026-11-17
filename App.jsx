@@ -8270,8 +8270,9 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             <div className="rounded p-4" style={{ background: C.card, border: "1px solid " + C.warn }}>
               <div className="text-sm mb-1">Vorgang löschen</div>
               <p className="text-xs mb-3" style={{ color: C.muted }}>
-                Für Testkunden und Fehleingaben. Der Vorgang verschwindet mit allen Dateien, Angeboten und Provisionsangaben
-                für alle Rollen. Das lässt sich nicht rückgängig machen.
+                Für Testkunden und Fehleingaben, auch wenn sie schon bestätigt oder abgeschlossen sind. Der Kunde verschwindet
+                komplett aus dem Portal: mit allen Dateien, Angeboten, Provisionsangaben, Smartmeter-Aufträgen, Problemfällen und
+                Beschaffungsaufträgen, für alle Rollen. Das lässt sich nicht rückgängig machen.
               </p>
               <Btn variante="gefahr" icon={Trash2} onClick={() => {
                 const name = (a.kunde && a.kunde.firma) || a.id;
@@ -20991,6 +20992,10 @@ export function PortalApp({ pruefung } = {}) {
         onVerlaengern={verlaengern} onNotieren={notieren}
         onLoeschen={(x) => {
           setAnfragen((l) => l.filter((y) => y.id !== x.id));
+          /* alles, was an diesem Kunden hängt, verschwindet mit: Smartmeter-Aufträge, Problemfälle, Beschaffungsaufträge */
+          setSmartmeter((l) => (l || []).filter((y) => y.anfrageId !== x.id));
+          setProbleme((l) => (l || []).filter((y) => y.anfrageId !== x.id));
+          setBeschaffung((l) => (l || []).filter((y) => y.anfrageId !== x.id));
           /* Dateien des Vorgangs im Speicher entfernen (nur die Geschäftsführung darf das) */
           try {
             sb.storage.from("dateien").list("anfragen/" + x.id, { limit: 1000 }).then(({ data }) => {
