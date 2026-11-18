@@ -153,9 +153,23 @@ def rueckseite():
     c.drawCentredString(W / 2, 40, "Schulungsunterlage für Vertriebspartner · nur für den internen Gebrauch · Stand " + "11/2026")
     return fertig(p, c)
 
+# Für das gedruckte Heft weggelassen (Foliennummern je Schulung): Kapitel-Trennfolien, Lernziele,
+# „Schulung abgeschlossen“ und der Schulungsweg (steht im Inhaltsverzeichnis). Die Zusammenfassung
+# über alle vier Schulungen (Schulung 4, Folie 25) bleibt.
+WEGLASSEN = {
+    1: [2, 3, 4, 9, 13, 19, 29],
+    2: [2, 5, 9, 12, 19],
+    3: [4, 9, 13, 18, 22, 25, 31],
+    4: [2, 5, 11, 18, 22, 26],
+}
+if "--alle" in sys.argv:
+    WEGLASSEN = {}
+    sys.argv.remove("--alle")
+
 # ---------- zusammensetzen ----------
 titelbild, ausgabe = sys.argv[1], sys.argv[2]
-quellen = [PdfReader(glob.glob(GRUND + f"unterlagen/schulungen/EGC_Schulung_{n}_*.pdf")[0]).pages for n, _, _ in SCHULUNGEN]
+quellen = [[f for i, f in enumerate(PdfReader(glob.glob(GRUND + f"unterlagen/schulungen/EGC_Schulung_{n}_*.pdf")[0]).pages)
+            if i + 1 not in WEGLASSEN.get(n, [])] for n, _, _ in SCHULUNGEN]
 je = [(len(q) + 1) // 2 for q in quellen]
 ab, s = [], 3
 for n in je:
