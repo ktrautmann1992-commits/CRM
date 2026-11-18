@@ -57,12 +57,11 @@ def umschlag(bild):
     logo(c, 48, H - 120, 128)
     c.setFillColorRGB(*GRUEN); c.setFont("Carlito-Bold", 11); c.drawString(50, H - 190, "SCHULUNGSUNTERLAGEN FÜR VERTRIEBSPARTNER")
     c.setFillColorRGB(1, 1, 1); c.setFont("Carlito-Bold", 44)
-    c.drawString(48, H - 240, "Energiemarkt"); c.drawString(48, H - 286, "verstehen und")
-    c.drawString(48, H - 332, "Kunden beraten")
-    c.setFillColorRGB(*GRUEN); c.rect(50, H - 356, 70, 4, fill=1, stroke=0)
+    c.drawString(48, H - 240, "Grundlagen der"); c.drawString(48, H - 286, "Energiewirtschaft")
+    c.setFillColorRGB(*GRUEN); c.rect(50, H - 310, 70, 4, fill=1, stroke=0)
     c.setFillColorRGB(0.85, 0.89, 0.93); c.setFont("Carlito", 13)
-    c.drawString(50, H - 382, "Die vier Grundlagenschulungen in einem Heft:")
-    c.drawString(50, H - 399, "Energiemarkt · Preisbildung · Beschaffungsmodelle · Energienebenkosten")
+    c.drawString(50, H - 336, "Die vier Grundlagenschulungen in einem Heft:")
+    c.drawString(50, H - 353, "Energiemarkt · Preisbildung · Beschaffungsmodelle · Energienebenkosten")
     # Fußleiste
     c.setFillColorRGB(*NAVY, alpha=0.92); c.rect(0, 0, W, 58, fill=1, stroke=0)
     c.setFillAlpha(1)
@@ -181,7 +180,7 @@ for (n, t, _), folien in zip(SCHULUNGEN, quellen):
 for _ in range(notizen):
     anhaengen(notiz(nr)); nr += 1
 anhaengen(rueckseite())
-ziel.add_metadata({"/Title": "EGC Schulungsunterlagen für Vertriebspartner", "/Author": "EGC Energie"})
+ziel.add_metadata({"/Title": "EGC Schulungsunterlagen · Grundlagen der Energiewirtschaft", "/Author": "EGC Energie"})
 ziel.compress_identical_objects(remove_duplicates=True, remove_unreferenced=True)
 with open(ausgabe, "wb") as f:
     ziel.write(f)
