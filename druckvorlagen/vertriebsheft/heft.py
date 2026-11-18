@@ -357,6 +357,40 @@ class Abschlagsplan(Flowable):
             c.drawString(x, h - 38 - i * 13.5, ("• " if i != 1 else "  ") + t)
         c.restoreState()
 
+class SpotSchema(Flowable):
+    """Schema Spotmarkt mit Festpreis-Option (keine echten Preise)"""
+    def __init__(self): super().__init__(); self.w, self.h = BREITE, 175
+    def wrap(self, aw, ah): return self.w, self.h
+    def draw(self):
+        c, w, h = self.canv, self.w, self.h
+        x0, y0, x1, y1 = 40, 28, w - 12, h - 44
+        c.saveState()
+        c.setFillColor(HELLGRAU); c.rect(0, 0, w, h, fill=1, stroke=0)
+        c.setStrokeColor(LINIE); c.setLineWidth(0.8); c.line(x0, y0, x1, y0); c.line(x0, y0, x0, y1)
+        c.setFillColor(NAVY); c.setFont("Carlito-Bold", 10.5); c.drawString(12, h - 17, "So funktioniert es (Schema, keine echten Preise)")
+        c.setFillColor(GRAU); c.setFont("Carlito", 8)
+        c.saveState(); c.translate(24, (y0 + y1) / 2); c.rotate(90); c.drawCentredString(0, 0, "Preis"); c.restoreState()
+        c.drawRightString(x1, y0 - 12, "Zeit")
+        # Marktpreis bis zur Fixierung
+        werte = [0.62, 0.70, 0.66, 0.74, 0.69, 0.58, 0.63, 0.55, 0.60, 0.50, 0.53, 0.44]
+        n_fix = len(werte) - 1; xs = lambda i: x0 + 10 + i * (x1 - x0 - 20) / 24
+        yv = lambda v: y0 + v * (y1 - y0)
+        wunsch = 0.44
+        c.setStrokeColor(WARN); c.setDash(3, 3); c.setLineWidth(1); c.line(x0, yv(wunsch), x1, yv(wunsch)); c.setDash()
+        c.setFillColor(WARN); c.setFont("Carlito-Bold", 8.5); c.drawRightString(x1, yv(wunsch) + 4, "Wunschpreis")
+        c.setStrokeColor(NAVY); c.setLineWidth(1.8)
+        p = c.beginPath(); p.moveTo(xs(0), yv(werte[0]))
+        for i, v in enumerate(werte[1:], 1): p.lineTo(xs(i), yv(v))
+        c.drawPath(p, stroke=1, fill=0)
+        c.setStrokeColor(GRUEN); c.setLineWidth(2.6); c.line(xs(n_fix), yv(wunsch), xs(24), yv(wunsch))
+        c.setFillColor(GRUEN); c.circle(xs(n_fix), yv(wunsch), 5, fill=1, stroke=0)
+        c.setStrokeColor(LINIE); c.setLineWidth(0.6); c.setDash(2, 2); c.line(xs(n_fix), y0, xs(n_fix), y1); c.setDash()
+        c.setFont("Carlito-Bold", 9); c.setFillColor(NAVY)
+        c.drawCentredString((xs(0) + xs(n_fix)) / 2, y1 + 2, "1 · Börsenpreis ohne Risikoaufschlag")
+        c.setFillColor(GRUEN); c.drawCentredString((xs(n_fix) + xs(24)) / 2, y1 + 2, "2 · Festpreis für alle Lieferjahre")
+        c.setFillColor(TEXT); c.setFont("Carlito", 8.2); c.drawString(xs(n_fix) + 8, yv(wunsch) - 13, "Fixierung beim Versorger")
+        c.restoreState()
+
 # ---------- Seitenrahmen ----------
 def innen(c, doc):
     c.saveState()
@@ -388,10 +422,11 @@ def inhaltsseiten():
     f.append(tabelle(["Kapitel", "Worum es geht", "Seite"], [
         ["Der Markt", "Wie sich die Börsenpreise entwickelt haben und was das für Ihre Kunden heißt", "3"],
         ["Ihre Kunden", "Kleine und mittlere Gewerbekunden erkennen und richtig einordnen", "4"],
-        ["Die 7 Schritte", "Vom Erstkontakt bis zur Betreuung nach dem Abschluss", "5–16"],
-        ["Die Jahresabrechnung", "Was auf der Rechnung steht, Abschlag und fehlende Rechnung (in Schritt 4)", "9–13"],
-        ["Einwände", "Die häufigsten Einwände und wie Sie ruhig und ehrlich antworten", "17–18"],
-        ["Rechnen und planen", "Rechenbeispiel, Regeln, Ihr Wochenplan und Ihre Ziele", "19–22"]], [0.22, 0.66, 0.12]))
+        ["Unsere Leistung", "Was EGC für den Kunden tut, Festpreis und Spotmarkt mit Fixierung zum Wunschpreis", "5–7"],
+        ["Die 7 Schritte", "Vom Erstkontakt bis zur Betreuung nach dem Abschluss", "8–19"],
+        ["Die Jahresabrechnung", "Was auf der Rechnung steht, Abschlag und fehlende Rechnung (in Schritt 4)", "12–16"],
+        ["Einwände", "Die häufigsten Einwände und wie Sie ruhig und ehrlich antworten", "20–21"],
+        ["Rechnen und planen", "Rechenbeispiel, Regeln, Ihr Wochenplan und Ihre Ziele", "22–25"]], [0.22, 0.66, 0.12]))
     f.append(Spacer(1, 10))
     f.append(tipp("Lesen Sie zuerst die sieben Schritte und das Kapitel Einwände. Nehmen Sie das Heft zu Ihren ersten Terminen mit. "
                   "Fachliche Hintergründe zu Marktrollen, Preisbildung und Beschaffungsmodellen finden Sie im Schulungsheft "
@@ -443,6 +478,81 @@ def inhaltsseiten():
     f.append(Spacer(1, 8))
     f.append(tipp("Fragen Sie im ersten Gespräch nach dem Vertragsende und notieren Sie es im Portal als Wiedervorlage. "
                   "Ein Kunde mit Vertrag ist kein verlorener Kunde, sondern ein Termin in Ihrem Kalender."))
+    f.append(PageBreak())
+
+    # --- Unsere Leistung ---
+    f += kopfzeile("UNSERE LEISTUNG", "Was EGC für Ihre Kunden tut")
+    f.append(P("Ihr Kunde bekommt nicht nur einen neuen Vertrag, sondern einen Partner, der sich dauerhaft um seine Energie kümmert. "
+               "Das ist Ihr stärkstes Argument, stärker als jeder Cent im Preis.", "intro"))
+    f.append(tabelle(["Leistung", "Was der Kunde davon hat"], [
+        ["Versorgerunabhängiger Vergleich", "Die Kalkulation holt Preise bei mehreren Versorgern ein. Der Kunde bekommt das Angebot, das zu ihm passt, nicht das eines bestimmten Versorgers."],
+        ["Das passende Beschaffungsmodell", "Festpreis für volle Planbarkeit oder Spotmarkt mit Festpreis-Option, um eine gute Marktlage zu nutzen (nächste Seiten)."],
+        ["Wechsel komplett übernommen", "Kündigung beim bisherigen Versorger, Anmeldung beim neuen, alle Fristen. Der Kunde unterschreibt einmal."],
+        ["Fristen im Blick", "Vertragsende und Kündigungsfrist werden für ihn überwacht. Keine stille Verlängerung zu Listenpreisen mehr."],
+        ["Laufende Betreuung", "Wir beobachten den Markt, kümmern uns um den Vertrag und passen ihn an die Marktentwicklung an."],
+        ["Rechnungen und Nebenkosten", "Abrechnungsfehler finden, Energienebenkosten senken, Erstattungen prüfen, etwa bei Strom- und Energiesteuer."],
+        ["PV, Speicher, Ladesäulen, Smartmeter", "Über geprüfte Partner und mit Zugang zu Fördermittelberatern."],
+        ["Ein fester Ansprechpartner", "Sie. Persönlich, ohne Warteschleife, auch nach dem Abschluss."]], [0.33, 0.67]))
+    f.append(Spacer(1, 10))
+    f.append(sagen("„Wir sind kein Versorger, wir stehen auf Ihrer Seite. Wir vergleichen für Sie, übernehmen den Wechsel, behalten Ihre "
+                   "Fristen im Blick und kümmern uns auch danach. Sie haben einen Ansprechpartner für alles rund um Strom und Erdgas.“"))
+    f.append(Spacer(1, 8))
+    f.append(tipp("Der Service- und Beratungsauftrag ist für den Kunden kostenfrei. Für die Prüfung von Erstattungen gibt es einen "
+                  "eigenen Dienstleistungsvertrag; was dafür vereinbart ist, steht dort. Fragen Sie im Gespräch, ob im Betrieb produziert "
+                  "wird, zum Beispiel in einer Bäckerei oder Metzgerei: Dann lohnt sich die Prüfung der Stromsteuer oft.", "GUT ZU WISSEN"))
+    f.append(PageBreak())
+
+    # --- Beschaffungsmodelle ---
+    f += kopfzeile("BESCHAFFUNGSMODELLE", "Festpreis oder Spotmarkt mit Festpreis-Option")
+    f.append(P("Für kleine und mittlere Kunden gibt es zwei Wege. Welcher passt, entscheidet die Antwort auf Ihre wichtigste Frage aus "
+               "Schritt 3: <b>„Was ist Ihnen wichtiger: ein fester Preis oder ein möglichst günstiger?“</b>", "intro"))
+    f.append(tabelle(["", "Festpreis", "Spotmarkt mit Festpreis-Option"], [
+        ["Preis", "Fest ab Lieferbeginn für die ganze Laufzeit", "Zuerst der Börsenpreis Monat für Monat, ab der Fixierung ein fester Preis"],
+        ["Risikoaufschlag", "Im Festpreis enthalten", "Beim Start keiner"],
+        ["Planbarkeit", "Sofort vollständig", "Ab der Fixierung vollständig"],
+        ["Chance", "Der Preis steht, egal wie sich der Markt bewegt", "Eine günstige Marktlage gezielt nutzen"],
+        ["Ehrlich gesagt", "Fallen die Preise später, profitiert der Kunde nicht davon", "Bis zur Fixierung schwanken die Kosten; steigen die Preise, zahlt der Kunde in dieser Zeit mehr"],
+        ["Passt zu", "Wer Ruhe will und ein festes Budget braucht", "Wer Marktchancen nutzen will und Schwankungen eine Zeit lang aushält"]], [0.2, 0.36, 0.44]))
+    f.append(Spacer(1, 10))
+    f.append(SpotSchema())
+    f.append(Spacer(1, 8))
+    f.append(tipp("Lassen Sie immer beide Wege rechnen: den Festpreis von heute und den Start am Börsenpreis mit Wunschpreis. Dann "
+                  "entscheidet der Kunde mit Zahlen. Strukturierte Tranchen oder PPA kommen erst bei größeren Kunden in Frage; "
+                  "dafür holen Sie Ihren Teamleiter dazu."))
+    f.append(PageBreak())
+
+    # --- Fixierung zum Wunschpreis ---
+    f += kopfzeile("SPOTMARKT MIT FESTPREIS-OPTION", "So läuft die Fixierung zum Wunschpreis")
+    f.append(P("Der Kunde muss den Markt nicht selbst beobachten. Das übernehmen wir, und sobald der Wunschpreis erreicht ist, "
+               "wird sein Festpreis beim Versorger gesichert.", "intro"))
+    f.append(Schritte([
+        ("Wunschpreis festlegen", "Mit der Kalkulation einen realistischen Zielpreis vereinbaren, auf Wunsch eine Obergrenze", "Abschluss"),
+        ("Zielpreisauftrag unterschreiben", "Anlage zur Vollmacht: Wunschpreis, Lieferjahre, bei RLM auch Teilmengen", "Abschluss"),
+        ("Am Börsenpreis starten", "Der Versorger beliefert zum Börsenpreis, ohne Risikoaufschlag", "Lieferbeginn"),
+        ("Markt beobachten", "EGC hat die Preise für die Lieferjahre laufend im Blick", "laufend"),
+        ("Festpreis fixieren", "Wunschpreis erreicht: Festpreis für alle Lieferjahre, der Kunde erhält eine Bestätigung", "Wunschpreis")]))
+    f.append(Spacer(1, 4))
+    f.append(sagen("„Sie starten zum Börsenpreis, ohne Risikoaufschlag. Sobald Ihr Wunschpreis erreicht ist, sichern wir Ihnen den "
+                   "Festpreis für alle Lieferjahre. Sie müssen dafür nichts tun, wir kümmern uns.“"))
+    f.append(Spacer(1, 8))
+    halb = (BREITE - 16) / 2
+    zwei = Table([[[P("So bleiben Sie ehrlich", "h2"), liste([
+                        "Steigen die Preise, zahlt der Kunde bis zur Fixierung den höheren Börsenpreis. Sagen Sie das offen.",
+                        "Deshalb auf Wunsch eine Obergrenze: Wird sie erreicht, wird sofort fixiert.",
+                        "Der Kunde kann jederzeit sagen: „Jetzt bitte festmachen.“"], breite=halb)],
+                   [P("Das sagen Sie nie", "h2"), liste([
+                        "„Der Preis fällt bestimmt.“",
+                        "„Sie sparen garantiert.“",
+                        "Einen Wunschpreis, den die Kalkulation nicht bestätigt hat"], haken=False, breite=halb, farbe="#B24328")]]],
+                 colWidths=[halb + 16, halb])
+    zwei.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                              ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+    f.append(zwei)
+    f.append(Spacer(1, 8))
+    f.append(tipp("In der Angebotsanfrage beim Produkt „Spotmarkt“ wählen und in die Bemerkung schreiben: „Spotmarkt mit "
+                  "Festpreis-Option, Wunschpreis gewünscht“. Den Zielpreisauftrag finden Sie unter <b>Unterlagen → Dokumente</b>, "
+                  "den vereinbarten Wunschpreis tragen Sie im Vorgang unter „Zielpreis Spotmarkt“ ein. Mehr dazu im "
+                  "Verkaufsskript und im Flyer „Spotmarkt mit Festpreis-Option“.", "IM PORTAL"))
     f.append(PageBreak())
 
     # --- 7 Schritte Überblick ---
