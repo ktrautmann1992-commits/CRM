@@ -175,7 +175,8 @@ ab, s = [], 3
 for n in je:
     ab.append(s); s += n
 inhaltsseiten = 2 + sum(je)                 # Umschlag, Inhalt, Schulungen
-notizen = (-(inhaltsseiten + 1)) % 4         # + Rückseite, auf Vielfache von 4 auffüllen
+NOTIZEN_MIN = int(next((x.split("=")[1] for x in sys.argv if x.startswith("--notizen=")), "0"))
+notizen = NOTIZEN_MIN + (-(inhaltsseiten + 1 + NOTIZEN_MIN)) % 4   # + Rückseite, auf Vielfache von 4 auffüllen
 gesamt = inhaltsseiten + notizen + 1
 
 ziel = PdfWriter()
