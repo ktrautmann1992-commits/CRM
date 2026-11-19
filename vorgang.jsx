@@ -2314,13 +2314,27 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                   <Feld label="Arbeitspreis (ct/kWh)"
                                     value={(v.preise[l.id] || {}).arbeit || ""}
                                     onChange={(x) => setVarPreis(v.id, l.id, "arbeit", x)} />
-                                  <Feld label="davon Energiepreis (ct/kWh)"
+                                  <Feld label={(v.preise[l.id] || {}).ohneGrundpreis ? "davon Energiepreis inkl. Grundpreis (ct/kWh)" : "davon Energiepreis (ct/kWh)"}
                                     value={(v.preise[l.id] || {}).energie || ""}
                                     onChange={(x) => setVarPreis(v.id, l.id, "energie", x)} />
-                                  <Feld label="Grundpreis (€/Jahr)"
-                                    value={(v.preise[l.id] || {}).grundpreis || ""}
-                                    onChange={(x) => setVarPreis(v.id, l.id, "grundpreis", x)} />
+                                  {!(v.preise[l.id] || {}).ohneGrundpreis && (
+                                    <Feld label="Grundpreis (€/Jahr)"
+                                      value={(v.preise[l.id] || {}).grundpreis || ""}
+                                      onChange={(x) => setVarPreis(v.id, l.id, "grundpreis", x)} />
+                                  )}
                                 </div>
+                                {/* Manche Versorger haben keinen Grundpreis: er steckt im Energiepreis (ct/kWh) */}
+                                <label className="flex items-start gap-2 text-sm mt-2">
+                                  <input type="checkbox" className="mt-0.5" checked={!!(v.preise[l.id] || {}).ohneGrundpreis}
+                                    onChange={(e) => setVar(v.id, "preise", { ...v.preise, [l.id]: { ...(v.preise[l.id] || {}),
+                                      ohneGrundpreis: e.target.checked, ...(e.target.checked ? { grundpreis: "" } : {}) } })} />
+                                  <span>Ohne Grundpreis
+                                    <span className="block text-xs" style={{ color: C.muted }}>
+                                      Der Versorger nennt Energiepreis und Grundpreis zusammen in ct/kWh. Im Angebot steht dann kein Grundpreis,
+                                      der Energiepreis heißt „inkl. Grundpreis“.
+                                    </span>
+                                  </span>
+                                </label>
                                 {l.zaehlerart === "RLM" && (
                                   <div className="grid sm:grid-cols-3 gap-4 mt-3">
                                     <Feld label="Lastspitze (kW)"
@@ -3384,7 +3398,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                   <MediumIcon medium={l.medium} />
                                   <span className="flex-1">{l.bezeichnung || (l.medium === "strom" ? "Strom" : "Erdgas")}</span>
                                   <span style={{ color: C.muted, fontVariantNumeric: "tabular-nums" }}>
-                                    {pr.energie ? "Energie " + pr.energie : ""}
+                                    {pr.energie ? (pr.ohneGrundpreis ? "Energie inkl. Grundpreis " : "Energie ") + pr.energie : ""}
                                     {pr.energie && pr.arbeit ? " · " : ""}
                                     {pr.arbeit ? "Arbeitspreis " + pr.arbeit : ""} ct/kWh
                                   </span>

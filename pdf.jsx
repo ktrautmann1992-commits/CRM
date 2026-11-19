@@ -1185,7 +1185,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     const sp = vergleich ? [RA, RA + 62, RA + 104, RA + 146] : [RA, null, RA + 100, null];
     for (const l of stellen) {
       const pr = (v.preise || {})[l.id] || {};
-      const neuA = zahlLesen(pr.arbeit), neuE = zahlLesen(pr.energie), neuG = zahlLesen(pr.grundpreis);
+      const ohneGP = !!pr.ohneGrundpreis; /* Grundpreis steckt im Energiepreis (ct/kWh) */
+      const neuA = zahlLesen(pr.arbeit), neuE = zahlLesen(pr.energie), neuG = ohneGP ? 0 : zahlLesen(pr.grundpreis);
       const vv = vorversorger[l.id] || {};
       const altRoh = altPreis(vv);
       /* Ältere Abrechnung: bisherigen Arbeitspreis um die gestiegenen Umlagen erhöhen, damit der Vergleich fair ist */
@@ -1207,13 +1208,15 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
         ["Arbeitspreis (ct/kWh)", alt ? ct(alt.arbeit) : "–", ct(neuA), alt && !isNaN(neuA) ? ct(alt.arbeit - neuA) : "–"],
         ...(aus ? [["      laut Abrechnung " + aus.jahr, ct(alt.arbeitAbrechnung), "–", "–"],
           ["      + Umlagen " + aus.ziel + " statt " + aus.jahr, (aus.diff >= 0 ? "+" : "") + ct3(aus.diff), "–", "–"]] : []),
-        ...(!isNaN(neuE) ? [["davon Energiepreis (ct/kWh)", "–", ct(neuE), "–"]] : []),
+        ...(!isNaN(neuE) ? [[ohneGP ? "davon Energiepreis inkl. Grundpreis (ct/kWh)" : "davon Energiepreis (ct/kWh)", "–", ct(neuE), "–"]] : []),
         ...(!isNaN(neuE) && !isNaN(teile.umlage) ? [["davon staatl. Umlagen und Abgaben (ct/kWh)", "–", ct3(teile.umlage), "–"],
           ...(teile.umlagenTeile.length > 1 ? teile.umlagenTeile.map((x) => ["      " + x.name, "–", ct3(zahlLesen(x.wert)), "–"]) : [])] : []),
         ...(!isNaN(teile.netz) ? [["davon Netzentgelte (ct/kWh)", "–", ct3(teile.netz), "–"]] : []),
         ...(teile.rlm && !isNaN(teile.leistungKosten) ? [["Leistungspreis Netz (" + num(teile.kw, 1) + " kW × " + num(teile.leistungspreis, 2) + " €/kW)", "–", eurx(teile.leistungKosten), "–"]] : []),
-        ["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–", isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
-          alt && !isNaN(neuA) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"],
+        /* ohne Grundpreis: Zeile entfällt; im Vergleich bleibt der bisherige Grundpreis stehen */
+        ...(ohneGP && !alt ? [] : [["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–",
+          ohneGP ? "im Energiepreis enthalten" : isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
+          alt && !isNaN(neuA) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"]]),
         ["Jahresverbrauch", num(menge) + " kWh", num(menge) + " kWh", "–"],
         ["Lieferbeginn", "–", sv.lieferbeginn ? datum(sv.lieferbeginn) : "–", "–"],
         ...(jeEnde ? [["Laufzeit bis", "–", enddatum(sv) ? datum(enddatum(sv)) : (laufzeitMonate(sv) || sv.laufzeit) + " Monate", "–"]] : []),
@@ -1605,7 +1608,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     y += 1.5;
     [["akt. Versorger", vv.versorger || l.versorger, "Kundennummer", l.kundennummer],
      ["Verbrauch", l.verbrauch ? num(zahlLesen(l.verbrauch) || 0) + " kWh" : "", "Zählernummer", l.zaehlernummer],
-     ["Lieferbeginn", v.lieferbeginn ? datum(v.lieferbeginn) : "", "MaLo", l.maloId]].forEach((r, i) => {
+     ["Lieferbeginn", (() => { const b = v.preise ? stelleIn(v, l).lieferbeginn : v.lieferbeginn; return b ? datum(b) : ""; })(), "MaLo", l.maloId]].forEach((r, i) => {
       if (i % 2 === 0) { flaeche(HELL); doc.rect(RA, y, BR, 4.8, "F"); }
       schrift(7.8); farbe(GRAU); text(r[0], RA + 2, y + 3.4); text(r[2], RA + halb + 2, y + 3.4);
       farbe(TEXT); text(blanko ? "" : r[1] || "", RA + 32, y + 3.4); text(blanko ? "" : r[3] || "", RA + halb + 32, y + 3.4);

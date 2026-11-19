@@ -405,7 +405,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“";
+const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh)";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1648,7 +1648,7 @@ function angebotPdf(a, v) {
              "   MaLo " + (l.maloId || "-") + "   " + l.zaehlerart +
              "   " + num(parseFloat(l.verbrauch) || 0) + " kWh/Jahr");
       if (pr.energie || pr.arbeit)
-        z.push("     " + [pr.energie && "Energiepreis " + pr.energie + " ct/kWh",
+        z.push("     " + [pr.energie && (pr.ohneGrundpreis ? "Energiepreis inkl. Grundpreis " : "Energiepreis ") + pr.energie + " ct/kWh",
                           pr.arbeit && "Arbeitspreis " + pr.arbeit + " ct/kWh"]
                           .filter(Boolean).join("   "));
     });
