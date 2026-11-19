@@ -30,7 +30,7 @@ import {
   monateBis, monateDazu, monateZwischen, naechsterSchritt, naechsterSchrittInnen, num, preisTeile, smartmeterStart,
   smartmeterSummen, statusVon, tippgeberFuer, tippgeberLabel, tippgeberMomentaufnahme, uid, umlagenAusgleich, umlagenJahr,
   umlagenVorjahre, varianten, verbrauchGesamt, verbrauchMedium, vertragsende, zahlLesen, zeitDe,
-  csvLesen, xlsxLesen,
+  csvLesen, xlsxLesen, VERTRIEB_BEARBEITBAR, ctZahl, stelleIn, stelleAbweichend, stellenVon, provisionsStellen, aufschlagText,
 } from "./App.jsx";
 import { BeschaffungKarte } from "./beschaffung.jsx";
 import { Smartmeter, SmartmeterKalk, UmlagenPflege } from "./innendienst.jsx";
@@ -1294,6 +1294,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   };
   const [fehlend, setFehlend] = useState([]);
   const [fehlendText, setFehlendText] = useState("");
+  /* „Sonstiges“: eigene Nachforderung als Freitext, wird als eigener Punkt in die Liste übernommen */
+  const [sonstiges, setSonstiges] = useState({ an: false, text: "" });
   const [modus, setModus] = useState(null);
 
   const istKalk = user.rolle === "Kalkulation";
@@ -1319,7 +1321,9 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   const setVorvFeld = (lid, k, w) => setVorv((alt) => ({ ...alt, [lid]: { ...(alt[lid] || {}), [k]: w } }));
   const [vmBemerkung, setVmBemerkung] = useState((a.kalkulation && a.kalkulation.vollmachtBemerkung) || "");
   const [hinweisPartner, setHinweisPartner] = useState((a.kalkulation && a.kalkulation.hinweisPartner) || "");
-  const [sm, setSm] = useState(() => (a.kalkulation && a.kalkulation.smartmeter) || (a.smartmeter ? smartmeterStart(a) : null));
+  /* Smartmeter: hat die Kalkulation das Angebot entfernt, wird es nicht wieder automatisch angelegt */
+  const [sm, setSm] = useState(() => (a.kalkulation && a.kalkulation.smartmeter)
+    || (a.smartmeter && !(a.kalkulation && a.kalkulation.smartmeterEntfernt) ? smartmeterStart(a) : null));
   const [erzeugt, setErzeugt] = useState(null);
   const [kurz, setKurz] = useState(false);
   const [paketLaeuft, setPaketLaeuft] = useState(false);
@@ -1370,6 +1374,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         vollmachtBemerkung: vmBemerkung,
         hinweisPartner: hinweisPartner.trim(),
         smartmeter: sm,
+        smartmeterEntfernt: !!(a.smartmeter && !sm),
         gewaehlt: null,
         varianten: vars.map((v) => ({
           ...v,
@@ -1398,7 +1403,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
     onUpdate({
       ...a,
       status: "klaerfall",
-      fehlend,
+      fehlend: [...fehlend, ...(sonstiges.an && sonstiges.text.trim() ? ["Sonstiges: " + sonstiges.text.trim()] : [])],
       fehlendText,
       verlauf: [...a.verlauf, { d: heute(), t: "Zurück an Vertrieb: Unterlagen unvollständig", w: user.name }],
     });
@@ -1460,9 +1465,9 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
       + (a.zielpreisNotiz ? "  ·  " + a.zielpreisNotiz : ""));
     if (a.bestaetigung) {
       z.push({ text: "Versorgerbestätigung", gross: true });
-      z.push("Versorger: " + a.bestaetigung.versorger);
+      z.push("Versorger: " + ([...new Set(provisionsStellen(a).map((s) => s.versorger).filter(Boolean))].join(" / ") || a.bestaetigung.versorger));
       z.push("Bestätigte Menge: " + num(bestaetigteMenge(a)) + " kWh");
-      z.push("Gesamtaufschlag: " + num(a.bestaetigung.aufschlag, 3) + " ct/kWh");
+      z.push("Gesamtaufschlag: " + aufschlagText(a));
       if (parseFloat(a.bestaetigung.bonus) > 0)
         z.push("Bonus: " + eur(parseFloat(a.bestaetigung.bonus)) + " ("
           + (a.bestaetigung.bonusArt === "jaehrlich" ? "pro Lieferjahr" : "einmalig") + ")");
@@ -1505,10 +1510,22 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
   /* Aufgabe 10: Versorgerbestätigung, Klärfall und Ablehnung */
   const [vModus, setVModus] = useState(null);
   const [best, setBest] = useState(
-    a.bestaetigung || {
-      versorger: "", stellen: {}, aufschlag: (aktiveVariante(a) || {}).aufschlag || a.aufschlag,
-      bonus: "", bonusArt: "keine",
-    }
+    a.bestaetigung || (() => {
+      /* eigene Werte je Lieferstelle aus dem angenommenen Angebot vorbelegen */
+      const stellen = {};
+      const vs = gewaehlte(a).length ? gewaehlte(a) : varianten(a).slice(0, 1);
+      vs.forEach((x) => stellenVon(a, x).forEach((l) => {
+        const sv = stelleIn(x, l);
+        const s = {};
+        if (sv.eigen.versorger) s.versorger = sv.versorger;
+        if (sv.eigen.aufschlag) s.aufschlag = String(sv.aufschlag);
+        if (sv.eigen.lieferbeginn) s.beginn = sv.lieferbeginn;
+        if (sv.eigen.laufzeit && enddatum(sv)) s.ende = enddatum(sv);
+        if (Object.keys(s).length) stellen[l.id] = s;
+      }));
+      return { versorger: (vs[0] || {}).versorger || "", stellen, aufschlag: (aktiveVariante(a) || {}).aufschlag || a.aufschlag,
+               bonus: "", bonusArt: "keine" };
+    })()
   );
   const [vKlaer, setVKlaer] = useState({ text: "", dateien: [] });
   const [vAbl, setVAbl] = useState({ text: "", dokument: null, alternativ: false, alternativAngebot: null });
@@ -2315,6 +2332,48 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                   </div>
                                 )}
                                 {(() => {
+                                  /* eigene Werte dieser Lieferstelle; leer = wie die Variante */
+                                  const pr = v.preise[l.id] || {};
+                                  const sv = stelleIn(v, l);
+                                  const art = pr.laufzeitArt || "monate";
+                                  return (
+                                    <details className="mt-3 rounded" open={stelleAbweichend(v, l)}
+                                      style={{ border: "1px solid " + (stelleAbweichend(v, l) ? C.gas : C.line), background: "#fff" }}>
+                                      <summary className="px-3 py-2 text-sm cursor-pointer">
+                                        Abweichend für diese Lieferstelle: Versorger, Lieferzeit, Aufschlag
+                                        {stelleAbweichend(v, l) && <span className="text-xs ml-2" style={{ color: C.gas }}>eigene Werte</span>}
+                                      </summary>
+                                      <div className="px-3 pb-3 grid sm:grid-cols-2 gap-4">
+                                        <Select label="Neuer Versorger" value={pr.versorger || ""}
+                                          onChange={(x) => setVarPreis(v.id, l.id, "versorger", x)}
+                                          options={[{ value: "", label: "wie Variante" + (v.versorger ? " (" + v.versorger + ")" : "") },
+                                            ...(versorger || []).map((x) => ({ value: x.name, label: x.name }))]} />
+                                        <Feld label="Aufschlag (ct/kWh)" value={pr.aufschlag || ""}
+                                          onChange={(x) => setVarPreis(v.id, l.id, "aufschlag", x)}
+                                          placeholder={"wie Variante: " + num(ctZahl(v.aufschlag), 3)} />
+                                        <Feld label={"Lieferbeginn" + (pr.lieferbeginn ? "" : " (leer = wie Variante)")} type="date" value={pr.lieferbeginn || ""}
+                                          onChange={(x) => setVarPreis(v.id, l.id, "lieferbeginn", x)} />
+                                        <Select label="Laufzeit" value={art === "ende" ? "ende" : String(pr.laufzeit || "")}
+                                          onChange={(x) => x === "ende"
+                                            ? setVar(v.id, "preise", { ...v.preise, [l.id]: { ...pr, laufzeitArt: "ende", laufzeit: "" } })
+                                            : setVar(v.id, "preise", { ...v.preise, [l.id]: { ...pr, laufzeitArt: "monate", laufzeit: x ? parseInt(x) : "", lieferende: "" } })}
+                                          options={[{ value: "", label: "wie Variante (" + (laufzeitMonate(v) || v.laufzeit || "–") + " Monate)" },
+                                            ...LAUFZEITEN.map((m) => ({ value: String(m), label: m + " Monate" })),
+                                            { value: "ende", label: "festes Lieferende" }]} />
+                                        {art === "ende" && (
+                                          <Feld label="Lieferende" type="date" value={pr.lieferende || ""}
+                                            onChange={(x) => setVarPreis(v.id, l.id, "lieferende", x)} />
+                                        )}
+                                        <p className="sm:col-span-2 text-xs" style={{ color: C.muted }}>
+                                          Gilt für diese Lieferstelle: {sv.versorger || "Versorger offen"} · Beginn {sv.lieferbeginn ? datum(sv.lieferbeginn) : "offen"}
+                                          {" · "}{laufzeitMonate(sv) ? jahreText(laufzeitMonate(sv)) : "Laufzeit offen"}
+                                          {enddatum(sv) ? " bis " + datum(enddatum(sv)) : ""} · Aufschlag {num(ctZahl(sv.aufschlag), 3)} ct/kWh
+                                        </p>
+                                      </div>
+                                    </details>
+                                  );
+                                })()}
+                                {(() => {
                                   const t = preisTeile(l, v.preise[l.id], v.umlagen);
                                   const ct3 = (x) => isNaN(x) ? "–" : num(x, 3) + " ct/kWh";
                                   return (
@@ -2490,14 +2549,25 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                         {f}
                       </label>
                     ))}
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={sonstiges.an}
+                        onChange={(e) => setSonstiges({ ...sonstiges, an: e.target.checked })}
+                        style={{ accentColor: C.warn }} />
+                      Sonstiges
+                    </label>
                   </div>
+                  {sonstiges.an && (
+                    <Feld label="Was fehlt noch? (erscheint beim Vertriebspartner als eigener Punkt)" value={sonstiges.text}
+                      onChange={(x) => setSonstiges({ ...sonstiges, text: x })}
+                      placeholder="z. B. Pachtvertrag der zweiten Filiale, Handelsregisterauszug" breit />
+                  )}
                   <label className="block">
                     <span className="block text-xs mb-1" style={{ color: C.muted }}>Ergänzender Hinweis</span>
                     <textarea rows={3} value={fehlendText} onChange={(e) => setFehlendText(e.target.value)}
                       className="w-full px-3 py-2 text-sm rounded outline-none"
                       style={{ border: "1px solid " + C.line }} />
                   </label>
-                  <Btn variante="gefahr" icon={RotateCcw} disabled={fehlend.length === 0}
+                  <Btn variante="gefahr" icon={RotateCcw} disabled={fehlend.length === 0 && !(sonstiges.an && sonstiges.text.trim())}
                     onClick={zurueckAnVertrieb}>
                     Anfrage an Vertriebspartner zurücksenden
                   </Btn>
@@ -2770,13 +2840,20 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                             onChange={(v) => setBestStelle(l.id, "beginn", v)} />
                           <Feld label="Lieferende" type="date" value={(best.stellen[l.id] || {}).ende || ""}
                             onChange={(v) => setBestStelle(l.id, "ende", v)} />
+                          <Select label="Versorger dieser Lieferstelle" value={(best.stellen[l.id] || {}).versorger || ""}
+                            onChange={(v) => setBestStelle(l.id, "versorger", v)}
+                            options={[{ value: "", label: "wie oben" + (best.versorger ? " (" + best.versorger + ")" : "") },
+                              ...(versorger || []).map((x) => ({ value: x.name, label: x.name }))]} />
+                          <Feld label="Aufschlag dieser Lieferstelle (ct/kWh)" value={(best.stellen[l.id] || {}).aufschlag || ""}
+                            onChange={(v) => setBestStelle(l.id, "aufschlag", v)}
+                            placeholder={"wie unten: " + num(ctZahl(best.aufschlag), 3)} />
                         </div>
                       </div>
                     ))}
                   </div>
 
                   <div className="grid sm:grid-cols-3 gap-4">
-                    <Feld label="Gesamtaufschlag (ct/kWh)" value={best.aufschlag}
+                    <Feld label="Gesamtaufschlag (ct/kWh), gilt für alle Lieferstellen ohne eigenen" value={best.aufschlag}
                       onChange={(v) => setBest({ ...best, aufschlag: v })} />
                     <Select label="Bonuszahlung" value={best.bonusArt}
                       onChange={(v) => setBest({ ...best, bonusArt: v, bonus: v === "keine" ? "" : best.bonus })}
@@ -2871,9 +2948,9 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.ok, ...reihe(-2) }}>
               <div className="text-sm mb-3">Provisionseingang erfassen</div>
               <div className="grid sm:grid-cols-2 gap-x-8 mb-4">
-                <Zeile k="Versorger" v={a.bestaetigung && a.bestaetigung.versorger} />
+                <Zeile k="Versorger" v={a.bestaetigung && ([...new Set(provisionsStellen(a).map((s) => s.versorger).filter(Boolean))].join(" / ") || a.bestaetigung.versorger)} />
                 <Zeile k="Bestätigte Menge" v={num(bestaetigteMenge(a)) + " kWh"} />
-                <Zeile k="Gesamtaufschlag" v={a.bestaetigung ? num(a.bestaetigung.aufschlag, 3) + " ct/kWh" : "–"} />
+                <Zeile k="Gesamtaufschlag" v={a.bestaetigung ? aufschlagText(a) : "–"} />
                 <Zeile k="Erwartete Provision" v={eur(gesamtprovision(a))} />
               </div>
               <div className="grid sm:grid-cols-2 gap-4 mb-4">
@@ -3145,6 +3222,27 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
             </div>
           )}
 
+          {/* Vertrieb: eingereichte Anfrage bis zum Angebot selbst ändern, z. B. eine vergessene Lieferstelle */}
+          {istPartner && VERTRIEB_BEARBEITBAR.includes(a._echterStatus || a.status) && (
+            <div className="rounded p-4 flex flex-wrap items-center justify-between gap-3"
+                 style={{ background: C.card, border: "1px solid " + C.line }}>
+              <span className="text-sm" style={{ color: C.muted, maxWidth: "52ch" }}>
+                Etwas vergessen? Kundendaten, Verbräuche und Lieferstellen kannst du ändern, ergänzen oder löschen,
+                bis die Kalkulation das Angebot erstellt hat. Die Kalkulation sieht, dass du geändert hast.
+              </span>
+              <Btn variante="hell" icon={Pencil} onClick={() => onBearbeiten && onBearbeiten(a)}>Anfrage bearbeiten</Btn>
+            </div>
+          )}
+          {/* Kalkulation: Hinweis, dass der Vertrieb nach dem Einreichen geändert hat */}
+          {istKalk && a.aenderungVertrieb && VERTRIEB_BEARBEITBAR.includes(a.status) && (
+            <div className="rounded p-4 text-sm" style={{ background: "#FFF8EC", border: "1px solid " + C.gas, color: C.text }}>
+              <AlertTriangle size={15} className="inline mr-1" style={{ color: C.gas }} />
+              {a.aenderungVertrieb.von} hat die Anfrage am {datum(a.aenderungVertrieb.datum)} um {a.aenderungVertrieb.zeit} Uhr geändert
+              {a.aenderungVertrieb.vorher !== a.aenderungVertrieb.nachher
+                ? " (Lieferstellen: " + a.aenderungVertrieb.vorher + " → " + a.aenderungVertrieb.nachher + ")" : ""}.
+              Bitte Kundendaten und Lieferstellen vor dem Angebot prüfen.
+            </div>
+          )}
           {/* Neues Angebot: erst an den Kunden schicken, dann hier markieren */}
           {istPartner && a.status === "angebot" && (
             <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + (a.angebotVersendet ? C.line : C.ok), ...reihe(-2) }}>
@@ -3205,6 +3303,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   <p className="whitespace-pre-line">{a.kalkulation.hinweisPartner}</p>
                 </div>
               )}
+              {a.smartmeter && a.kalkulation.smartmeterEntfernt && !a.kalkulation.smartmeter && (
+                <div className="rounded p-3 text-sm flex items-center gap-2" style={{ background: "#F6F8FA", border: "1px solid " + C.line, color: C.muted }}>
+                  <Gauge size={15} /> Kein Smartmeter-Angebot möglich. Die Kalkulation hat es aus dem Angebot genommen.
+                </div>
+              )}
               {a.kalkulation.smartmeter && smartmeterSummen(a.kalkulation.smartmeter).anzahl > 0 && (() => {
                 const su = smartmeterSummen(a.kalkulation.smartmeter);
                 return (
@@ -3252,6 +3355,23 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                           <Zeile k="Aufschlag" v={num(v.aufschlag, 3) + " ct/kWh"} />
                           <Zeile k="Gültig bis" v={datum(v.gueltigBis)} />
                         </div>
+                        {stellenVon(a, v).some((l) => stelleAbweichend(v, l)) && (
+                          <div className="mt-3 rounded p-3 text-xs space-y-1" style={{ background: "#FFF8EC", border: "1px solid " + C.line }}>
+                            <div className="text-sm mb-1" style={{ color: C.text }}>Je Lieferstelle unterschiedlich</div>
+                            {stellenVon(a, v).map((l) => {
+                              const sv = stelleIn(v, l);
+                              return (
+                                <div key={l.id} className="flex flex-wrap gap-x-2" style={{ color: C.text }}>
+                                  <span style={{ minWidth: 120 }}>{l.bezeichnung || (l.medium === "gas" ? "Erdgas" : "Strom")}</span>
+                                  <span style={{ color: C.muted }}>
+                                    {sv.versorger || "Versorger offen"} · {sv.lieferbeginn ? datum(sv.lieferbeginn) : "Beginn offen"}
+                                    {enddatum(sv) ? " bis " + datum(enddatum(sv)) : ""} · {num(ctZahl(sv.aufschlag), 3)} ct/kWh
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
 
                         {a.lieferstellen.some((l) => v.preise && v.preise[l.id] &&
                           ((v.preise[l.id].energie) || (v.preise[l.id].arbeit))) && (

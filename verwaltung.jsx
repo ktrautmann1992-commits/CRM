@@ -22,7 +22,7 @@ import {
   Feld, Kunden, Leads, Liste, PORTAL_ADRESSE, PartnerStatus, Provisionen, ROLLENFARBE,
   Registrierung, Select, StammdatenFormular, TG_FIRMA, TIPPGEBER_VORSCHLAG_KWH, Tippgeber, TippgeberStatus, Unterschrift,
   VERSION, Ziele, aktiveVariante, bestaetigteMenge, beteiligte, dateiLaden, dateiLesen, datum,
-  erzeugePdf, erzeugeXlsx, eur, gesamtprovision, heute, istBeteiligt, jetzt, laufzeitVon,
+  erzeugePdf, erzeugeXlsx, eur, gesamtprovision, heute, istBeteiligt, jetzt, laufzeitVon, provisionsStellen,
   leereStammdaten, leererTippgeber, num, passwortRegeln, stammdatenLuecken, statusVon, strukturUnter, tgZahl,
   tippgeberFrei, tippgeberText, tippgeberVertragPdf, uid, utf8Binaer, verbrauchGesamt, verbrauchMedium, verteilung,
   vertragsende, visitenkartenDaten, zahlweiseVon,
@@ -721,9 +721,12 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
       v && v.lieferbeginn ? datum(v.lieferbeginn) : "",
       vertragsende(a) ? datum(vertragsende(a)) : "",
       verbrauchMedium(a, "strom"), verbrauchMedium(a, "gas"), verbrauchGesamt(a),
-      a.bestaetigung ? Number(a.bestaetigung.aufschlag) : (v ? Number(v.aufschlag) : Number(a.aufschlag)),
+      /* Aufschlag: bei unterschiedlichen Aufschlägen je Lieferstelle das mengengewichtete Mittel */
+      (() => { const st = provisionsStellen(a); const m = st.reduce((x, s) => x + s.menge, 0);
+        return m ? Math.round(st.reduce((x, s) => x + s.menge * s.aufschlag, 0) / m * 1000) / 1000
+          : a.bestaetigung ? Number(a.bestaetigung.aufschlag) : (v ? Number(v.aufschlag) : Number(a.aufschlag)); })(),
       Math.round(gesamtprovision(a) * 100) / 100,
-      a.bestaetigung ? a.bestaetigung.versorger : "",
+      a.bestaetigung ? [...new Set(provisionsStellen(a).map((s) => s.versorger).filter(Boolean))].join(" / ") || a.bestaetigung.versorger || "" : "",
       a.vertragsStatus || "", a.zielpreis || "",
     ];
   };

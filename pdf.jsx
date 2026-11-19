@@ -24,6 +24,7 @@ import {
   datum, enddatum, erzeugePdf, firmenzeile, heute, kb, ladeJsPdf, lastgangAuswerten,
   lastgangGrafiken, laufzeitMonate, num, pdfFussFirma, pdfMitFeldern, preisTeile, smartmeterSummen, umlageSumme,
   umlagenAusgleich, umlagenJahr, verbrauchGesamt, verbrauchMedium, vertragsZeilen, visitenkartenDaten, xlsxAusZeilen, zahlLesen,
+  stelleIn,
 } from "./App.jsx";
 import { Beschaffung } from "./beschaffung.jsx";
 import { Kalkulationen, Smartmeter } from "./innendienst.jsx";
@@ -1154,8 +1155,17 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     y = absatz((ansprech ? "Guten Tag " + ansprech + ", h" : "H") + "erzlichen Dank für Ihre Anfrage. Gerne unterbreiten wir Ihnen nachfolgend ein individuelles Angebot für die Belieferung " +
       (stellen.length > 1 ? "Ihrer Standorte" : "Ihres Standortes") + " mit " + name + ". Unser Ziel ist es, Ihnen nicht nur einen attraktiven Preis, sondern auch eine langfristige und verlässliche Partnerschaft zu bieten.",
       RA, y, BR, 8.5, 3.9) + 2;
-    const eck = [["Neuer Versorger", v.versorger || "–"], ["Beschaffungsmodell", v.produkt || "–"],
-      ["Lieferbeginn", v.lieferbeginn ? datum(v.lieferbeginn) : "–"], ["Laufzeit bis", ende ? datum(ende) : (laufzeitMonate(v) || v.laufzeit) + " Monate"]];
+    /* Eigene Werte je Lieferstelle: oben „je Lieferstelle“, die Werte stehen dann bei jeder Lieferstelle */
+    const je = (k) => new Set(stellen.map((l) => {
+      const sv = stelleIn(v, l);
+      return k === "ende" ? String(enddatum(sv) || laufzeitMonate(sv)) : String(sv[k] || "");
+    })).size > 1;
+    const jeEnde = je("ende");
+    const eck = [["Neuer Versorger", je("versorger") ? "je Lieferstelle" : (stellen[0] ? stelleIn(v, stellen[0]).versorger : v.versorger) || "–"],
+      ["Beschaffungsmodell", v.produkt || "–"],
+      ["Lieferbeginn", je("lieferbeginn") ? "je Lieferstelle" : (() => { const b = stellen[0] ? stelleIn(v, stellen[0]).lieferbeginn : v.lieferbeginn; return b ? datum(b) : "–"; })()],
+      ["Laufzeit bis", jeEnde ? "je Lieferstelle" : (() => { const sv = stellen[0] ? stelleIn(v, stellen[0]) : v; const e = enddatum(sv) || ende;
+        return e ? datum(e) : (laufzeitMonate(sv) || sv.laufzeit) + " Monate"; })()]];
     const ekb = (BR - 9) / 4;
     eck.forEach(([k, w], i) => {
       const x = RA + i * (ekb + 3);
@@ -1191,8 +1201,9 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
         if (alt) { summeAlt += kostenAlt; mitVergleich = true; } else summeAlt += kostenNeu;
       }
       const teile = preisTeile(l, pr, v.umlagen);
+      const sv = stelleIn(v, l);
       const zeilen = [
-        ["Versorger", vv.versorger || l.versorger || "–", v.versorger || "–", "–"],
+        ["Versorger", vv.versorger || l.versorger || "–", sv.versorger || "–", "–"],
         ["Arbeitspreis (ct/kWh)", alt ? ct(alt.arbeit) : "–", ct(neuA), alt && !isNaN(neuA) ? ct(alt.arbeit - neuA) : "–"],
         ...(aus ? [["      laut Abrechnung " + aus.jahr, ct(alt.arbeitAbrechnung), "–", "–"],
           ["      + Umlagen " + aus.ziel + " statt " + aus.jahr, (aus.diff >= 0 ? "+" : "") + ct3(aus.diff), "–", "–"]] : []),
@@ -1204,7 +1215,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
         ["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–", isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
           alt && !isNaN(neuA) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"],
         ["Jahresverbrauch", num(menge) + " kWh", num(menge) + " kWh", "–"],
-        ["Lieferbeginn", "–", v.lieferbeginn ? datum(v.lieferbeginn) : "–", "–"],
+        ["Lieferbeginn", "–", sv.lieferbeginn ? datum(sv.lieferbeginn) : "–", "–"],
+        ...(jeEnde ? [["Laufzeit bis", "–", enddatum(sv) ? datum(enddatum(sv)) : (laufzeitMonate(sv) || sv.laufzeit) + " Monate", "–"]] : []),
         ["Kosten pro Jahr", alt ? eurx(kostenAlt) : "–", kostenNeu == null ? "–" : eurx(kostenNeu),
           alt && kostenNeu != null ? eurx(kostenAlt - kostenNeu) : "–"],
         /* RLM: Leistungspreis des Netzbetreibers extra ausweisen, Ersparnis nur auf Arbeit und Grundpreis */
