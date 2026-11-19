@@ -24,7 +24,7 @@ import {
   datum, enddatum, erzeugePdf, firmenzeile, heute, kb, ladeJsPdf, lastgangAuswerten,
   lastgangGrafiken, laufzeitMonate, num, pdfFussFirma, pdfMitFeldern, preisTeile, smartmeterSummen, umlageSumme,
   umlagenAusgleich, umlagenJahr, verbrauchGesamt, verbrauchMedium, vertragsZeilen, visitenkartenDaten, xlsxAusZeilen, zahlLesen,
-  stelleIn,
+  stelleIn, stellenVon,
 } from "./App.jsx";
 import { Beschaffung } from "./beschaffung.jsx";
 import { Kalkulationen, Smartmeter } from "./innendienst.jsx";
@@ -1111,12 +1111,12 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
 
   /* ---------- Angebot je Sparte ---------- */
   const sparten = (v.sparte && v.sparte !== "beide") ? [v.sparte]
-    : ["strom", "gas"].filter((s) => a.lieferstellen.some((l) => l.medium === s));
+    : ["strom", "gas"].filter((s) => stellenVon(a, v).some((l) => l.medium === s));
   let summeAlt = 0, summeNeu = 0, mitVergleich = false;
   const ausgleiche = []; /* je Lieferstelle mit älterer Abrechnung: Umlagen-Ausgleich für den Hinweis */
 
   for (const sparte of sparten) {
-    const stellen = a.lieferstellen.filter((l) => l.medium === sparte);
+    const stellen = stellenVon(a, v).filter((l) => l.medium === sparte);
     if (!stellen.length) continue;
     const name = sparte === "gas" ? "Erdgas" : "Strom";
     y = neueSeite(sparte === "gas" ? "GASANGEBOT" : "STROMANGEBOT");
@@ -1362,8 +1362,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   }
 
   /* ---------- Lastgang-Analyse für RLM-Lieferstellen mit Lastgang ---------- */
-  const rlm = a.lieferstellen.filter((l) => l.zaehlerart === "RLM" && l.lastgang &&
-    (!v.sparte || v.sparte === "beide" || l.medium === v.sparte));
+  const rlm = stellenVon(a, v).filter((l) => l.zaehlerart === "RLM" && l.lastgang);
   for (const [l, lg] of rlm.flatMap((l) => dateienVon(l.lastgang).map((d) => [l, d]))) {
     let stand;
     try { stand = await lastgangAuswerten({ ...lg, url: await dateiInhalt(lg) }); }

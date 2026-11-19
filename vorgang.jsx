@@ -1667,7 +1667,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
     if (!v) return a.kalkulation ? a.kalkulation.gewaehlt : null;
     const bisher = gewaehlte(a).map((x) => x.id);
     const behalten = varianten(a)
-      .filter((x) => bisher.includes(x.id) && (x.sparte || "beide") !== (v.sparte || "beide"))
+      .filter((x) => bisher.includes(x.id) && !stellenVon(a, x).some((l) => stellenVon(a, v).some((y) => y.id === l.id)))
       .map((x) => x.id);
     return [...behalten, v.id];
   };
@@ -2251,6 +2251,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                         <span className="text-sm">
                           Variante {i + 1}: {v.produkt} · {laufzeitMonate(v) || v.laufzeit} Monate
                           {v.sparte && v.sparte !== "beide" ? " · " + (v.sparte === "gas" ? "Erdgas" : "Strom") : ""}
+                          {Array.isArray(v.lieferstellenIds) && v.lieferstellenIds.length ? " · " + stellenVon(a, v).map((l) => l.bezeichnung || "Lieferstelle").join(", ") : ""}
                         </span>
                         {vars.length > 1 && (
                           <button onClick={() => varLoeschen(v.id)} style={{ color: C.muted }}>
@@ -2260,8 +2261,34 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                       </div>
                       <div className="p-4 space-y-4">
                         <div className="grid sm:grid-cols-2 gap-4">
-                          <Select label="Gilt für" value={v.sparte || "beide"}
-                            onChange={(x) => setVar(v.id, "sparte", x)} options={SPARTEN} />
+                          <div>
+                            <Select label="Gilt für" value={v.sparte || "beide"}
+                              onChange={(x) => setVars(vars.map((y) => y.id === v.id ? { ...y, sparte: x, lieferstellenIds: null } : y))} options={SPARTEN} />
+                            {(() => {
+                              /* einzelne Lieferstellen für diese Variante wählen (ohne Auswahl: alle der Sparte) */
+                              const moeglich = stellenVon(a, { sparte: v.sparte });
+                              if (moeglich.length < 2) return null;
+                              const ids = Array.isArray(v.lieferstellenIds) && v.lieferstellenIds.length ? v.lieferstellenIds : moeglich.map((l) => l.id);
+                              const umschalten = (id) => {
+                                const neu = ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+                                if (!neu.length) return;
+                                setVar(v.id, "lieferstellenIds", neu.length === moeglich.length ? null : neu);
+                              };
+                              return (
+                                <div className="mt-2 p-2 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                                  <span className="block text-xs mb-1" style={{ color: C.muted }}>Lieferstellen in dieser Variante</span>
+                                  {moeglich.map((l) => (
+                                    <label key={l.id} className="flex items-center gap-2 text-sm py-0.5">
+                                      <input type="checkbox" checked={ids.includes(l.id)} onChange={() => umschalten(l.id)} />
+                                      <MediumIcon medium={l.medium} />
+                                      {l.bezeichnung || (l.medium === "gas" ? "Erdgas" : "Strom")}
+                                      <span className="text-xs" style={{ color: C.muted }}>{num(parseFloat(l.verbrauch) || 0)} kWh</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </div>
                           <Select label="Neuer Versorger" value={v.versorger || ""}
                             onChange={(x) => setVar(v.id, "versorger", x)}
                             options={[{ value: "", label: "Bitte wählen" },
@@ -2300,8 +2327,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                             <span className="text-xs" style={{ color: C.muted }}>netto</span>
                           </div>
                           <div className="space-y-3">
-                            {a.lieferstellen
-                              .filter((l) => !v.sparte || v.sparte === "beide" || l.medium === v.sparte)
+                            {stellenVon(a, v)
                               .map((l) => (
                               <div key={l.id} className="p-3 rounded"
                                    style={{ border: "1px solid " + C.line,
@@ -3353,6 +3379,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                           {" · " + (laufzeitMonate(v) || v.laufzeit) + " Monate"}
                           {laufzeitFuer(a, v) !== laufzeitMonate(v) ? " · angenommen: " + jahreText(laufzeitFuer(a, v)) : ""}
                           {v.sparte && v.sparte !== "beide" ? " · " + (v.sparte === "gas" ? "Erdgas" : "Strom") : ""}
+                          {Array.isArray(v.lieferstellenIds) && v.lieferstellenIds.length ? " · " + stellenVon(a, v).map((l) => l.bezeichnung || "Lieferstelle").join(", ") : ""}
                         </span>
                         {gewaehlt && (
                           <span className="inline-flex items-center gap-1 text-xs" style={{ color: C.ok }}>
@@ -3387,10 +3414,10 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                           </div>
                         )}
 
-                        {a.lieferstellen.some((l) => v.preise && v.preise[l.id] &&
+                        {stellenVon(a, v).some((l) => v.preise && v.preise[l.id] &&
                           ((v.preise[l.id].energie) || (v.preise[l.id].arbeit))) && (
                           <div className="mt-3 space-y-1">
-                            {a.lieferstellen.map((l) => {
+                            {stellenVon(a, v).map((l) => {
                               const pr = (v.preise || {})[l.id] || {};
                               if (!pr.energie && !pr.arbeit) return null;
                               return (

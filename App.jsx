@@ -405,7 +405,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh)";
+const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh), Varianten für einzelne Lieferstellen";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1638,8 +1638,7 @@ function angebotPdf(a, v) {
   z.push("Sparte: " + (v.sparte === "gas" ? "Erdgas" : v.sparte === "strom" ? "Strom" : "Strom und Erdgas"));
   z.push(" ");
   z.push({ text: "Lieferstellen und Preise", gross: true });
-  a.lieferstellen
-    .filter((l) => !v.sparte || v.sparte === "beide" || l.medium === v.sparte)
+  stellenVon(a, v)
     .forEach((l) => {
       const pr = (v.preise || {})[l.id] || {};
       z.push((l.bezeichnung || (l.medium === "strom" ? "Strom" : "Erdgas")) +
@@ -1653,7 +1652,7 @@ function angebotPdf(a, v) {
                           .filter(Boolean).join("   "));
     });
   z.push(" ");
-  z.push("Gesamtmenge " + num(mengeSparte(a, v.sparte)) + " kWh je Lieferjahr");
+  z.push("Gesamtmenge " + num(stellenVon(a, v).reduce((s, l) => s + (parseFloat(l.verbrauch) || 0), 0)) + " kWh je Lieferjahr");
   if (v.bemerkung) { z.push(" "); z.push({ text: "Hinweise", gross: true }); z.push(v.bemerkung); }
   z.push(" ");
   z.push("Alle Preise netto zuzüglich Steuern, Abgaben, Umlagen und Netzentgelten,");
@@ -1797,7 +1796,9 @@ const laufzeitVon = (a) => {
    Laufzeit und einen eigenen Aufschlag eintragen (in v.preise[l.id]). Leer heißt: wie die Variante. */
 const ctZahl = (x) => { const n = parseFloat(String(x === undefined || x === null ? "" : x).replace(",", ".")); return isNaN(n) ? 0 : n; };
 const hatWert = (x) => x !== undefined && x !== null && String(x).trim() !== "";
-const stellenVon = (a, v) => a.lieferstellen.filter((l) => !v || !v.sparte || v.sparte === "beide" || l.medium === v.sparte);
+/* Lieferstellen einer Variante: nach Sparte, und wenn die Kalkulation einzelne gewählt hat, nur diese */
+const stellenVon = (a, v) => a.lieferstellen.filter((l) => (!v || !v.sparte || v.sparte === "beide" || l.medium === v.sparte)
+  && (!v || !Array.isArray(v.lieferstellenIds) || !v.lieferstellenIds.length || v.lieferstellenIds.includes(l.id)));
 function stelleIn(v, l) {
   const p = ((v && v.preise) || {})[l.id] || {};
   const art = p.laufzeitArt || "monate";
