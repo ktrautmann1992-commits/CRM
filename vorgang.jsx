@@ -249,6 +249,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
         const zeilen = /\.xlsx?$/i.test(file.name) ? await xlsxLesen(d) : await csvLesen(d);
         const { anfrage, hinweise } = kundeAusTabelle(zeilen, a);
         setA(anfrage);
+        setGeprueft(true); /* fehlende Pflichtfelder sofort rot markieren */
         setCsv({ name: file.name, hinweise, ls: anfrage.lieferstellen.length, firma: anfrage.kunde.firma });
       } catch (e) {
         setCsv({ name: file.name, fehler: (e && e.message) || "Die Datei konnte nicht gelesen werden.", hinweise: [] });
@@ -312,7 +313,7 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
   const luecken = useMemo(() => {
     const f = [];
     if (!a.kunde.firma) f.push("Firmenname");
-    if (!a.kunde.plz || !a.kunde.ort) f.push("Kundenanschrift");
+    if (!a.kunde.strasse || !a.kunde.plz || !a.kunde.ort) f.push("Kundenanschrift");
     if (!a.kunde.ansprechpartner) f.push("Ansprechpartner");
     a.lieferstellen.forEach((l, i) => {
       const n = (l.bezeichnung || "Lieferstelle " + (i + 1)) + ": ";
@@ -361,6 +362,9 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
   };
 
   const Schritte = ["Kunde", "Lieferstellen", "Angebotswunsch", "Prüfen & senden"];
+  /* fehlende Pflichtangaben je Schritt (für die rote Zahl am Reiter) */
+  const imKunden = luecken.filter((f) => ["Firmenname", "Kundenanschrift", "Ansprechpartner"].includes(f)).length;
+  const fehltIn = [imKunden, luecken.length - imKunden, 0, luecken.length];
 
   return (
     <div>
@@ -383,6 +387,11 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
             }}
           >
             {i + 1}. {s}
+            {geprueft && fehltIn[i] > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center rounded-full text-xs"
+                style={{ background: C.warn, color: "#fff", minWidth: 18, height: 18, padding: "0 5px" }}
+                title="fehlende Pflichtangaben">{fehltIn[i]}</span>
+            )}
           </button>
         ))}
       </div>
@@ -429,6 +438,14 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                   <div className="mt-3 p-3 rounded text-sm" style={{ background: "#F1F7F0", border: "1px solid " + C.ok, color: C.text }}>
                     <div style={{ color: C.ok }}><Check size={14} className="inline mr-1" />Übernommen: {csv.firma} mit {csv.ls} {csv.ls === 1 ? "Lieferstelle" : "Lieferstellen"}.</div>
                     <div className="text-xs mt-1" style={{ color: C.muted }}>Bitte alle Schritte durchsehen und je Lieferstelle die Rechnung hochladen.</div>
+                    {luecken.length > 0 ? (
+                      <div className="mt-2 p-2 rounded text-xs" style={{ background: "#FCF3F0", border: "1px solid " + C.warn }}>
+                        <div style={{ color: C.warn }}><AlertTriangle size={12} className="inline mr-1" />Noch auszufüllen (in den Schritten rot markiert):</div>
+                        <ul className="ml-4 mt-1 list-disc" style={{ color: C.text }}>{luecken.map((f) => <li key={f}>{f}</li>)}</ul>
+                      </div>
+                    ) : (
+                      <div className="text-xs mt-2" style={{ color: C.ok }}>Alle Pflichtangaben sind ausgefüllt.</div>
+                    )}
                     {csv.hinweise.length > 0 && (
                       <ul className="text-xs mt-2 ml-4 list-disc" style={{ color: C.warn }}>{csv.hinweise.map((h, i) => <li key={i}>{h}</li>)}</ul>
                     )}
@@ -455,7 +472,8 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
             <p className="sm:col-span-2 text-xs" style={{ color: C.muted }}>Felder mit * braucht die Kalkulation für ein Angebot.</p>
             <Feld label="Firma / Kunde *" value={a.kunde.firma} onChange={(v) => setK("firma", v)}
               placeholder="Musterbetrieb GmbH" fehler={geprueft && !a.kunde.firma} breit />
-            <Feld label="Straße und Hausnummer *" value={a.kunde.strasse} onChange={(v) => setK("strasse", v)} breit />
+            <Feld label="Straße und Hausnummer *" value={a.kunde.strasse} onChange={(v) => setK("strasse", v)}
+              fehler={geprueft && !a.kunde.strasse} breit />
             <Feld label="PLZ *" value={a.kunde.plz} onChange={(v) => setK("plz", v)} fehler={geprueft && !a.kunde.plz} />
             <Feld label="Ort *" value={a.kunde.ort} onChange={(v) => setK("ort", v)} fehler={geprueft && !a.kunde.ort} />
             <Feld label="Ansprechpartner *" value={a.kunde.ansprechpartner}

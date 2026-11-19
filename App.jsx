@@ -403,7 +403,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.41 · 19.11.2026 · Kunde per CSV-Datei anlegen (Vorlage und Hochladen in „Angebot anfragen“), CSV-Dateien aus Excel unter Windows lesbar";
+const VERSION = "v5.41 · 19.11.2026 · Kunde per CSV-Datei anlegen (Vorlage und Hochladen in „Angebot anfragen“, fehlende Pflichtangaben sofort rot markiert, Anzahl am Reiter), CSV-Dateien aus Excel unter Windows lesbar";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
