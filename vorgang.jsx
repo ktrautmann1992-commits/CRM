@@ -30,6 +30,7 @@ import {
   monateBis, monateDazu, monateZwischen, naechsterSchritt, naechsterSchrittInnen, num, preisTeile, smartmeterStart,
   smartmeterSummen, statusVon, tippgeberFuer, tippgeberLabel, tippgeberMomentaufnahme, uid, umlagenAusgleich, umlagenJahr,
   umlagenVorjahre, varianten, verbrauchGesamt, verbrauchMedium, vertragsende, zahlLesen, zeitDe,
+  csvLesen, xlsxLesen,
 } from "./App.jsx";
 import { BeschaffungKarte } from "./beschaffung.jsx";
 import { Smartmeter, SmartmeterKalk, UmlagenPflege } from "./innendienst.jsx";
@@ -37,10 +38,223 @@ import { dienstleistungsvertragPdf, egcAngebotPdf, individualPaket, ndaPdf } fro
 import { Akquise } from "./vertrieb.jsx";
 
 /* ------------------------------------------------------------------ */
+/* ---------- Kunde aus einer CSV- oder Excel-Datei anlegen ----------
+   Eine Datei = ein Kunde. Je Zeile eine Lieferstelle; die Kundendaten stehen in der ersten Zeile
+   (in weiteren Zeilen dürfen sie fehlen oder gleich sein). Das Ergebnis füllt nur den Assistenten vor:
+   Der Vertriebspartner prüft, lädt die Rechnungen hoch und sendet wie gewohnt. */
+const KUNDE_CSV_SPALTEN = [
+  ["firma", "Firma", "Musterbetrieb GmbH"],
+  ["strasse", "Straße und Hausnummer", "Musterstraße 12"],
+  ["plz", "PLZ", "12345"],
+  ["ort", "Ort", "Musterstadt"],
+  ["ansprechpartner", "Ansprechpartner", "Max Mustermann"],
+  ["telefon", "Telefon", "0123 456789"],
+  ["email", "E-Mail", "info@musterbetrieb.de"],
+  ["branche", "Branche", "Bäckerei"],
+  ["steuernummer", "Steuernummer oder USt-IdNr.", ""],
+  ["sparte", "Sparte (Strom oder Erdgas)", "Strom", "Erdgas"],
+  ["bezeichnung", "Bezeichnung der Lieferstelle", "Backstube", "Backstube"],
+  ["lStrasse", "Lieferstelle Straße", "", ""],
+  ["lPlz", "Lieferstelle PLZ", "", ""],
+  ["lOrt", "Lieferstelle Ort", "", ""],
+  ["versorger", "Aktueller Versorger", "Beispiel-Energie AG", "Muster-Gas GmbH"],
+  ["kundennummer", "Kundennummer beim Versorger", "4711081523", "GV778812"],
+  ["zaehlernummer", "Zählernummer", "1ESY1160123456", "7GMT00987654"],
+  ["maloId", "Marktlokation (MaLo)", "51238947561", "50812345678"],
+  ["meloId", "Messlokation (MeLo)", "", ""],
+  ["verbrauch", "Jahresverbrauch in kWh", "42380", "82203"],
+  ["zaehlerart", "Zählerart (SLP oder RLM)", "SLP", "SLP"],
+  ["vertragsendeAlt", "Vertrag läuft bis", "31.12.2026", "30.09.2026"],
+  ["kuendigungsfrist", "Kündigungsfrist", "3 Monate zum Vertragsende", "6 Wochen zum Vertragsende"],
+  ["produkt", "Produkt Strom", "Festpreis", ""],
+  ["produktGas", "Produkt Erdgas", "", "Festpreis"],
+  ["laufzeit", "Laufzeit in Monaten", "24", ""],
+  ["wunschLieferbeginn", "Gewünschter Lieferbeginn", "01.01.2027", ""],
+  ["bemerkung", "Bemerkung für die Kalkulation", "Kunde wünscht Festpreis, plant PV 2027", ""],
+];
+const KUNDE_CSV_BEISPIEL = "Musterbetrieb GmbH";
+/* weitere Schreibweisen in Kopfzeilen, die ein Kunde oder ein anderes Programm liefern könnte */
+const KUNDE_CSV_ALIAS = {
+  firma: ["firmenname", "kunde", "kundenname", "unternehmen", "name der firma"],
+  strasse: ["straße", "strasse", "anschrift", "adresse"],
+  plz: ["postleitzahl"], ort: ["stadt", "wohnort"],
+  ansprechpartner: ["kontakt", "kontaktperson", "ansprechperson"],
+  telefon: ["tel", "telefonnummer", "mobil", "handy"], email: ["mail", "e-mail-adresse", "email"],
+  steuernummer: ["steuernummer", "ust-idnr", "ustidnr", "umsatzsteuer-id"],
+  sparte: ["sparte", "medium", "energie", "energieart"],
+  bezeichnung: ["lieferstelle", "bezeichnung", "standort"],
+  lStrasse: ["lieferadresse", "lieferstelle strasse", "lieferstelle straße und hausnummer"],
+  versorger: ["versorger", "lieferant", "energieversorger", "bisheriger versorger"],
+  kundennummer: ["kundennummer", "kundennr", "vertragskonto"],
+  zaehlernummer: ["zählernummer", "zaehlernummer", "zählernr", "zaehlernr"],
+  maloId: ["malo", "malo-id", "marktlokation", "marktlokations-id"],
+  meloId: ["melo", "melo-id", "messlokation", "messlokations-id", "zählpunkt", "zaehlpunkt"],
+  verbrauch: ["jahresverbrauch", "verbrauch", "verbrauch kwh", "kwh"],
+  zaehlerart: ["zählerart", "zaehlerart", "messart"],
+  vertragsendeAlt: ["vertragsende", "lieferende", "vertrag bis"],
+  laufzeit: ["laufzeit"], wunschLieferbeginn: ["lieferbeginn", "wunschlieferbeginn"],
+  bemerkung: ["bemerkung", "bemerkungen", "notiz", "hinweis"],
+};
+const csvSchluessel = (t) => String(t || "").replace(/^﻿/, "").toLowerCase().replace(/\s*\(.*?\)\s*/g, " ").replace(/\s+/g, " ").trim();
+
+/* Vorlage mit zwei Beispielzeilen (Strom und Erdgas desselben Kunden) */
+function kundeCsvVorlage() {
+  const feld = (t) => (/[;"\n]/.test(t) ? '"' + String(t).replace(/"/g, '""') + '"' : t);
+  const zeilen = [KUNDE_CSV_SPALTEN.map((s) => s[1]), KUNDE_CSV_SPALTEN.map((s) => s[2] || ""), KUNDE_CSV_SPALTEN.map((s) => s[3] || "")];
+  const text = "\ufeff" + zeilen.map((z) => z.map(feld).join(";")).join("\r\n") + "\r\n";
+  const bytes = new TextEncoder().encode(text);
+  let bin = ""; bytes.forEach((b) => { bin += String.fromCharCode(b); });
+  return { name: "EGC_Kunde_anlegen_Vorlage.csv", typ: "text/csv", groesse: bytes.length, url: "data:text/csv;base64," + btoa(bin) };
+}
+
+/* Datum: 31.12.2026, 31.12.26 oder 2026-12-31 → ISO */
+function csvDatum(t) {
+  const s = String(t || "").trim();
+  let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/);
+  if (m) {
+    const j = m[3].length === 2 ? "20" + m[3] : m[3];
+    const iso = j + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");
+    return isNaN(new Date(iso + "T12:00:00")) ? null : iso;
+  }
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[0] : null;
+}
+/* kWh: „42.380“ ist hier immer eine Tausenderzahl, kein Komma (Zählerstände sind ganze kWh) */
+function csvKwh(t) {
+  const s = String(t || "").replace(/\s|kwh/gi, "");
+  if (!s) return NaN;
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) return zahlLesen(s.replace(/\./g, ""));
+  return zahlLesen(s);
+}
+function csvProdukt(t) {
+  const s = String(t || "").trim().toLowerCase();
+  if (!s) return null;
+  if (s.startsWith("spot")) return "Spotmarkt";
+  if (s.startsWith("fest")) return "Festpreis";
+  if (s.startsWith("tranche")) return "Tranchenmodell";
+  if (s.startsWith("ppa")) return "PPA-Modell";
+  if (s.includes("empfehl")) return EMPFEHLUNG;
+  return undefined;
+}
+
+/* Tabelle (Zeilen inkl. Kopfzeile) → vorausgefüllte Anfrage und Hinweise für den Vertriebspartner */
+function kundeAusTabelle(zeilen, basis) {
+  const hinweise = [];
+  if (!zeilen || zeilen.length < 2) throw new Error("Die Datei enthält keine Daten. In der ersten Zeile stehen die Spaltennamen, darunter die Lieferstellen.");
+  const kopf = zeilen[0].map(csvSchluessel);
+  const idx = {};
+  KUNDE_CSV_SPALTEN.forEach(([k, titel]) => { idx[k] = kopf.indexOf(csvSchluessel(titel)); });
+  Object.entries(KUNDE_CSV_ALIAS).forEach(([k, al]) => {
+    if (idx[k] >= 0) return;
+    const i = kopf.findIndex((h, n) => al.includes(h) && !Object.values(idx).includes(n));
+    if (i >= 0) idx[k] = i;
+  });
+  if (idx.firma < 0) throw new Error("Keine Spalte „Firma“ gefunden. Bitte die Vorlage verwenden; die erste Zeile muss die Spaltennamen enthalten.");
+  const unbekannt = zeilen[0].filter((h, n) => String(h || "").trim() && !Object.values(idx).includes(n));
+  if (unbekannt.length) hinweise.push("Nicht übernommen (Spalte unbekannt): " + unbekannt.join(", "));
+  const w = (z, k) => (idx[k] >= 0 ? String(z[idx[k]] === undefined ? "" : z[idx[k]]).trim() : "");
+  const daten = zeilen.slice(1).filter((z) => z.some((x) => String(x || "").trim()));
+  const erste = daten.find((z) => w(z, "firma"));
+  if (!erste) throw new Error("In der Spalte „Firma“ steht kein Name.");
+  const firmen = [...new Set(daten.map((z) => w(z, "firma")).filter(Boolean))];
+  if (firmen.length > 1) throw new Error("Die Datei enthält mehrere Kunden (" + firmen.join(", ") + "). Bitte je Kunde eine eigene Datei hochladen.");
+  if (firmen[0] === KUNDE_CSV_BEISPIEL) hinweise.push("Das sind noch die Beispieldaten aus der Vorlage. Bitte die Daten des Kunden eintragen.");
+
+  const kunde = { ...basis.kunde };
+  /* Excel macht aus langen Nummern gern „5,12389E+10“ und streicht führende Nullen */
+  const exp = daten.some((z) => ["maloId", "zaehlernummer", "kundennummer", "meloId"].some((k) => /\d[.,]?\d*e\+\d+$/i.test(w(z, k))));
+  if (exp) hinweise.push("Excel hat lange Nummern verkürzt (zum Beispiel „5,12389E+10“). Bitte MaLo, Zählernummer und Kundennummer prüfen; in Excel die Spalten vorher als „Text“ formatieren.");
+  ["firma", "strasse", "plz", "ort", "ansprechpartner", "telefon", "email", "branche", "steuernummer"].forEach((k) => {
+    if (w(erste, k)) kunde[k] = w(erste, k);
+  });
+  if (/^\d{4}$/.test(kunde.plz)) { kunde.plz = "0" + kunde.plz; hinweise.push("PLZ um die führende Null ergänzt: " + kunde.plz + "."); }
+
+  const lieferstellen = [];
+  daten.forEach((z, n) => {
+    const zeile = "Zeile " + (zeilen.indexOf(z) + 1);
+    const hat = ["versorger", "kundennummer", "zaehlernummer", "maloId", "meloId", "verbrauch", "bezeichnung", "sparte", "lStrasse"].some((k) => w(z, k));
+    if (!hat) return;
+    const sp = w(z, "sparte").toLowerCase();
+    const medium = /gas/.test(sp) ? "gas" : "strom";
+    if (sp && !/gas|strom/.test(sp)) hinweise.push(zeile + ": Sparte „" + w(z, "sparte") + "“ unbekannt, als Strom übernommen.");
+    const l = { ...leereLieferstelle(medium) };
+    l.bezeichnung = w(z, "bezeichnung");
+    const eigene = w(z, "lStrasse") || w(z, "lPlz") || w(z, "lOrt");
+    if (eigene) {
+      l.strasse = w(z, "lStrasse"); l.plz = w(z, "lPlz").replace(/^(\d{4})$/, "0$1"); l.ort = w(z, "lOrt");
+      l.adresseVon = l.strasse === kunde.strasse && l.plz === kunde.plz && l.ort === kunde.ort ? "kunde" : "manuell";
+    } else {
+      l.adresseVon = "kunde"; l.strasse = kunde.strasse; l.plz = kunde.plz; l.ort = kunde.ort;
+    }
+    l.versorger = w(z, "versorger"); l.versorgerVon = "manuell";
+    l.kundennummer = w(z, "kundennummer");
+    l.zaehlernummer = w(z, "zaehlernummer");
+    l.maloId = w(z, "maloId").replace(/\s/g, "");
+    if (l.maloId && !/^\d{11}$/.test(l.maloId)) hinweise.push(zeile + ": Die MaLo „" + l.maloId + "“ hat nicht 11 Ziffern. Bitte prüfen.");
+    l.meloId = w(z, "meloId").replace(/\s/g, "").toUpperCase();
+    if (l.meloId && !/^DE[0-9A-Z]{31}$/.test(l.meloId)) hinweise.push(zeile + ": Die MeLo „" + l.meloId + "“ hat nicht das übliche Format (DE und 31 Zeichen). Bitte prüfen.");
+    if (w(z, "verbrauch")) {
+      const v = csvKwh(w(z, "verbrauch"));
+      if (isNaN(v) || v <= 0) hinweise.push(zeile + ": Jahresverbrauch „" + w(z, "verbrauch") + "“ nicht lesbar.");
+      else l.verbrauch = String(Math.round(v));
+    }
+    const za = w(z, "zaehlerart").toUpperCase();
+    if (za === "RLM" || za === "SLP") l.zaehlerart = za;
+    else if (za) hinweise.push(zeile + ": Zählerart „" + w(z, "zaehlerart") + "“ unbekannt, SLP übernommen.");
+    if (w(z, "vertragsendeAlt")) {
+      const d = csvDatum(w(z, "vertragsendeAlt"));
+      if (d) l.vertragsendeAlt = d; else hinweise.push(zeile + ": Datum „" + w(z, "vertragsendeAlt") + "“ bei „Vertrag läuft bis“ nicht lesbar.");
+    }
+    l.kuendigungsfrist = w(z, "kuendigungsfrist");
+    lieferstellen.push(l);
+  });
+  if (!lieferstellen.length) hinweise.push("Keine Lieferstelle in der Datei. Bitte im Schritt „Lieferstellen“ ergänzen.");
+
+  const neu = { ...basis, kunde, lieferstellen: lieferstellen.length ? lieferstellen : basis.lieferstellen };
+  const ersterWert = (k) => { const z = daten.find((x) => w(x, k)); return z ? w(z, k) : ""; };
+  [["produkt", "Produkt Strom"], ["produktGas", "Produkt Erdgas"]].forEach(([k, titel]) => {
+    const roh = ersterWert(k); const p = csvProdukt(roh);
+    if (p) neu[k] = p; else if (p === undefined) hinweise.push(titel + " „" + roh + "“ unbekannt, Festpreis übernommen.");
+  });
+  if (ersterWert("laufzeit")) {
+    const roh = ersterWert("laufzeit"); const n = parseInt(roh, 10);
+    const monate = /jahr/i.test(roh) ? n * 12 : n;
+    if (monate > 0 && monate <= 120) { neu.laufzeit = monate; neu.laufzeitArt = "monate"; }
+    else hinweise.push("Laufzeit „" + roh + "“ nicht lesbar.");
+  }
+  if (ersterWert("wunschLieferbeginn")) {
+    const d = csvDatum(ersterWert("wunschLieferbeginn"));
+    if (d) { neu.wunschLieferbeginn = d; neu.lieferbeginnVon = "manuell"; }
+    else hinweise.push("Lieferbeginn „" + ersterWert("wunschLieferbeginn") + "“ nicht lesbar.");
+  }
+  if (ersterWert("bemerkung")) {
+    const b = daten.map((z) => w(z, "bemerkung")).filter(Boolean).join("\n");
+    neu.bemerkungVertrieb = [basis.bemerkungVertrieb, b].filter(Boolean).join("\n");
+  }
+  return { anfrage: neu, hinweise };
+}
+
 function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpeichern, onSenden, onAbbrechen }) {
   const [a, setA] = useState(entwurf || leereAnfrage(user));
   const [schritt, setSchritt] = useState(1);
   const [geprueft, setGeprueft] = useState(false);
+  const [csv, setCsv] = useState(null); /* { name, hinweise, fehler, laedt } nach dem Hochladen einer Kundendatei */
+  const kundeEinlesen = (file) => {
+    if (!file) return;
+    const vorhanden = a.kunde.firma || a.lieferstellen.some((l) => l.versorger || l.zaehlernummer || l.maloId || l.verbrauch);
+    if (vorhanden && !window.confirm("Die bisher eingetragenen Kunden- und Lieferstellendaten werden durch die Datei ersetzt. Fortfahren?")) return;
+    setCsv({ name: file.name, laedt: true, hinweise: [] });
+    dateiLesen(file, async (d) => {
+      try {
+        const zeilen = /\.xlsx?$/i.test(file.name) ? await xlsxLesen(d) : await csvLesen(d);
+        const { anfrage, hinweise } = kundeAusTabelle(zeilen, a);
+        setA(anfrage);
+        setCsv({ name: file.name, hinweise, ls: anfrage.lieferstellen.length, firma: anfrage.kunde.firma });
+      } catch (e) {
+        setCsv({ name: file.name, fehler: (e && e.message) || "Die Datei konnte nicht gelesen werden.", hinweise: [] });
+      }
+    });
+  };
 
   const setK = (k, v) =>
     setA((z) => {
@@ -189,6 +403,39 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
       <div className="rounded p-5" style={{ background: C.card, border: "1px solid " + C.line }}>
         {schritt === 1 && (
           <div className="grid sm:grid-cols-2 gap-4">
+            {!entwurf && (
+              <div className="sm:col-span-2 p-4 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
+                <div className="flex items-center gap-2 text-sm"><Upload size={15} /> Kunde aus einer Datei übernehmen (freiwillig)</div>
+                <p className="text-xs mt-1" style={{ color: C.muted }}>
+                  Vorlage laden, Kunde und Lieferstellen eintragen (eine Zeile je Lieferstelle) und als CSV hochladen.
+                  Das Portal füllt die Anfrage aus; du prüfst sie danach und lädst je Lieferstelle die Rechnung hoch.
+                </p>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <Btn variante="hell" icon={FileText} onClick={() => dateiLaden(kundeCsvVorlage())}>Vorlage herunterladen (CSV)</Btn>
+                  <label className="inline-flex items-center gap-2 px-3 py-2 rounded text-sm cursor-pointer"
+                    style={{ background: C.ink, color: "#fff" }}>
+                    <Upload size={14} /> Datei hochladen
+                    <input type="file" className="hidden" accept=".csv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; kundeEinlesen(f); }} />
+                  </label>
+                </div>
+                {csv && csv.laedt && <p className="text-sm mt-3" style={{ color: C.muted }}>„{csv.name}“ wird gelesen …</p>}
+                {csv && csv.fehler && (
+                  <div className="mt-3 p-3 rounded text-sm" style={{ background: "#FCF3F0", border: "1px solid " + C.warn, color: C.text }}>
+                    <span style={{ color: C.warn }}>„{csv.name}“ konnte nicht übernommen werden.</span> {csv.fehler}
+                  </div>
+                )}
+                {csv && csv.firma && (
+                  <div className="mt-3 p-3 rounded text-sm" style={{ background: "#F1F7F0", border: "1px solid " + C.ok, color: C.text }}>
+                    <div style={{ color: C.ok }}><Check size={14} className="inline mr-1" />Übernommen: {csv.firma} mit {csv.ls} {csv.ls === 1 ? "Lieferstelle" : "Lieferstellen"}.</div>
+                    <div className="text-xs mt-1" style={{ color: C.muted }}>Bitte alle Schritte durchsehen und je Lieferstelle die Rechnung hochladen.</div>
+                    {csv.hinweise.length > 0 && (
+                      <ul className="text-xs mt-2 ml-4 list-disc" style={{ color: C.warn }}>{csv.hinweise.map((h, i) => <li key={i}>{h}</li>)}</ul>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {optionen.length > 1 && (
               <div className="sm:col-span-2 p-3 rounded" style={{ background: "#F6F8FA", border: "1px solid " + C.line }}>
                 <Select label="Kunde anlegen für" value={a.partnerId}

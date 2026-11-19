@@ -403,7 +403,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.40 · 17.11.2026 · Schnellerer Start: Programm in Teile aufgeteilt, Vorgänge löschen (Geschäftsführung), Logo in den E-Mails, Beschaffung: Offpeak-Absicherung bei Tal am Tag, Hinweis auf neue Fassung, Angebot per Link an den Kunden: Öffnen sehen, am Handy unterschreiben, Vollmacht und Angebot am Handy ausfüllbar mit Unterschriftsfeldern für DocuSign, Steuernummer auf der Vollmacht, Hedgearten nach Vorgabe der Beschaffung, Skalierung 80–120 %, AE-Näherung, Termine vom Teamleiter mit Kundendaten, Hinweisen, Rückmeldung und Verschieben, Seitenleiste scrollt für sich, neue Seite beginnt oben";
+const VERSION = "v5.41 · 19.11.2026 · Kunde per CSV-Datei anlegen (Vorlage und Hochladen in „Angebot anfragen“), CSV-Dateien aus Excel unter Windows lesbar";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -607,7 +607,14 @@ async function xlsxLesen(datei) {
 }
 
 async function csvLesen(datei) {
-  const roh = decodeURIComponent(escape(atob(String(await dateiInhalt(datei)).split(",")[1])));
+  /* UTF-8, sonst Windows-1252 (so speichert Excel unter Windows oft „CSV“); Byte-Order-Mark entfernen */
+  const bin = atob(String(await dateiInhalt(datei)).split(",")[1] || "");
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  let roh;
+  try { roh = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch (e) { roh = new TextDecoder("windows-1252").decode(bytes); }
+  roh = roh.replace(/^\ufeff/, "");
   const trenner = (roh.split("\n")[0].match(/;/g) || []).length >=
                   (roh.split("\n")[0].match(/,/g) || []).length ? ";" : ",";
   return roh.split(/\r?\n/).filter((z) => z.trim()).map((z) => {
