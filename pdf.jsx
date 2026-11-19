@@ -1408,7 +1408,9 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   }
 
   /* ---------- Smartmeter-Angebot: Titelseite mit Bild und Seite mit Vorteilen und Preisen ---------- */
-  const smPos = ((smartmeter && smartmeter.positionen) || []).filter((p) => String(p.bezeichnung || "").trim());
+  /* Smartmeter nur für die Lieferstellen dieser Variante */
+  const smIds = new Set(stellenVon(a, v).map((l) => l.id));
+  const smPos = ((smartmeter && smartmeter.positionen) || []).filter((p) => String(p.bezeichnung || "").trim() && (!p.lieferstelle || smIds.has(p.lieferstelle)));
   if (smPos.length) {
     const tx = { ...SMARTMETER, ...(smartmeter.texte || {}) };
     const HELLBLAU = [196, 208, 222], HELLGRAU = [244, 247, 250];
@@ -1491,7 +1493,7 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     };
     tabKopf();
     let zeile = 0;
-    a.lieferstellen.forEach((l, i) => {
+    stellenVon(a, v).forEach((l, i) => {
       const lp = smPos.filter((p) => p.lieferstelle === l.id);
       lp.forEach((p, j) => {
         const h = j === 0 ? 12 : 7.5;
@@ -1591,7 +1593,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     strich(TEXT); doc.setLineWidth(0.3); doc.rect(RA, y - 2.8, 2.8, 2.8, "S"); ankreuzen("Lieferstellenliste", RA, y - 2.8);
     schrift(8); farbe(TEXT); text("siehe Lieferstellenliste (Anlage)", RA + 4, y); y += 5;
   }
-  for (const l of a.lieferstellen) {
+  /* im Auftrag stehen genau die Lieferstellen dieser Angebotsvariante */
+  for (const l of (blanko ? a.lieferstellen : stellenVon(a, v))) {
     if (y + 20 > H - 22) y = neueSeite("SERVICE- & BERATUNGSAUFTRAG");
     const vv = vorversorger[l.id] || {};
     schrift(8.5, true); farbe(NAVY);

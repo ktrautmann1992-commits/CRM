@@ -405,7 +405,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh), Varianten für einzelne Lieferstellen, tatsächlicher und dem Vertrieb mitgeteilter Aufschlag, Preise mit 4 Nachkommastellen, Zählernummer kein Pflichtfeld";
+const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh), Varianten für einzelne Lieferstellen, tatsächlicher und dem Vertrieb mitgeteilter Aufschlag, Preise mit 4 Nachkommastellen, Zählernummer kein Pflichtfeld, Service- und Beratungsauftrag nur mit den Lieferstellen der Variante";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
