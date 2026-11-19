@@ -30,7 +30,7 @@ import {
   monateBis, monateDazu, monateZwischen, naechsterSchritt, naechsterSchrittInnen, num, preisTeile, smartmeterStart,
   smartmeterSummen, statusVon, tippgeberFuer, tippgeberLabel, tippgeberMomentaufnahme, uid, umlagenAusgleich, umlagenJahr,
   umlagenVorjahre, varianten, verbrauchGesamt, verbrauchMedium, vertragsende, zahlLesen, zeitDe,
-  csvLesen, xlsxLesen, VERTRIEB_BEARBEITBAR, ctZahl, stelleIn, stelleAbweichend, stellenVon, provisionsStellen, aufschlagText,
+  csvLesen, xlsxLesen, VERTRIEB_BEARBEITBAR, ctZahl, mitVerdecktemAufschlag, stelleIn, stelleAbweichend, stellenVon, provisionsStellen, aufschlagText,
 } from "./App.jsx";
 import { BeschaffungKarte } from "./beschaffung.jsx";
 import { Smartmeter, SmartmeterKalk, UmlagenPflege } from "./innendienst.jsx";
@@ -38,6 +38,8 @@ import { dienstleistungsvertragPdf, egcAngebotPdf, individualPaket, ndaPdf } fro
 import { Akquise } from "./vertrieb.jsx";
 
 /* ------------------------------------------------------------------ */
+const hatWertK = (x) => x !== undefined && x !== null && String(x).trim() !== "";
+
 /* ---------- Kunde aus einer CSV- oder Excel-Datei anlegen ----------
    Eine Datei = ein Kunde. Je Zeile eine Lieferstelle; die Kundendaten stehen in der ersten Zeile
    (in weiteren Zeilen dürfen sie fehlen oder gleich sein). Das Ergebnis füllt nur den Assistenten vor:
@@ -318,7 +320,6 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
     a.lieferstellen.forEach((l, i) => {
       const n = (l.bezeichnung || "Lieferstelle " + (i + 1)) + ": ";
       if (!l.neueinzug && !l.versorger) f.push(n + "Versorger");
-      if (!l.zaehlernummer) f.push(n + "Zählernummer");
       if (!l.maloId) f.push(n + "Marktlokations-ID");
       if (!l.verbrauch) f.push(n + "Jahresverbrauch");
       if (l.zaehlerart === "RLM" && !l.lastgang) f.push(n + "Lastgang");
@@ -773,8 +774,8 @@ function Assistent({ user, mitarbeiter, alleAnfragen, tippgeber, entwurf, onSpei
                               onChange={(v) => setL(l.id, "kuendigungsfrist", v)} placeholder="z. B. 3 Monate zum Vertragsende" />
                           </>
                         )}
-                        <Feld label="Zählernummer *" value={l.zaehlernummer}
-                          onChange={(v) => setL(l.id, "zaehlernummer", v)} fehler={geprueft && !l.zaehlernummer} />
+                        <Feld label="Zählernummer" value={l.zaehlernummer}
+                          onChange={(v) => setL(l.id, "zaehlernummer", v)} />
                         <Feld label="Marktlokations-ID (MaLo) *" value={l.maloId}
                           onChange={(v) => setL(l.id, "maloId", v)} placeholder="11-stellig"
                           fehler={geprueft && !l.maloId} />
@@ -1381,6 +1382,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
           sparte: v.sparte || "beide",
           laufzeitArt: v.laufzeitArt || "monate",
           aufschlag: parseFloat(String(v.aufschlag).replace(",", ".")) || 0,
+          aufschlagEcht: hatWertK(v.aufschlagEcht) ? ctZahl(v.aufschlagEcht) : "",
           laufzeit: parseInt(v.laufzeit) || a.laufzeit,
         })),
       },
@@ -1518,12 +1520,13 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         const sv = stelleIn(x, l);
         const s = {};
         if (sv.eigen.versorger) s.versorger = sv.versorger;
-        if (sv.eigen.aufschlag) s.aufschlag = String(sv.aufschlag);
+        if (sv.eigen.aufschlag) { s.aufschlag = String(sv.aufschlag); if (ctZahl(sv.aufschlagEcht) !== ctZahl(sv.aufschlag)) s.aufschlagEcht = String(sv.aufschlagEcht); }
         if (sv.eigen.lieferbeginn) s.beginn = sv.lieferbeginn;
         if (sv.eigen.laufzeit && enddatum(sv)) s.ende = enddatum(sv);
         if (Object.keys(s).length) stellen[l.id] = s;
       }));
       return { versorger: (vs[0] || {}).versorger || "", stellen, aufschlag: (aktiveVariante(a) || {}).aufschlag || a.aufschlag,
+               aufschlagEcht: hatWertK((aktiveVariante(a) || {}).aufschlagEcht) ? String(aktiveVariante(a).aufschlagEcht) : "",
                bonus: "", bonusArt: "keine" };
     })()
   );
@@ -2190,13 +2193,13 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                 <p className="text-xs mt-2" style={{ color: C.strom }}>
                                   Umlagen {au.jahr}: {num(au.alt, 3)} ct/kWh, {au.ziel}: {num(au.neu, 3)} ct/kWh.
                                   Im Vergleich wird der Arbeitspreis um {(au.diff >= 0 ? "+" : "") + num(au.diff, 3)} ct/kWh
-                                  auf {num(ergebnis.arbeit + au.diff, 2)} ct/kWh angepasst, mit Hinweis im Angebot.
+                                  auf {num(ergebnis.arbeit + au.diff, 4)} ct/kWh angepasst, mit Hinweis im Angebot.
                                 </p>
                               );
                             })()}
                             {ergebnis && (
                               <p className="text-xs mt-2" style={{ color: C.ok }}>
-                                Arbeitspreis bisher: {num(ergebnis.arbeit, 2)} ct/kWh
+                                Arbeitspreis bisher: {num(ergebnis.arbeit, 4)} ct/kWh
                                 {ergebnis.aufgerechnet ? " (aus " + num(ergebnis.tage || 0) + " Tagen Abrechnung" +
                                   (ergebnis.grundpreis ? ", ohne anteiligen Grundpreis" : "") + ")" : ""}
                                 {ergebnis.grundpreis ? " · Grundpreis " + num(ergebnis.grundpreis, 2) + " €/Jahr" : ""}
@@ -2295,9 +2298,17 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                               ...(versorger || []).map((x) => ({ value: x.name, label: x.name }))]} />
                           <Select label="Beschaffungsmodell" value={v.produkt}
                             onChange={(x) => setVar(v.id, "produkt", x)} options={PRODUKTE} />
-                          <Feld label="Bestätigter Aufschlag (ct/kWh)" value={v.aufschlag}
+                          <Feld label="Aufschlag für den Vertriebspartner (ct/kWh)" value={v.aufschlag}
                             onChange={(x) => setVar(v.id, "aufschlag", x)}
                             placeholder={"Wunsch: " + num(a.aufschlag, 3)} />
+                          <div>
+                            <Feld label="Tatsächlicher Aufschlag (ct/kWh), sieht der Vertrieb nicht" value={v.aufschlagEcht || ""}
+                              onChange={(x) => setVar(v.id, "aufschlagEcht", x)}
+                              placeholder={"leer = wie oben (" + num(ctZahl(v.aufschlag), 3) + ")"} />
+                            {hatWertK(v.aufschlagEcht) && ctZahl(v.aufschlagEcht) < ctZahl(v.aufschlag) && (
+                              <p className="text-xs mt-1" style={{ color: C.warn }}>Der tatsächliche Aufschlag ist kleiner als der mitgeteilte.</p>
+                            )}
+                          </div>
                           <Feld label="Lieferbeginn" type="date" value={v.lieferbeginn || ""}
                             onChange={(x) => setVar(v.id, "lieferbeginn", x)} />
                           <Select label="Vertragsdauer festlegen über" value={v.laufzeitArt || "monate"}
@@ -2380,7 +2391,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                     <details className="mt-3 rounded" open={stelleAbweichend(v, l)}
                                       style={{ border: "1px solid " + (stelleAbweichend(v, l) ? C.gas : C.line), background: "#fff" }}>
                                       <summary className="px-3 py-2 text-sm cursor-pointer">
-                                        Abweichend für diese Lieferstelle: Versorger, Lieferzeit, Aufschlag
+                                        Abweichend für diese Lieferstelle: Versorger, Lieferzeit, Aufschläge
                                         {stelleAbweichend(v, l) && <span className="text-xs ml-2" style={{ color: C.gas }}>eigene Werte</span>}
                                       </summary>
                                       <div className="px-3 pb-3 grid sm:grid-cols-2 gap-4">
@@ -2388,9 +2399,12 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                           onChange={(x) => setVarPreis(v.id, l.id, "versorger", x)}
                                           options={[{ value: "", label: "wie Variante" + (v.versorger ? " (" + v.versorger + ")" : "") },
                                             ...(versorger || []).map((x) => ({ value: x.name, label: x.name }))]} />
-                                        <Feld label="Aufschlag (ct/kWh)" value={pr.aufschlag || ""}
+                                        <Feld label="Aufschlag für den Vertriebspartner (ct/kWh)" value={pr.aufschlag || ""}
                                           onChange={(x) => setVarPreis(v.id, l.id, "aufschlag", x)}
                                           placeholder={"wie Variante: " + num(ctZahl(v.aufschlag), 3)} />
+                                        <Feld label="Tatsächlicher Aufschlag (ct/kWh)" value={pr.aufschlagEcht || ""}
+                                          onChange={(x) => setVarPreis(v.id, l.id, "aufschlagEcht", x)}
+                                          placeholder={"wie " + (hatWertK(v.aufschlagEcht) ? "Variante: " + num(ctZahl(v.aufschlagEcht), 3) : "für den Vertriebspartner")} />
                                         <Feld label={"Lieferbeginn" + (pr.lieferbeginn ? "" : " (leer = wie Variante)")} type="date" value={pr.lieferbeginn || ""}
                                           onChange={(x) => setVarPreis(v.id, l.id, "lieferbeginn", x)} />
                                         <Select label="Laufzeit" value={art === "ende" ? "ende" : String(pr.laufzeit || "")}
@@ -2407,7 +2421,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                         <p className="sm:col-span-2 text-xs" style={{ color: C.muted }}>
                                           Gilt für diese Lieferstelle: {sv.versorger || "Versorger offen"} · Beginn {sv.lieferbeginn ? datum(sv.lieferbeginn) : "offen"}
                                           {" · "}{laufzeitMonate(sv) ? jahreText(laufzeitMonate(sv)) : "Laufzeit offen"}
-                                          {enddatum(sv) ? " bis " + datum(enddatum(sv)) : ""} · Aufschlag {num(ctZahl(sv.aufschlag), 3)} ct/kWh
+                                          {enddatum(sv) ? " bis " + datum(enddatum(sv)) : ""} · Aufschlag Vertrieb {num(ctZahl(sv.aufschlag), 3)}
+                                          {ctZahl(sv.aufschlagEcht) !== ctZahl(sv.aufschlag) ? ", tatsächlich " + num(ctZahl(sv.aufschlagEcht), 3) : ""} ct/kWh
                                         </p>
                                       </div>
                                     </details>
@@ -2415,7 +2430,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                 })()}
                                 {(() => {
                                   const t = preisTeile(l, v.preise[l.id], v.umlagen);
-                                  const ct3 = (x) => isNaN(x) ? "–" : num(x, 3) + " ct/kWh";
+                                  const ct3 = (x) => isNaN(x) ? "–" : num(x, 4) + " ct/kWh";
                                   return (
                                     <div className="mt-3 text-xs space-y-0.5" style={{ color: C.muted }}>
                                       <div>Staatliche Umlagen und Abgaben {ct3(t.umlage)}
@@ -2884,17 +2899,22 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                             onChange={(v) => setBestStelle(l.id, "versorger", v)}
                             options={[{ value: "", label: "wie oben" + (best.versorger ? " (" + best.versorger + ")" : "") },
                               ...(versorger || []).map((x) => ({ value: x.name, label: x.name }))]} />
-                          <Feld label="Aufschlag dieser Lieferstelle (ct/kWh)" value={(best.stellen[l.id] || {}).aufschlag || ""}
+                          <Feld label="Aufschlag Vertrieb dieser Lieferstelle (ct/kWh)" value={(best.stellen[l.id] || {}).aufschlag || ""}
                             onChange={(v) => setBestStelle(l.id, "aufschlag", v)}
                             placeholder={"wie unten: " + num(ctZahl(best.aufschlag), 3)} />
+                          <Feld label="Tatsächlicher Aufschlag dieser Lieferstelle (ct/kWh)" value={(best.stellen[l.id] || {}).aufschlagEcht || ""}
+                            onChange={(v) => setBestStelle(l.id, "aufschlagEcht", v)}
+                            placeholder="wie unten" />
                         </div>
                       </div>
                     ))}
                   </div>
 
                   <div className="grid sm:grid-cols-3 gap-4">
-                    <Feld label="Gesamtaufschlag (ct/kWh), gilt für alle Lieferstellen ohne eigenen" value={best.aufschlag}
+                    <Feld label="Aufschlag für den Vertriebspartner (ct/kWh), für alle Lieferstellen ohne eigenen" value={best.aufschlag}
                       onChange={(v) => setBest({ ...best, aufschlag: v })} />
+                    <Feld label="Tatsächlicher Aufschlag (ct/kWh), leer = wie für den Vertriebspartner" value={best.aufschlagEcht || ""}
+                      onChange={(v) => setBest({ ...best, aufschlagEcht: v })} />
                     <Select label="Bonuszahlung" value={best.bonusArt}
                       onChange={(v) => setBest({ ...best, bonusArt: v, bonus: v === "keine" ? "" : best.bonus })}
                       options={[{ value: "keine", label: "Keine" },
@@ -2990,7 +3010,8 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
               <div className="grid sm:grid-cols-2 gap-x-8 mb-4">
                 <Zeile k="Versorger" v={a.bestaetigung && ([...new Set(provisionsStellen(a).map((s) => s.versorger).filter(Boolean))].join(" / ") || a.bestaetigung.versorger)} />
                 <Zeile k="Bestätigte Menge" v={num(bestaetigteMenge(a)) + " kWh"} />
-                <Zeile k="Gesamtaufschlag" v={a.bestaetigung ? aufschlagText(a) : "–"} />
+                <Zeile k="Gesamtaufschlag" v={a.bestaetigung ? (VERTRIEB_SICHT_ROLLEN.includes(user.rolle) ? aufschlagText(a)
+                  : aufschlagText(a, undefined, true) + (mitVerdecktemAufschlag(a) ? " (Vertrieb: " + aufschlagText(a) + ")" : "")) : "–"} />
                 <Zeile k="Erwartete Provision" v={eur(gesamtprovision(a))} />
               </div>
               <div className="grid sm:grid-cols-2 gap-4 mb-4">

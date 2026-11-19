@@ -405,7 +405,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh), Varianten für einzelne Lieferstellen";
+const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh), Varianten für einzelne Lieferstellen, tatsächlicher und dem Vertrieb mitgeteilter Aufschlag, Preise mit 4 Nachkommastellen, Zählernummer kein Pflichtfeld";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1810,7 +1810,11 @@ function stelleIn(v, l) {
     laufzeit: eigeneLaufzeit ? p.laufzeit : v && v.laufzeit,
     lieferende: eigeneLaufzeit ? p.lieferende : (v && v.lieferende) || "",
     aufschlag: hatWert(p.aufschlag) ? p.aufschlag : v && v.aufschlag,
-    eigen: { versorger: hatWert(p.versorger), lieferbeginn: hatWert(p.lieferbeginn), laufzeit: eigeneLaufzeit, aufschlag: hatWert(p.aufschlag) },
+    /* tatsächlicher Aufschlag der Firma; leer = wie der dem Vertrieb mitgeteilte */
+    aufschlagEcht: hatWert(p.aufschlagEcht) ? p.aufschlagEcht
+      : v && hatWert(v.aufschlagEcht) ? v.aufschlagEcht
+      : hatWert(p.aufschlag) ? p.aufschlag : v && v.aufschlag,
+    eigen: { versorger: hatWert(p.versorger), lieferbeginn: hatWert(p.lieferbeginn), laufzeit: eigeneLaufzeit, aufschlag: hatWert(p.aufschlag) || hatWert(p.aufschlagEcht) },
   };
 }
 const stelleAbweichend = (v, l) => Object.values(stelleIn(v, l).eigen).some(Boolean);
@@ -1832,28 +1836,32 @@ function provisionsStellen(a, v) {
       const s = (b.stellen || {})[l.id] || {};
       const x = varFuer(l);
       const sv = x ? stelleIn(x, l) : { lieferbeginn: "", laufzeit: a.laufzeit };
-      return { l, menge: parseFloat(s.kwh) || 0, aufschlag: hatWert(s.aufschlag) ? ctZahl(s.aufschlag) : ctZahl(b.aufschlag),
+      const mit = hatWert(s.aufschlag) ? ctZahl(s.aufschlag) : ctZahl(b.aufschlag);
+      return { l, menge: parseFloat(s.kwh) || 0, aufschlag: mit,
+               aufschlagEcht: hatWert(s.aufschlagEcht) ? ctZahl(s.aufschlagEcht) : hatWert(b.aufschlagEcht) ? ctZahl(b.aufschlagEcht) : mit,
                versorger: s.versorger || b.versorger || "", beginn: s.beginn || sv.lieferbeginn || "", monate: monateVon(x, sv) };
     }).filter((s) => s.menge > 0);
   }
   if (!vars.length) return [];
   return vars.flatMap((x) => stellenVon(a, x).map((l) => {
     const sv = stelleIn(x, l);
-    return { l, menge: parseFloat(l.verbrauch) || 0, aufschlag: ctZahl(sv.aufschlag), versorger: sv.versorger,
+    return { l, menge: parseFloat(l.verbrauch) || 0, aufschlag: ctZahl(sv.aufschlag), aufschlagEcht: ctZahl(sv.aufschlagEcht), versorger: sv.versorger,
              beginn: sv.lieferbeginn, monate: monateVon(x, sv) };
   }));
 }
 /* Provision in einem Lieferjahr: nur Lieferstellen, deren Laufzeit dieses Jahr noch umfasst */
 const imJahr = (s, jahr) => !jahr || lieferjahreAus(s.monate) >= jahr;
-const provisionAus = (stellen, jahr) => stellen.filter((s) => imJahr(s, jahr)).reduce((t, s) => t + (s.menge * s.aufschlag) / 100, 0);
+/* Gesamtprovision der Firma: tatsächlicher Aufschlag. Grundlage für den Vertrieb: der mitgeteilte Aufschlag */
+const provisionAus = (stellen, jahr, mitgeteilt) => stellen.filter((s) => imJahr(s, jahr))
+  .reduce((t, s) => t + (s.menge * (mitgeteilt ? s.aufschlag : (s.aufschlagEcht ?? s.aufschlag))) / 100, 0);
 /* größte Zahl Lieferjahre über alle Lieferstellen */
 const lieferjahreVon = (a, v) => {
   const st = provisionsStellen(a, v);
   return st.length ? Math.max(...st.map((s) => lieferjahreAus(s.monate))) : lieferjahreAus(laufzeitVon(a));
 };
 /* Aufschlag als Text: ein Wert, oder „je Lieferstelle 0,400–0,600“ */
-const aufschlagText = (a, v) => {
-  const w = [...new Set(provisionsStellen(a, v).map((s) => s.aufschlag))];
+const aufschlagText = (a, v, echt) => {
+  const w = [...new Set(provisionsStellen(a, v).map((s) => (echt ? s.aufschlagEcht ?? s.aufschlag : s.aufschlag)))];
   if (!w.length) return num((v ? ctZahl(v.aufschlag) : ctZahl(a.aufschlag)), 3) + " ct/kWh";
   return w.length === 1 ? num(w[0], 3) + " ct/kWh" : "je Lieferstelle " + num(Math.min(...w), 3) + "–" + num(Math.max(...w), 3) + " ct/kWh";
 };
@@ -1871,6 +1879,13 @@ const gesamtprovision = (a, v, jahr) => {
   if (v || a.bestaetigung || varianten(a).length) return provisionAus(provisionsStellen(a, v), jahr);
   return (verbrauchGesamt(a) * ctZahl(a.aufschlag)) / 100;
 };
+/* Provision auf Basis des dem Vertrieb mitgeteilten Aufschlags; darauf rechnen Partner und Struktur */
+const vertriebsprovision = (a, v, jahr) => {
+  if (v || a.bestaetigung || varianten(a).length) return provisionAus(provisionsStellen(a, v), jahr, true);
+  return (verbrauchGesamt(a) * ctZahl(a.aufschlag)) / 100;
+};
+/* Unterscheiden sich tatsächlicher und mitgeteilter Aufschlag? */
+const mitVerdecktemAufschlag = (a, v) => provisionsStellen(a, v).some((s) => Math.abs((s.aufschlagEcht ?? s.aufschlag) - s.aufschlag) > 1e-9);
 
 /* Differenzprovision: der Partner erhält seinen Satz, jede Stufe darüber
    die Differenz zum bereits vergebenen Satz. Der Rest bleibt in der Firma. */
@@ -2009,13 +2024,18 @@ function tippgeberTraeger(a, mitarbeiter) {
 function firmenanteilVorgang(a, jahr) {
   if (!a || !a.bestaetigung) return firmenanteilVon(null);
   const st = provisionsStellen(a).filter((s) => imJahr(s, jahr));
-  const summe = st.reduce((t, s) => t + s.menge * s.aufschlag, 0);
+  const e = (s) => s.menge * (s.aufschlagEcht ?? s.aufschlag);
+  const summe = st.reduce((t, s) => t + e(s), 0);
   if (!summe) return firmenanteilVon(a.bestaetigung.versorger || null);
-  return st.reduce((t, s) => t + s.menge * s.aufschlag * firmenanteilVon(s.versorger || null), 0) / summe;
+  return st.reduce((t, s) => t + e(s) * firmenanteilVon(s.versorger || null), 0) / summe;
 }
 
-function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
-  const g = betrag != null ? betrag : gesamtprovision(a, undefined, jahr);
+function gesamtverteilung(a, mitarbeiter, betrag, jahr, variante) {
+  const g = betrag != null ? betrag : gesamtprovision(a, variante, jahr);
+  /* Partner und Struktur bekommen ihre Sätze auf die Provision zum mitgeteilten Aufschlag;
+     bei der Firma kommt die Provision zum tatsächlichen Aufschlag an */
+  const echtG = gesamtprovision(a, variante, jahr), mitG = vertriebsprovision(a, variante, jahr);
+  const gV = echtG > 0 ? g * (mitG / echtG) : g;
   const quote = firmenanteilVorgang(a, jahr);
   const beiEgc = (g * quote) / 100;
   const teile = beteiligte(a);
@@ -2025,7 +2045,7 @@ function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
   const eigen = (a.akquiseArt || "eigen") === "eigen";
 
   teile.forEach((b) => {
-    const anteilG = (g * (parseFloat(b.anteil) || 0)) / summe;
+    const anteilG = (gV * (parseFloat(b.anteil) || 0)) / summe;
     const v = verteilung(anteilG, b.id, mitarbeiter);
     v.anteile.forEach((x) => {
       if (!map[x.id]) map[x.id] = { ...x, betrag: 0, bonus: 0 };
@@ -2060,7 +2080,7 @@ function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
     const basis = p ? p.betrag : 0;
     let auszahlung = 0, abzug = 0;
     if (tg.art === "prozent") {
-      auszahlung = ((p ? basis : tg.besitzerId === TG_FIRMA ? beiEgc : g) * wert) / 100;
+      auszahlung = ((p ? basis : tg.besitzerId === TG_FIRMA ? beiEgc : gV) * wert) / 100;
       abzug = p ? Math.min(auszahlung, basis) : 0;
     } else if (tg.art === "kwh") {
       const gesamtTG = (wert * tippgeberMenge(a)) / 100000;
@@ -2079,13 +2099,13 @@ function gesamtverteilung(a, mitarbeiter, betrag, jahr) {
     /* Was der Firma bleibt: ihr Anteil an der Gesamtprovision abzüglich
        aller Auszahlungen, die auf die volle Gesamtprovision gerechnet werden. */
     firma: beiEgc - ausgeschuettet,
-    beiEgc, quote, ausgeschuettet,
+    beiEgc, quote, ausgeschuettet, vertriebBasis: gV,
     bonus: bonusGesamt, eigenakquise: eigen, tippgeber,
   };
 }
 
 const anteilVon = (a, id, mitarbeiter, variante) => {
-  const v = gesamtverteilung(a, mitarbeiter, gesamtprovision(a, variante));
+  const v = gesamtverteilung(a, mitarbeiter, gesamtprovision(a, variante), undefined, variante);
   const t = v.anteile.find((x) => x.id === id);
   return t ? t.betrag : 0;
 };
@@ -2804,7 +2824,7 @@ const Datei = ({ label, datei, onSet, hinweis, bild, mehrere, annehmen }) => {
 /* Provisionsaufteilung – zeigt je nach Rolle alles oder nur den eigenen Anteil */
 function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante, ohneHinweis }) {
   const gesamt = gesamtprovision(a, variante);
-  const v = gesamtverteilung(a, mitarbeiter, gesamt);
+  const v = gesamtverteilung(a, mitarbeiter, gesamt, undefined, variante);
   /* Die gesamte ausgeschüttete Provision sehen nur Geschäftsführung und Finanzbuchhaltung.
      Teamleiter und Vertriebsleitung sehen ausschließlich ihren eigenen Anteil. */
   const sichtStruktur = ["Geschäftsführung", "Finanzbuchhaltung"].includes(user.rolle);
@@ -2830,7 +2850,7 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante, ohneHinweis
   /* über die Laufzeit: ein einmaliger Tippgeber fällt nur im 1. Lieferjahr an */
   const kopfGesamt = jahre
     ? Array.from({ length: Math.max(1, Math.round(jahre)) }, (_, i) =>
-        kopfVon(i ? gesamtverteilung(a, mitarbeiter, gesamtprovision(a, variante, i + 1), i + 1) : v)).reduce((t, x) => t + x, 0)
+        kopfVon(i ? gesamtverteilung(a, mitarbeiter, gesamtprovision(a, variante, i + 1), i + 1, variante) : v)).reduce((t, x) => t + x, 0)
     : 0;
   /* Vor der Bestätigung des Versorgers ist die Provision nur eine Vorschau: maßgeblich ist
      die bestätigte Liefermenge. Verbraucht der Kunde weniger, sinkt die Provision. */
@@ -2861,11 +2881,14 @@ function Provisionsblock({ a, mitarbeiter, user, laufzeit, variante, ohneHinweis
       <div className="text-xs mb-3" style={{ color: C.muted }}>
         {istKalkSicht
           ? (partner ? partner.name + " · " + num(partner.satz, 0) + " % · " : "") +
-            "Aufschlag " + aufschlagText(a, variante)
+            "Aufschlag für den Vertrieb " + aufschlagText(a, variante)
+            + (mitVerdecktemAufschlag(a, variante) ? " · tatsächlich " + aufschlagText(a, variante, true) : "")
           : a.bestaetigung && sichtGesamt && !variante
-          ? "bestätigt: " + num(bestaetigteMenge(a)) + " kWh × " + aufschlagText(a)
+          ? "bestätigt: " + num(bestaetigteMenge(a)) + " kWh × " + aufschlagText(a, undefined, true)
+            + (mitVerdecktemAufschlag(a) ? " (dem Vertrieb mitgeteilt " + aufschlagText(a) + ")" : "")
           : sichtGesamt
-          ? num(mengeP) + " kWh × " + aufschlagText(a, variante)
+          ? num(mengeP) + " kWh × " + aufschlagText(a, variante, true)
+            + (mitVerdecktemAufschlag(a, variante) ? " (dem Vertrieb mitgeteilt " + aufschlagText(a, variante) + ")" : "")
           : num(eigenerSatzVon(user), 0) + " % Provisionssatz auf " + (mitMenge
               ? num(bestaetigteMenge(a)) + " kWh bestätigte Liefermenge"
               : num(mengeP) + " kWh laut Anfrage")}
@@ -6064,7 +6087,7 @@ function bonusZeitraum(m, anfragen, mitarbeiter, art) {
         : 1;
       return {
         menge: t.menge + verbrauchGesamt(a) * q,
-        provision: t.provision + gesamtprovision(a) * q,
+        provision: t.provision + vertriebsprovision(a) * q,
       };
     }, { menge: 0, provision: 0 });
 }
@@ -8868,6 +8891,7 @@ export function PortalApp({ pruefung } = {}) {
 
 /* Gemeinsame Bausteine für die ausgelagerten Programmteile */
 export {
+  vertriebsprovision, mitVerdecktemAufschlag,
   VERTRIEB_BEARBEITBAR,
   ctZahl, hatWert, stellenVon, stelleIn, stelleAbweichend, provisionsStellen, lieferjahreVon, lieferjahreAus, aufschlagText, firmenanteilVorgang,
   ABLAGE_ARTEN, ABLAGE_BEREICHE, ABLEHNUNGSGRUENDE, AKQUISE_ART, AKQ_STATUS, Abrechnung, AbrechnungAuslesen, Abschnitt,

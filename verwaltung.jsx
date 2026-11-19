@@ -723,7 +723,7 @@ function Datenexport({ anfragen, mitarbeiter, leads, ablage, versorger, tickets,
       verbrauchMedium(a, "strom"), verbrauchMedium(a, "gas"), verbrauchGesamt(a),
       /* Aufschlag: bei unterschiedlichen Aufschlägen je Lieferstelle das mengengewichtete Mittel */
       (() => { const st = provisionsStellen(a); const m = st.reduce((x, s) => x + s.menge, 0);
-        return m ? Math.round(st.reduce((x, s) => x + s.menge * s.aufschlag, 0) / m * 1000) / 1000
+        return m ? Math.round(st.reduce((x, s) => x + s.menge * (s.aufschlagEcht ?? s.aufschlag), 0) / m * 10000) / 10000
           : a.bestaetigung ? Number(a.bestaetigung.aufschlag) : (v ? Number(v.aufschlag) : Number(a.aufschlag)); })(),
       Math.round(gesamtprovision(a) * 100) / 100,
       a.bestaetigung ? [...new Set(provisionsStellen(a).map((s) => s.versorger).filter(Boolean))].join(" / ") || a.bestaetigung.versorger || "" : "",

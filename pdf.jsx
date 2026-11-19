@@ -928,8 +928,8 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
   const gueltig = v.gueltigBis ? datum(v.gueltigBis) : "";
   const ende = blanko ? null : enddatum(v);
   const zahl = (x, d = 2) => num(x, d);
-  const ct = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " ct/kWh");
-  const ct3 = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 3) + " ct/kWh");
+  const ct = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 4) + " ct/kWh");
+  const ct3 = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 4) + " ct/kWh");
   const eurx = (x) => (x == null || isNaN(x) ? "–" : zahl(x, 2) + " €");
   const logo = "data:image/jpeg;base64," + LOGO_PDF;
   let smTitel = 0; /* Seitennummer der Smartmeter-Titelseite: ohne Seitenzahl */
