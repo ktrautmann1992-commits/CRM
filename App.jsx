@@ -405,7 +405,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh), Varianten für einzelne Lieferstellen, tatsächlicher und dem Vertrieb mitgeteilter Aufschlag, Preise mit 4 Nachkommastellen, Zählernummer kein Pflichtfeld, Service- und Beratungsauftrag nur mit den Lieferstellen der Variante";
+const VERSION = "v5.42 · 19.11.2026 · Angebot je Lieferstelle: eigener Versorger, Lieferbeginn, Laufzeit und Aufschlag (Provision je Lieferstelle, auch bei der Versorgerbestätigung), Anfrage bis zum Angebot durch den Vertrieb änderbar (Lieferstellen ergänzen oder löschen), Smartmeter-Angebot bleibt entfernt, Unterlagen nachfordern mit „Sonstiges“, Angebot ohne Grundpreis (Energiepreis inkl. Grundpreis in ct/kWh), Varianten für einzelne Lieferstellen, tatsächlicher und dem Vertrieb mitgeteilter Aufschlag, Preise mit 4 Nachkommastellen, Zählernummer kein Pflichtfeld, Service- und Beratungsauftrag nur mit den Lieferstellen der Variante, kein Eigenakquise-Bonus mehr";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1952,8 +1952,10 @@ const monateDazu = (iso, monate) => {
 
 /* Zusatzprovision für selbst gewonnene Kunden, in Prozentpunkten.
    Sie geht zulasten des Firmenanteils, die Struktur bleibt unberührt. */
-let BONUS_EIGENAKQUISE = 10;
-const setzeBonus = (wert) => { BONUS_EIGENAKQUISE = parseFloat(wert) || 0; };
+/* Einen Bonus für Eigenakquise gibt es nicht mehr (Vorgabe der Geschäftsführung, v5.42).
+   Ältere Einstellungen und eigene Sätze je Person werden nicht mehr berücksichtigt. */
+const BONUS_EIGENAKQUISE = 0;
+const setzeBonus = () => {};
 
 /* Anteil der Gesamtprovision, der tatsächlich bei EGC ankommt.
    Die Sätze der Vertriebspartner rechnen auf die volle Gesamtprovision,
@@ -1980,10 +1982,7 @@ const istGFRolle = (m) => !!m && m.rolle === "Geschäftsführung";
 const eigenerSatzVon = (m) => istGFRolle(m) ? (isNaN(FIRMENANTEIL) ? 75 : FIRMENANTEIL) : (parseFloat(m && m.satz) || 0);
 
 /* Welcher Eigenakquise-Satz gilt für diese Person? */
-const eigenBonusVon = (m) =>
-  m && m.eigenBonus !== undefined && m.eigenBonus !== ""
-    ? parseFloat(m.eigenBonus) || 0
-    : BONUS_EIGENAKQUISE;
+const eigenBonusVon = () => 0;
 
 /* Ein Kunde kann von mehreren Vertriebspartnern betreut werden.
    beteiligte hält je Partner den prozentualen Anteil an der Vertriebsprovision. */
@@ -2055,11 +2054,8 @@ function gesamtverteilung(a, mitarbeiter, betrag, jahr, variante) {
     /* Der Bonus geht an den Partner selbst, nicht an seine Struktur.
        Ist für die Person ein eigener Satz hinterlegt, gilt dieser. */
     /* Die Geschäftsführung bekommt keinen Bonus an sich selbst: ihr gehört ohnehin der Firmenanteil */
-    if (eigen && !istGFRolle(mitarbeiter.find((x) => x.id === b.id))) {
-      const person = mitarbeiter.find((x) => x.id === b.id) || {};
-      const satz = person.eigenBonus !== undefined && person.eigenBonus !== ""
-        ? parseFloat(person.eigenBonus) || 0
-        : BONUS_EIGENAKQUISE;
+    if (eigen && BONUS_EIGENAKQUISE > 0 && !istGFRolle(mitarbeiter.find((x) => x.id === b.id))) {
+      const satz = BONUS_EIGENAKQUISE;
       const bonus = (anteilG * satz) / 100;
       if (!map[b.id]) map[b.id] = { id: b.id, name: "", rolle: "", satz: 0, betrag: 0, bonus: 0 };
       map[b.id].bonus += bonus;

@@ -192,8 +192,10 @@ Aufschlag in ct/kWh × Menge = Gesamtprovision je Lieferjahr.
   (`FIRMENANTEIL`, Vorgabe 75 %, je Versorger überschreibbar). Die Sätze
   rechnen trotzdem auf die volle Gesamtprovision. Was bleibt:
   `Anteil bei EGC − Ausschüttung`.
-- **Eigenakquise-Bonus** und **Zielboni** gehen zulasten des Firmenanteils,
-  nie zulasten der Overhead-Provision der Teamleiter.
+- **Eigenakquise-Bonus gibt es nicht mehr** (seit v5.42, ausdrücklich bestätigt). Nicht wieder einbauen.
+- **Zielboni** gehen zulasten des Firmenanteils, nie zulasten der Overhead-Provision der Teamleiter.
+- **Zwei Aufschläge (v5.42):** tatsächlicher Aufschlag (`aufschlagEcht`, Gesamtprovision der Firma) und
+  der dem Vertrieb mitgeteilte (`aufschlag`, darauf rechnen Partner und Struktur). Der Vertrieb sieht nur den mitgeteilten.
 
 Sätze zum Zeitpunkt dieser Notiz: Vertriebspartner 20, Teamleiter 30,
 Leitung Vertrieb 35. Obergrenze der Ausschüttung: 50 Prozent.

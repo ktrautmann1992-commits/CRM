@@ -414,25 +414,6 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
                         ...koepfe.filter((k) => k.id !== gewaehlt.id)
                           .map((k) => ({ value: k.id, label: k.name + " · " + k.rolle }))]} />
           </div>
-          {istGF && (
-            <div className="mt-4 pt-4" style={{ borderTop: "1px solid " + C.line }}>
-              <div className="sm:max-w-xs">
-                <Feld label="Eigenakquise-Bonus in Prozentpunkten"
-                  value={gewaehlt.eigenBonus !== undefined && gewaehlt.eigenBonus !== ""
-                    ? gewaehlt.eigenBonus : ""}
-                  placeholder={"Vorgabe: " + num(parseFloat(bonus) || 0, 0)}
-                  onChange={(v) => setz(gewaehlt.id, { eigenBonus: v.replace(/[^\d]/g, "") })} />
-              </div>
-              <p className="text-xs mt-2" style={{ color: C.muted, maxWidth: "60ch" }}>
-                Leer lassen, damit die allgemeine Vorgabe gilt. Ein eigener Wert überschreibt sie
-                nur für {gewaehlt.name}.
-                {gewaehlt.eigenBonus !== undefined && gewaehlt.eigenBonus !== "" && (
-                  <button className="ml-2" style={{ color: C.strom }}
-                    onClick={() => setz(gewaehlt.id, { eigenBonus: "" })}>zurücksetzen</button>
-                )}
-              </p>
-            </div>
-          )}
 
           {(() => {
             /* Die Sätze rechnen auf die volle Gesamtprovision, bei EGC kommt
@@ -617,23 +598,6 @@ function Partnerverwaltung({ mitarbeiter, setMitarbeiter, user, notieren, bonus,
         </Btn>
       </div>
 
-      {istGF && (
-        <div className="rounded p-4 mb-5" style={{ background: C.card, border: "1px solid " + C.line }}>
-          <div className="text-sm mb-1">Bonus für Eigenakquise</div>
-          <p className="text-xs mb-3" style={{ color: C.muted, maxWidth: "62ch" }}>
-            Zusätzliche Prozentpunkte für Kunden, die ein Partner selbst gewonnen hat. Der Bonus geht
-            zulasten des Firmenanteils, die Overhead-Provision der Teamleiter bleibt unverändert.
-          </p>
-          <div className="sm:max-w-xs">
-            <Feld label="Bonus in Prozentpunkten" value={bonus}
-              onChange={(v) => setBonus(v.replace(/[^\d]/g, ""))} />
-          </div>
-          <p className="text-xs mt-2" style={{ color: C.muted }}>
-            Beispiel bei 1.000 € Gesamtprovision: Ein Partner mit 25 % erhält bei Eigenakquise{" "}
-            {eur(10 * (25 + (parseFloat(bonus) || 0)))} statt {eur(250)}.
-          </p>
-        </div>
-      )}
 
       {istGF && strukturanfragen.some((x) => x.status === "offen") && (
         <div className="rounded overflow-hidden mb-5" style={{ background: C.card, border: "1px solid " + C.gas }}>
