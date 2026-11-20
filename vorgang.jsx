@@ -30,7 +30,7 @@ import {
   monateBis, monateDazu, monateZwischen, naechsterSchritt, naechsterSchrittInnen, num, preisTeile, smartmeterStart,
   smartmeterSummen, statusVon, tippgeberFuer, tippgeberLabel, tippgeberMomentaufnahme, uid, umlagenAusgleich, umlagenJahr,
   umlagenVorjahre, varianten, verbrauchGesamt, verbrauchMedium, vertragsende, zahlLesen, zeitDe,
-  csvLesen, xlsxLesen, VERTRIEB_BEARBEITBAR, ctZahl, mitVerdecktemAufschlag, stelleIn, stelleAbweichend, stellenVon, provisionsStellen, aufschlagText,
+  csvLesen, xlsxLesen, VERTRIEB_BEARBEITBAR, SPOT_2025, spotVergleich, ctZahl, mitVerdecktemAufschlag, stelleIn, stelleAbweichend, stellenVon, provisionsStellen, aufschlagText,
 } from "./App.jsx";
 import { BeschaffungKarte } from "./beschaffung.jsx";
 import { Smartmeter, SmartmeterKalk, UmlagenPflege } from "./innendienst.jsx";
@@ -1341,7 +1341,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
         jahr: umlagenJahr(UMLAGEN), vorjahre: umlagenVorjahre(UMLAGEN) }));
       if (!v.umlagen) setVar(v.id, "umlagen", vu);
       const pdf = await egcAngebotPdf(a, { ...v, umlagen: vu },
-        { mitarbeiter, vorversorger: mitVergleich ? vorv : {}, vollmachtBemerkung: vmBemerkung, smartmeter: sm });
+        { mitarbeiter, vorversorger: mitVergleich ? vorv : {}, spotVorversorger: vorv, vollmachtBemerkung: vmBemerkung, smartmeter: sm });
       setVar(v.id, "angebot", pdf);
       setVar(v.id, "angebotMitVergleich", mitVergleich);
       /* gleich anzeigen, damit die Kalkulation es prüfen kann */
@@ -2458,6 +2458,56 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                             ))}
                           </div>
                         </div>
+
+                        {/* Spotmarkt: Vergleich mit dem Lieferjahr 2025, immer aufgeklappt */}
+                        {v.produkt === "Spotmarkt" && (() => {
+                          const sp = v.spot || {};
+                          const setSpot = (k, w) => setVar(v.id, "spot", { ...sp, [k]: w });
+                          const zeilen = spotVergleich(a, v, vorv);
+                          const ct4 = (x) => (isNaN(x) ? "–" : num(x, 4) + " ct/kWh");
+                          const summeAlt = zeilen.filter((z) => z.vollstaendig).reduce((s, z) => s + z.kostenAlt, 0);
+                          const summeSpot = zeilen.filter((z) => z.vollstaendig).reduce((s, z) => s + z.kostenSpot, 0);
+                          return (
+                            <div className="rounded p-4 space-y-3" style={{ background: "#F1F7F0", border: "1px solid " + C.ok }}>
+                              <div className="text-sm">Spotmarkt-Vergleich 2025 <span className="text-xs" style={{ color: C.muted }}>steht im Angebot</span></div>
+                              <p className="text-xs" style={{ color: C.muted }}>
+                                Was hätte der Kunde 2025 am Spotmarkt bezahlt? Durchschnittlicher Börsenpreis 2025:
+                                Strom {num(SPOT_2025.strom, 4)} ct/kWh, Erdgas {num(SPOT_2025.gas, 4)} ct/kWh. Dazu Ihr Aufschlag,
+                                die Netzentgelte 2025 und die Umlagen 2025. Verglichen wird mit dem bisherigen Vertrag (oben unter „Bisheriger Versorger“).
+                              </p>
+                              <div className="grid sm:grid-cols-3 gap-4">
+                                <Feld label="Aufschlag auf den Börsenpreis (ct/kWh)" value={sp.aufschlag || ""}
+                                  onChange={(x) => setSpot("aufschlag", x)} placeholder="z. B. 1,0" />
+                              </div>
+                              {zeilen.map((z) => (
+                                <div key={z.l.id} className="p-3 rounded" style={{ background: "#fff", border: "1px solid " + C.line }}>
+                                  <div className="flex items-center gap-2 text-sm mb-2"><MediumIcon medium={z.l.medium} />{z.l.bezeichnung || (z.sparte === "gas" ? "Erdgas" : "Strom")}
+                                    <span className="text-xs" style={{ color: C.muted }}>{num(z.menge)} kWh</span></div>
+                                  <div className="grid sm:grid-cols-3 gap-4">
+                                    <Feld label="Netzentgelte 2025 (ct/kWh)" value={(sp.netz || {})[z.l.id] || ""}
+                                      onChange={(x) => setSpot("netz", { ...(sp.netz || {}), [z.l.id]: x })} placeholder="von der Rechnung 2025" />
+                                    <div className="sm:col-span-2 text-xs space-y-0.5" style={{ color: C.muted }}>
+                                      <div>Börsenpreis Ø 2025 {ct4(z.boerse)} + Aufschlag {ct4(z.aufschlag)} + Netzentgelte 2025 {ct4(z.netz)} + Umlagen 2025 {ct4(z.umlage)}</div>
+                                      <div style={{ color: C.text }}>= Arbeitspreis am Spotmarkt 2025 {ct4(z.arbeit)} · Kosten {isNaN(z.kostenSpot) ? "–" : eur(z.kostenSpot)}</div>
+                                      <div>Bisheriger Vertrag 2025: {z.alt ? ct4(z.alt.arbeit) + " + Grundpreis " + eur(z.alt.grundpreis) + " = " + eur(z.kostenAlt) : "fehlt (oben unter „Bisheriger Versorger“ eintragen)"}</div>
+                                      {z.vollstaendig && (
+                                        <div style={{ color: z.differenz >= 0 ? C.ok : C.warn }}>
+                                          {z.differenz >= 0 ? "Am Spotmarkt " + eur(z.differenz) + " günstiger" : "Am Spotmarkt " + eur(-z.differenz) + " teurer"}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              {zeilen.some((z) => z.vollstaendig) && (
+                                <div className="text-sm" style={{ color: summeAlt - summeSpot >= 0 ? C.ok : C.warn }}>
+                                  Zusammen: bisheriger Vertrag {eur(summeAlt)}, Spotmarkt {eur(summeSpot)} →{" "}
+                                  {summeAlt - summeSpot >= 0 ? eur(summeAlt - summeSpot) + " weniger" : eur(summeSpot - summeAlt) + " mehr"} im Jahr 2025
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         <Provisionsblock a={a} mitarbeiter={mitarbeiter} user={user}
                           laufzeit={laufzeitFuer(a, v)}

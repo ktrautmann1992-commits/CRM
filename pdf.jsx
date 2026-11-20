@@ -24,7 +24,7 @@ import {
   datum, enddatum, erzeugePdf, firmenzeile, heute, kb, ladeJsPdf, lastgangAuswerten,
   lastgangGrafiken, laufzeitMonate, num, pdfFussFirma, pdfMitFeldern, preisTeile, smartmeterSummen, umlageSumme,
   umlagenAusgleich, umlagenJahr, verbrauchGesamt, verbrauchMedium, vertragsZeilen, visitenkartenDaten, xlsxAusZeilen, zahlLesen,
-  stelleIn, stellenVon,
+  stelleIn, stellenVon, spotVergleich, SPOT_2025,
 } from "./App.jsx";
 import { Beschaffung } from "./beschaffung.jsx";
 import { Kalkulationen, Smartmeter } from "./innendienst.jsx";
@@ -914,7 +914,7 @@ async function portfolioFlyerPdf(m) {
 }
 
 /* Erzeugt das Angebot als PDF. Gibt ein Dateiobjekt zurück wie ein Upload. */
-async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBemerkung = "", blanko = false, smartmeter = null }) {
+async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, spotVorversorger = null, vollmachtBemerkung = "", blanko = false, smartmeter = null }) {
   const jsPDF = await ladeJsPdf();
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true });
   const W = 210, H = 297, RA = 16, BR = W - 2 * RA;
@@ -1359,6 +1359,68 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, vollmachtBe
     text("Hiermit akzeptiere ich das oben stehende Angebot und beauftrage EGC Energie mit dem Abschluss des Energieliefervertrags.",
       RA + 4, y + 12.5, { maxWidth: BR - 8 });
     unterschriften(y + 24, ["Ort, Datum", "Name, Vorname Kunde (leserlich)", "Unterschrift & Stempel"], 4, "Angebot", 6);
+  }
+
+  /* ---------- Spotmarkt: Vergleich mit dem Lieferjahr 2025 ---------- */
+  if (!blanko && v.produkt === "Spotmarkt" && v.spot) {
+    const zeilenSpot = spotVergleich(a, v, spotVorversorger || (a.kalkulation && a.kalkulation.vorversorger) || vorversorger, v.umlagen)
+      .filter((z) => !isNaN(z.kostenSpot));
+    if (zeilenSpot.length) {
+      y = neueSeite("SPOTMARKT-VERGLEICH 2025");
+      y = ueberschrift("Was Sie 2025 am Spotmarkt bezahlt hätten", RA, y + 4);
+      farbe(TEXT);
+      y = absatz("Wir haben Ihr Lieferjahr 2025 nachgerechnet: mit dem durchschnittlichen Börsenpreis (Day-Ahead) des Jahres 2025, " +
+        "unserem Aufschlag sowie den Netzentgelten und staatlichen Umlagen von 2025. Daneben steht, was Sie mit Ihrem bisherigen Vertrag bezahlt haben.",
+        RA, y, BR) + 3;
+      const sp4 = [RA, RA + 92, RA + 140];
+      let sAlt = 0, sSpot = 0, alleVoll = true;
+      for (const z of zeilenSpot) {
+        const reihen = [
+          ["Durchschnittlicher Börsenpreis 2025", "", ct(z.boerse)],
+          ["Aufschlag", "", ct(z.aufschlag)],
+          ["Netzentgelte 2025", "", ct(z.netz)],
+          ["Staatliche Umlagen und Abgaben 2025", "", ct(z.umlage)],
+          ["Arbeitspreis", z.alt ? ct(z.alt.arbeit) : "–", ct(z.arbeit)],
+          ["Grundpreis (€/Jahr)", z.alt ? eurx(z.alt.grundpreis) : "–", "–"],
+          ["Jahresverbrauch", num(z.menge) + " kWh", num(z.menge) + " kWh"],
+          ["Kosten 2025", z.vollstaendig ? eurx(z.kostenAlt) : "–", eurx(z.kostenSpot)],
+        ];
+        const ZH = 5.6, KH = 7, th = KH + reihen.length * ZH;
+        if (y + th + 14 > H - 22) y = neueSeite("SPOTMARKT-VERGLEICH 2025");
+        schrift(8.5, true); farbe(NAVY);
+        text((z.l.bezeichnung || (z.sparte === "gas" ? "Erdgas" : "Strom")) + "  ·  " + (z.sparte === "gas" ? "Erdgas" : "Strom"), RA, y);
+        y += 2.5;
+        schatten(RA, y, BR, th, 2.5);
+        doc.saveGraphicsState(); doc.roundedRect(RA, y, BR, th, 2.5, 2.5, null); doc.clip(); doc.discardPath();
+        flaeche(WEISS); doc.rect(RA, y, BR, th, "F");
+        verlauf(RA, y, BR, KH, NAVY1, NAVY2, { stufen: 60 });
+        reihen.forEach((r, i) => { if (i === reihen.length - 1) { flaeche(GRUENHELL); doc.rect(RA, y + KH + i * ZH, BR, ZH, "F"); }
+          else if (i % 2) { flaeche(HELL); doc.rect(RA, y + KH + i * ZH, BR, ZH, "F"); } });
+        doc.restoreGraphicsState();
+        strich(LINIE); doc.setLineWidth(0.25); doc.roundedRect(RA, y, BR, th, 2.5, 2.5, "S");
+        schrift(7.6, true); farbe(WEISS);
+        ["Position", "Ihr Vertrag 2025", "Spotmarkt 2025"].forEach((tt, i) => text(tt, sp4[i] + 3, y + 4.7));
+        y += KH;
+        reihen.forEach((r, i) => { const fett = i === reihen.length - 1; schrift(8, fett); farbe(fett ? NAVY : TEXT);
+          r.forEach((tt, k) => text(tt || "", sp4[k] + 3, y + 3.9)); y += ZH; });
+        y += 6;
+        if (z.vollstaendig) { sAlt += z.kostenAlt; sSpot += z.kostenSpot; } else alleVoll = false;
+      }
+      if (sAlt > 0 && alleVoll) {
+        if (y + 22 > H - 22) y = neueSeite("SPOTMARKT-VERGLEICH 2025");
+        const diff = sAlt - sSpot;
+        verlauf(RA, y, BR, 16, diff >= 0 ? GRUEN1 : NAVY1, diff >= 0 ? GRUEN2 : NAVY2, { r: 3, stufen: 50 });
+        schrift(9, true); farbe(WEISS);
+        text(diff >= 0 ? "AM SPOTMARKT HÄTTEN SIE 2025 WENIGER BEZAHLT" : "AM SPOTMARKT HÄTTEN SIE 2025 MEHR BEZAHLT", RA + 5, y + 6.5);
+        schrift(7.5); text("Bisheriger Vertrag " + eurx(sAlt) + "  ·  Spotmarkt " + eurx(sSpot), RA + 5, y + 11.5);
+        schrift(15, true); text(eurx(Math.abs(diff)), W - RA - 5, y + 10.5, { align: "right" });
+        y += 22;
+      }
+      schrift(7.2); farbe(GRAU);
+      y = absatz("Grundlage: durchschnittlicher Day-Ahead-Börsenpreis des Lieferjahres 2025 (Strom " + num(SPOT_2025.strom, 4) + " ct/kWh, Mittel aller Stunden, " +
+        "Energy-Charts/Fraunhofer ISE; Erdgas " + num(SPOT_2025.gas, 4) + " ct/kWh, Mittel aller Tage, THE Day-Ahead/EEX), Netzentgelte und Umlagen 2025, alle Preise netto. " +
+        "Die Rechnung zeigt die Vergangenheit; künftige Börsenpreise können höher oder niedriger sein.", RA, y, BR, 7.2, 3.3);
+    }
   }
 
   /* ---------- Lastgang-Analyse für RLM-Lieferstellen mit Lastgang ---------- */

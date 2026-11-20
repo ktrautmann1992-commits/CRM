@@ -405,7 +405,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.43 · 20.11.2026 · Tatsächlicher Aufschlag in eigener geschützter Tabelle (nur Kalkulation, Geschäftsführung, Finanzbuchhaltung), Netzentgelte laut Versorger als freiwilliges Feld im Angebot";
+const VERSION = "v5.43 · 20.11.2026 · Tatsächlicher Aufschlag in eigener geschützter Tabelle (nur Kalkulation, Geschäftsführung, Finanzbuchhaltung), Netzentgelte laut Versorger als freiwilliges Feld im Angebot, Spotmarkt-Vergleich 2025 im Angebot";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -2180,6 +2180,32 @@ const umlageSumme = (quelle, sparte) => {
   if (!t.length || t.some((x) => isNaN(zahlLesen(x.wert)))) return NaN;
   return t.reduce((s, x) => s + zahlLesen(x.wert), 0);
 };
+
+/* ---------- Spotmarkt-Vergleich 2025 ----------
+   Durchschnittlicher Day-Ahead-Preis des Lieferjahres 2025 in ct/kWh (fest, das Jahr ist abgeschlossen):
+   Strom: Mittel aller 8.760 Stunden 2025 (deutsche Zeit), Energy-Charts / Fraunhofer ISE (CC BY 4.0), 89,3217 €/MWh.
+   Erdgas: Mittel aller 365 Tage 2025, THE Day-Ahead (EEX, Übersicht ENGIE Deutschland), 37,1780 €/MWh.
+   Spot-Arbeitspreis 2025 = Ø Börsenpreis 2025 + Aufschlag (Kalkulation) + Netzentgelte 2025 (Kalkulation)
+   + staatliche Umlagen und Abgaben 2025 (Vorjahreswerte der Umlagen). Verglichen mit dem bisherigen Vertrag 2025. */
+const SPOT_2025 = { strom: 8.93217, gas: 3.7178 };
+function spotVergleich(a, v, vorversorger, umlagen) {
+  const sp = (v && v.spot) || {};
+  const auf = zahlLesen(sp.aufschlag);
+  const q = umlagen || (v && v.umlagen) || UMLAGEN;
+  return stellenVon(a, v).map((l) => {
+    const sparte = l.medium === "gas" ? "gas" : "strom";
+    const boerse = SPOT_2025[sparte];
+    const netz = zahlLesen(((sp.netz || {})[l.id]));
+    const uml = zahlLesen((umlagenVorjahre(q)["2025"] || {})[sparte]);
+    const menge = zahlLesen(l.verbrauch) || 0;
+    const arbeit = boerse + (isNaN(auf) ? 0 : auf) + netz + uml;
+    const kostenSpot = isNaN(arbeit) ? NaN : (arbeit / 100) * menge;
+    const alt = altPreis((vorversorger || {})[l.id]);
+    const kostenAlt = alt ? alt.grundpreis + (alt.arbeit / 100) * menge : NaN;
+    return { l, sparte, boerse, aufschlag: isNaN(auf) ? 0 : auf, netz, umlage: uml, arbeit, menge, kostenSpot, alt, kostenAlt,
+             differenz: kostenAlt - kostenSpot, vollstaendig: !isNaN(kostenSpot) && !isNaN(kostenAlt) };
+  });
+}
 
 /* Preisbestandteile einer Lieferstelle:
    Netzentgelte = Arbeitspreis − Energiepreis − staatliche Umlagen und Abgaben.
@@ -8896,6 +8922,7 @@ export function PortalApp({ pruefung } = {}) {
 
 /* Gemeinsame Bausteine für die ausgelagerten Programmteile */
 export {
+  SPOT_2025, spotVergleich,
   vertriebsprovision, mitVerdecktemAufschlag,
   VERTRIEB_BEARBEITBAR,
   ctZahl, hatWert, stellenVon, stelleIn, stelleAbweichend, provisionsStellen, lieferjahreVon, lieferjahreAus, aufschlagText, firmenanteilVorgang,
