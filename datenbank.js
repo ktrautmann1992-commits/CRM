@@ -44,6 +44,86 @@ export const SAMMLUNGEN = {
   beschaffung: { tabelle: "beschaffung", neuOben: true },
 };
 
+/* ---------- Tatsächlicher Aufschlag (v5.43) ----------
+   Im Vorgang steht nur der dem Vertrieb mitgeteilte Aufschlag. Der tatsächliche (aufschlagEcht)
+   in Varianten, Lieferstellen-Preisen und der Versorgerbestätigung wird beim Speichern
+   herausgelöst und in `aufschlaege_intern` abgelegt (lesen nur Kalkulation, GF, FiBu).
+   Beim Laden wird er wieder an dieselben Stellen eingesetzt. */
+const ECHT_TABELLE = "aufschlaege_intern";
+const hat = (x) => x !== undefined && x !== null && x !== "";
+function echtTrennen(a) {
+  const echt = {};
+  let ohne = a;
+  const k = a && a.kalkulation;
+  if (k && Array.isArray(k.varianten)) {
+    const varianten = k.varianten.map((v) => {
+      if (!v) return v;
+      const e = {};
+      let nv = v;
+      if ("aufschlagEcht" in v) { if (hat(v.aufschlagEcht)) e.a = v.aufschlagEcht; const { aufschlagEcht, ...r } = nv; nv = r; }
+      if (v.preise && typeof v.preise === "object") {
+        const preise = {};
+        for (const [lid, pr] of Object.entries(v.preise)) {
+          if (pr && typeof pr === "object" && "aufschlagEcht" in pr) {
+            if (hat(pr.aufschlagEcht)) (e.s = e.s || {})[lid] = pr.aufschlagEcht;
+            const { aufschlagEcht, ...r } = pr; preise[lid] = r;
+          } else preise[lid] = pr;
+        }
+        nv = { ...nv, preise };
+      }
+      if (Object.keys(e).length) (echt.v = echt.v || {})[v.id] = e;
+      return nv;
+    });
+    ohne = { ...ohne, kalkulation: { ...k, varianten } };
+  }
+  const b = a && a.bestaetigung;
+  if (b && typeof b === "object") {
+    const e = {};
+    let nb = b;
+    if ("aufschlagEcht" in b) { if (hat(b.aufschlagEcht)) e.a = b.aufschlagEcht; const { aufschlagEcht, ...r } = nb; nb = r; }
+    if (b.stellen && typeof b.stellen === "object") {
+      const stellen = {};
+      for (const [lid, s] of Object.entries(b.stellen)) {
+        if (s && typeof s === "object" && "aufschlagEcht" in s) {
+          if (hat(s.aufschlagEcht)) (e.s = e.s || {})[lid] = s.aufschlagEcht;
+          const { aufschlagEcht, ...r } = s; stellen[lid] = r;
+        } else stellen[lid] = s;
+      }
+      nb = { ...nb, stellen };
+    }
+    if (Object.keys(e).length) echt.b = e;
+    ohne = { ...ohne, bestaetigung: nb };
+  }
+  return { ohne, echt };
+}
+function echtEinsetzen(a, echt) {
+  if (!echt || (!echt.v && !echt.b)) return a;
+  let n = a;
+  if (echt.v && n.kalkulation && Array.isArray(n.kalkulation.varianten)) {
+    n = { ...n, kalkulation: { ...n.kalkulation, varianten: n.kalkulation.varianten.map((v) => {
+      const e = v && echt.v[v.id];
+      if (!e) return v;
+      const nv = { ...v, ...(hat(e.a) ? { aufschlagEcht: e.a } : {}) };
+      if (e.s) {
+        const preise = { ...(v.preise || {}) };
+        for (const [lid, w] of Object.entries(e.s)) preise[lid] = { ...(preise[lid] || {}), aufschlagEcht: w };
+        nv.preise = preise;
+      }
+      return nv;
+    }) } };
+  }
+  if (echt.b && n.bestaetigung) {
+    const nb = { ...n.bestaetigung, ...(hat(echt.b.a) ? { aufschlagEcht: echt.b.a } : {}) };
+    if (echt.b.s) {
+      const stellen = { ...(nb.stellen || {}) };
+      for (const [lid, w] of Object.entries(echt.b.s)) stellen[lid] = { ...(stellen[lid] || {}), aufschlagEcht: w };
+      nb.stellen = stellen;
+    }
+    n = { ...n, bestaetigung: nb };
+  }
+  return n;
+}
+
 /* Mitarbeiter sind auf drei Tabellen verteilt:
    mitarbeiter (für alle sichtbar), mitarbeiter_konditionen (Sätze, Ziele)
    und mitarbeiter_stammdaten (Bank, Ausweis). Die Einladungscodes liegen in `einladungen`. */
@@ -166,9 +246,14 @@ function zeilenVon(name, liste) {
     return zeilen;
   }
   const s = SAMMLUNGEN[name];
-  for (const x of liste) {
-    if (!x || !x.id) continue;
+  for (const x0 of liste) {
+    if (!x0 || !x0.id) continue;
+    let x = x0;
+    /* Vorgänge: tatsächlichen Aufschlag herauslösen */
+    let echt = null;
+    if (name === "anfragen") ({ ohne: x, echt } = echtTrennen(x0));
     const haupt = { ...x };
+    if (echt) zeilen.push({ tabelle: ECHT_TABELLE, id: x.id, daten: Object.keys(echt).length ? { echt } : {} });
     for (const [feld, tab] of Object.entries(s.abspalten || {})) {
       const wert = haupt[feld];
       delete haupt[feld];
@@ -189,7 +274,8 @@ function tabellenVon(name) {
   if (name === "mitarbeiter")
     return ["mitarbeiter", "mitarbeiter_konditionen", "mitarbeiter_stammdaten", "einladungen"];
   const s = SAMMLUNGEN[name];
-  return [s.tabelle, ...Object.values(s.abspalten || {}), ...Object.keys(s.buendeln || {})];
+  return [s.tabelle, ...Object.values(s.abspalten || {}), ...Object.keys(s.buendeln || {}),
+    ...(name === "anfragen" ? [ECHT_TABELLE] : [])];
 }
 
 /* leer: nichts drin außer Vorgabewerten (z. B. Stammdaten oder Sätze anderer,
@@ -256,8 +342,11 @@ export async function laden(name, umformen = (x) => x) {
   const ergebnisse = await Promise.all(tabellen.map((t) => alleZeilen(t, neuOben)));
   const [haupt, ...teile] = ergebnisse;
   const teilMaps = teile.map((zeilen) => new Map(zeilen.map((z) => [z.id, z.daten || {}])));
-  const liste = umformen(haupt.map((z) =>
-    Object.assign({ id: z.id }, z.daten, ...teilMaps.map((m) => m.get(z.id) || {}))));
+  let roh = haupt.map((z) =>
+    Object.assign({ id: z.id }, z.daten, ...teilMaps.map((m) => m.get(z.id) || {})));
+  /* Vorgänge: tatsächlichen Aufschlag wieder einsetzen (nur wer ihn lesen darf, bekommt ihn) */
+  if (name === "anfragen") roh = roh.map(({ echt, ...a }) => echtEinsetzen(a, echt));
+  const liste = umformen(roh);
 
   const aufServer = {};
   tabellen.forEach((t, i) => { aufServer[t] = new Set(ergebnisse[i].map((z) => z.id)); standVon(t).clear(); });
