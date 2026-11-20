@@ -405,7 +405,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.43 · 20.11.2026 · Tatsächlicher Aufschlag in eigener geschützter Tabelle (nur Kalkulation, Geschäftsführung, Finanzbuchhaltung), Netzentgelte laut Versorger als freiwilliges Feld im Angebot, Spotmarkt-Vergleich 2025 im Angebot";
+const VERSION = "v5.43 · 20.11.2026 · Tatsächlicher Aufschlag in eigener geschützter Tabelle (nur Kalkulation, Geschäftsführung, Finanzbuchhaltung), Netzentgelte laut Versorger als freiwilliges Feld im Angebot, Spotmarkt-Vergleich 2025 im Angebot, Firmenanteil 80 %";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1972,14 +1972,14 @@ const setzeFirmenanteil = (wert, jeVersorger) => {
 const firmenanteilVon = (versorgerName) => {
   const eigen = FIRMENANTEIL_JE_VERSORGER[versorgerName];
   const w = parseFloat(eigen);
-  /* fehlt die Einstellung, gilt die Vorgabe 75 % */
-  return eigen !== undefined && eigen !== "" && !isNaN(w) ? w : (isNaN(FIRMENANTEIL) ? 75 : FIRMENANTEIL);
+  /* fehlt die Einstellung, gilt die Vorgabe 80 % */
+  return eigen !== undefined && eigen !== "" && !isNaN(w) ? w : (isNaN(FIRMENANTEIL) ? 80 : FIRMENANTEIL);
 };
 
-/* Eigener Satz in Prozent der Gesamtprovision. Die Geschäftsführung erhält immer den Firmenanteil (Vorgabe 75 %),
+/* Eigener Satz in Prozent der Gesamtprovision. Die Geschäftsführung erhält immer den Firmenanteil (Vorgabe 80 %),
    nicht einen Vertriebssatz; ein Eigenakquise-Bonus kommt für sie nicht hinzu. */
 const istGFRolle = (m) => !!m && m.rolle === "Geschäftsführung";
-const eigenerSatzVon = (m) => istGFRolle(m) ? (isNaN(FIRMENANTEIL) ? 75 : FIRMENANTEIL) : (parseFloat(m && m.satz) || 0);
+const eigenerSatzVon = (m) => istGFRolle(m) ? (isNaN(FIRMENANTEIL) ? 80 : FIRMENANTEIL) : (parseFloat(m && m.satz) || 0);
 
 /* Welcher Eigenakquise-Satz gilt für diese Person? */
 const eigenBonusVon = () => 0;

@@ -189,7 +189,7 @@ Aufschlag in ct/kWh × Menge = Gesamtprovision je Lieferjahr.
   darüber die Differenz. Die Ausschüttung entspricht immer dem höchsten Satz
   in der Kette.
 - **Firmenanteil:** Nur ein Teil der Gesamtprovision kommt bei EGC an
-  (`FIRMENANTEIL`, Vorgabe 75 %, je Versorger überschreibbar). Die Sätze
+  (`FIRMENANTEIL`, Vorgabe 80 % (seit v5.43, in der Portalsteuerung eingestellt), je Versorger überschreibbar). Die Sätze
   rechnen trotzdem auf die volle Gesamtprovision. Was bleibt:
   `Anteil bei EGC − Ausschüttung`.
 - **Eigenakquise-Bonus gibt es nicht mehr** (seit v5.42, ausdrücklich bestätigt). Nicht wieder einbauen.
