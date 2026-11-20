@@ -2191,6 +2191,15 @@ function preisTeile(l, pr, umlagen) {
   const sparte = l.medium === "gas" ? "gas" : "strom";
   const umlage = umlageSumme(quelle, sparte);
   const umlagenTeile = umlageTeile(quelle, sparte);
+  /* Netzentgelte laut Versorger (freiwillig): dann sind die Abgaben der Rest, wie in der Aufteilung des Versorgers */
+  const netzVersorger = zahlLesen(pr.netz);
+  if (!isNaN(netzVersorger) && !isNaN(arbeit) && !isNaN(energie)) {
+    const rlm0 = l.zaehlerart === "RLM";
+    const kw0 = zahlLesen(pr.leistung !== undefined && pr.leistung !== "" ? pr.leistung : l.lastspitze);
+    const lp0 = zahlLesen(pr.leistungspreis);
+    return { arbeit, energie, umlage: arbeit - energie - netzVersorger, umlagenTeile: [], netz: netzVersorger, netzVomVersorger: true,
+             rlm: rlm0, kw: kw0, leistungspreis: lp0, leistungKosten: rlm0 && !isNaN(kw0) && !isNaN(lp0) ? kw0 * lp0 : NaN };
+  }
   const netz = !isNaN(arbeit) && !isNaN(energie) && !isNaN(umlage) ? arbeit - energie - umlage : NaN;
   const rlm = l.zaehlerart === "RLM";
   const kw = zahlLesen(pr.leistung !== undefined && pr.leistung !== "" ? pr.leistung : l.lastspitze);

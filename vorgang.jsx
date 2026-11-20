@@ -2372,6 +2372,16 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                     </span>
                                   </span>
                                 </label>
+                                <div className="grid sm:grid-cols-3 gap-4 mt-3">
+                                  <Feld label="Netzentgelte laut Versorger (ct/kWh), freiwillig"
+                                    value={(v.preise[l.id] || {}).netz || ""}
+                                    onChange={(x) => setVarPreis(v.id, l.id, "netz", x)}
+                                    placeholder="leer = berechnet" />
+                                  <p className="sm:col-span-2 text-xs self-end" style={{ color: C.muted }}>
+                                    Eingetragen übernimmt das Angebot die Aufteilung des Versorgers: Netzentgelte wie hier,
+                                    Umlagen und Abgaben = Arbeitspreis − Energiepreis − Netzentgelte.
+                                  </p>
+                                </div>
                                 {l.zaehlerart === "RLM" && (
                                   <div className="grid sm:grid-cols-3 gap-4 mt-3">
                                     <Feld label="Lastspitze (kW)"
@@ -2437,7 +2447,7 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                         {isNaN(t.umlage) ? " · bitte oben einmal für " + (l.medium === "gas" ? "Erdgas" : "Strom") + " hinterlegen"
                                           : t.umlagenTeile.length > 1 ? " (" + t.umlagenTeile.map((x) => x.name + " " + x.wert).join(", ") + ")" : ""}</div>
                                       <div style={{ color: !isNaN(t.netz) && t.netz < 0 ? C.warn : C.muted }}>
-                                        Netzentgelte (Arbeitspreis − Energiepreis − Umlagen) {ct3(t.netz)}
+                                        {t.netzVomVersorger ? "Netzentgelte laut Versorger " : "Netzentgelte (Arbeitspreis − Energiepreis − Umlagen) "}{ct3(t.netz)}
                                         {!isNaN(t.netz) && t.netz < 0 ? " · negativ, bitte Preise prüfen" : ""}</div>
                                       {t.rlm && <div>Leistungspreis Netz {isNaN(t.leistungKosten) ? "–"
                                         : num(t.kw, 1) + " kW × " + num(t.leistungspreis, 2) + " €/kW = " + eur(t.leistungKosten) + " pro Jahr"}</div>}

@@ -615,7 +615,8 @@ def inhaltsseiten():
     f.append(P("Vollständige Unterlagen sind der schnellste Weg zum Angebot. Fehlt etwas, entsteht ein Klärfall und der Kunde wartet.", "intro"))
     f.append(tabelle(["Unterlage", "Wofür", "Pflicht"], [
         ["Letzte Jahresrechnung, alle Seiten (PDF oder Foto)", "Versorger, Zählernummer, MaLo und Verbrauch; bei einer PDF liest das Portal sie aus", "ja"],
-        ["Marktlokations-ID (MaLo) und Zählernummer", "Eindeutige Kennung jeder Lieferstelle, steht auf der Rechnung", "ja"],
+        ["Marktlokations-ID (MaLo)", "Eindeutige Kennung jeder Lieferstelle, steht auf der Rechnung", "ja"],
+        ["Zählernummer", "Hilft bei der Zuordnung, steht auf der Rechnung und auf dem Zähler", "wenn vorhanden"],
         ["Jahresverbrauch in kWh", "Grundlage für Preis und Versorgerauswahl", "ja"],
         ["Vertragsende und Kündigungsfrist", "Frühester Lieferbeginn, Kündigung durch uns", "wenn bekannt"],
         ["Lastgang (Excel oder CSV)", "Nur bei RLM: die Viertelstundenwerte des letzten Jahres", "bei RLM"],
