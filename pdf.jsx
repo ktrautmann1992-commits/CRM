@@ -1214,9 +1214,10 @@ async function egcAngebotPdf(a, v, { mitarbeiter, vorversorger = {}, spotVorvers
         ...(!isNaN(teile.netz) ? [["davon Netzentgelte (ct/kWh)", "–", ct3(teile.netz), "–"]] : []),
         ...(teile.rlm && !isNaN(teile.leistungKosten) ? [["Leistungspreis Netz (" + num(teile.kw, 1) + " kW × " + num(teile.leistungspreis, 2) + " €/kW)", "–", eurx(teile.leistungKosten), "–"]] : []),
         /* ohne Grundpreis: Zeile entfällt; im Vergleich bleibt der bisherige Grundpreis stehen */
-        ...(ohneGP && !alt ? [] : [["Grundpreis (€/Jahr)", alt ? eurx(alt.grundpreis) : "–",
-          ohneGP ? "im Energiepreis enthalten" : isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
-          alt && !isNaN(neuA) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"]]),
+        /* bisheriger Preis aus der Rechnung ohne bekannten Grundpreis: Grundpreis steckt im Durchschnittspreis */
+        ...(ohneGP && !alt ? [] : [["Grundpreis (€/Jahr)", alt ? (!alt.grundpreis && alt.aufgerechnet ? "im Arbeitspreis enthalten" : eurx(alt.grundpreis)) : "–",
+          ohneGP ? (isNaN(neuE) ? "im Arbeitspreis enthalten" : "im Energiepreis enthalten") : isNaN(neuA) && isNaN(neuG) ? "–" : eurx(isNaN(neuG) ? 0 : neuG),
+          alt && !isNaN(neuA) && !(ohneGP && !alt.grundpreis) ? eurx(alt.grundpreis - (isNaN(neuG) ? 0 : neuG)) : "–"]]),
         ["Jahresverbrauch", num(menge) + " kWh", num(menge) + " kWh", "–"],
         ["Lieferbeginn", "–", sv.lieferbeginn ? datum(sv.lieferbeginn) : "–", "–"],
         ...(jeEnde ? [["Laufzeit bis", "–", enddatum(sv) ? datum(enddatum(sv)) : (laufzeitMonate(sv) || sv.laufzeit) + " Monate", "–"]] : []),

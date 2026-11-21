@@ -415,7 +415,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.43 · 21.11.2026 · Tatsächlicher Aufschlag in eigener geschützter Tabelle (nur Kalkulation, Geschäftsführung, Finanzbuchhaltung), Netzentgelte laut Versorger als freiwilliges Feld im Angebot, Spotmarkt-Vergleich 2025 im Angebot, Firmenanteil 80 %, Anleitung Kalkulation unter Unterlagen → Intern (nur Kalkulation und GF)";
+const VERSION = "v5.44 · 21.11.2026 · Schnell kalkulieren für die Kalkulation (Abrechnung netto oder brutto, Verbrauch auf 365 Tage, Umlagen-Ausgleich, neuer Versorger je Lieferstelle)";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -1295,12 +1295,20 @@ const abrechnungstage = (von, bis) => {
   const t = tageZwischen(von, bis);
   return t == null ? 0 : t + 1;
 };
+/* Umsatzsteuer auf Strom und Erdgas (Prozent), zum Herausrechnen brutto eingetragener Rechnungsbeträge */
+const UST_SATZ = 19;
+/* Abrechnung auf ein Jahr (365 Tage) hochrechnen */
+const jahresverbrauchAus = (verbrauch, von, bis) => {
+  const m = zahlLesen(verbrauch), t = abrechnungstage(von, bis);
+  return isNaN(m) || m <= 0 || !t ? null : Math.round((m * 365) / t);
+};
 function altPreis(vv) {
   if (!vv) return null;
   const z = (x) => zahlLesen(x);
   const grund = z(vv.grundpreis);
   if ((vv.modus || "preis") === "rechnung") {
-    const betrag = z(vv.betrag), menge = z(vv.verbrauch);
+    /* Rechnungsbetrag brutto: Umsatzsteuer herausrechnen, verglichen wird immer netto */
+    const betrag = z(vv.betrag) / (vv.brutto ? 1 + UST_SATZ / 100 : 1), menge = z(vv.verbrauch);
     if (isNaN(betrag) || isNaN(menge) || menge <= 0) return null;
     const tage = abrechnungstage(vv.von, vv.bis);
     const grundAnteil = !isNaN(grund) && tage ? (grund * tage) / 365 : 0;
@@ -1946,10 +1954,12 @@ const mengeSparte = (a, sparte) =>
 
 const monateZwischen = (von, bis) => {
   if (!von || !bis) return null;
+  /* Lieferende zählt mit: 01.01.2027 bis 31.12.2028 sind 24 Monate (bis Tagesbeginn des Folgetags gerechnet) */
   const v = new Date(von), b = new Date(bis);
   if (isNaN(v) || isNaN(b)) return null;
-  const m = (b.getFullYear() - v.getFullYear()) * 12 + (b.getMonth() - v.getMonth());
-  return Math.max(0, b.getDate() >= v.getDate() ? m : m - 1);
+  b.setUTCDate(b.getUTCDate() + 1);
+  const m = (b.getUTCFullYear() - v.getUTCFullYear()) * 12 + (b.getUTCMonth() - v.getUTCMonth());
+  return Math.max(0, b.getUTCDate() >= v.getUTCDate() ? m : m - 1);
 };
 
 const monateDazu = (iso, monate) => {
@@ -8935,7 +8945,7 @@ export {
   UNTERLAGEN_INTERN,
   SPOT_2025, spotVergleich,
   vertriebsprovision, mitVerdecktemAufschlag,
-  VERTRIEB_BEARBEITBAR,
+  VERTRIEB_BEARBEITBAR, UST_SATZ, jahresverbrauchAus, abrechnungstage,
   ctZahl, hatWert, stellenVon, stelleIn, stelleAbweichend, provisionsStellen, lieferjahreVon, lieferjahreAus, aufschlagText, firmenanteilVorgang,
   ABLAGE_ARTEN, ABLAGE_BEREICHE, ABLEHNUNGSGRUENDE, AKQUISE_ART, AKQ_STATUS, Abrechnung, AbrechnungAuslesen, Abschnitt,
   Aufgaben, Avatar, BONUS_EIGENAKQUISE, Balken, Btn, C, Datei, DateiBild,

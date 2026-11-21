@@ -30,7 +30,7 @@ import {
   monateBis, monateDazu, monateZwischen, naechsterSchritt, naechsterSchrittInnen, num, preisTeile, smartmeterStart,
   smartmeterSummen, statusVon, tippgeberFuer, tippgeberLabel, tippgeberMomentaufnahme, uid, umlagenAusgleich, umlagenJahr,
   umlagenVorjahre, varianten, verbrauchGesamt, verbrauchMedium, vertragsende, zahlLesen, zeitDe,
-  csvLesen, xlsxLesen, VERTRIEB_BEARBEITBAR, SPOT_2025, spotVergleich, ctZahl, mitVerdecktemAufschlag, stelleIn, stelleAbweichend, stellenVon, provisionsStellen, aufschlagText,
+  csvLesen, xlsxLesen, VERTRIEB_BEARBEITBAR, UST_SATZ, jahresverbrauchAus, abrechnungstage, SPOT_2025, spotVergleich, ctZahl, mitVerdecktemAufschlag, stelleIn, stelleAbweichend, stellenVon, provisionsStellen, aufschlagText,
 } from "./App.jsx";
 import { BeschaffungKarte } from "./beschaffung.jsx";
 import { Smartmeter, SmartmeterKalk, UmlagenPflege } from "./innendienst.jsx";
@@ -1261,6 +1261,260 @@ function KundenVersand({ a, user, onUpdate, onAnnahmeUebernehmen, nurStatus }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Schnell kalkulieren (Kalkulation, v5.44)                           */
+/*  Je Lieferstelle: bisherige Abrechnung (Zeitraum, Verbrauch, Betrag */
+/*  netto oder brutto, Abrechnungsjahr für die Umlagen) und neuer      */
+/*  Versorger (Lieferbeginn, Lieferende, Arbeitspreis inkl. Aufschlag, */
+/*  beide Aufschläge). Ergebnis ist eine Angebotsvariante mit          */
+/*  Vergleich; gerechnet wird immer netto.                             */
+/* ------------------------------------------------------------------ */
+const schnellJahr = (bis) => {
+  const j = String(bis || "").slice(0, 4);
+  return ["2025", "2026", umlagenJahr(UMLAGEN)].includes(j) ? j : "";
+};
+function schnellStart(a, vars, vorv) {
+  const v = vars.find((x) => x.schnell);
+  const daten = {};
+  a.lieferstellen.forEach((l) => {
+    const vv = vorv[l.id] || {};
+    const pr = (v && v.preise && v.preise[l.id]) || {};
+    const sv = v ? stelleIn(v, l) : null;
+    const drin = v ? stellenVon(a, v).some((y) => y.id === l.id) : false;
+    daten[l.id] = {
+      altVersorger: vv.versorger ?? (l.versorger || ""),
+      von: vv.von || "", bis: vv.bis || "", verbrauch: vv.verbrauch || "", betrag: vv.betrag || "",
+      brutto: !!vv.brutto, altGrund: vv.grundpreis || "",
+      jahr: vv.jahr !== undefined ? vv.jahr : abrechnungsJahrVon(vv, l),
+      uebernehmen: true,
+      versorger: drin ? sv.versorger : "",
+      lieferbeginn: drin ? sv.lieferbeginn : a.wunschLieferbeginn || "",
+      lieferende: drin ? (sv.lieferende || "") : a.wunschLieferende || "",
+      arbeit: drin ? pr.arbeit || "" : "", grund: drin ? pr.grundpreis || "" : "",
+      aufschlag: drin ? String(sv.aufschlag ?? "") : hatWertK(a.aufschlag) ? String(a.aufschlag) : "",
+      aufschlagEcht: drin && hatWertK(pr.aufschlagEcht ?? v.aufschlagEcht) ? String(sv.aufschlagEcht) : "",
+    };
+  });
+  return { produkt: (v && v.produkt) || (PRODUKTE.includes(a.produkt) ? a.produkt : "Festpreis"),
+           gueltigBis: (v && v.gueltigBis) || "", stellen: daten };
+}
+/* Ergebnis je Lieferstelle: bisheriger Preis, Umlagen-Ausgleich, Jahresverbrauch, Kosten und Ersparnis */
+function schnellRechnung(l, d) {
+  const vv = { modus: "rechnung", von: d.von, bis: d.bis, betrag: d.betrag, brutto: d.brutto,
+               verbrauch: d.verbrauch, grundpreis: d.altGrund, jahr: d.jahr, versorger: d.altVersorger };
+  const tage = abrechnungstage(d.von, d.bis);
+  const jahresverbrauch = jahresverbrauchAus(d.verbrauch, d.von, d.bis);
+  const alt = d.von && d.bis && tage ? altPreis(vv) : null;
+  const aus = alt ? umlagenAusgleich(vv, l) : null;
+  const altArbeit = alt ? alt.arbeit + (aus ? aus.diff : 0) : null;
+  const menge = d.uebernehmen && jahresverbrauch ? jahresverbrauch : zahlLesen(l.verbrauch) || 0;
+  const neu = zahlLesen(d.arbeit), neuG = zahlLesen(d.grund);
+  const kostenNeu = isNaN(neu) ? null : (isNaN(neuG) ? 0 : neuG) + (neu / 100) * menge;
+  const kostenAlt = alt ? alt.grundpreis + (altArbeit / 100) * menge : null;
+  const netto = zahlLesen(d.betrag) / (d.brutto ? 1 + UST_SATZ / 100 : 1);
+  return { vv, tage, jahresverbrauch, alt, aus, altArbeit, menge, kostenNeu, kostenAlt, netto,
+           ersparnis: kostenNeu != null && kostenAlt != null ? kostenAlt - kostenNeu : null };
+}
+
+function SchnellKalkulation({ a, vars, vorv, onErzeugen, erzeugt, onSenden, bereit, onAusfuehrlich }) {
+  const [e, setE] = useState(() => schnellStart(a, vars, vorv));
+  const [geprueft, setGeprueft] = useState(false);
+  const setS = (lid, k, w) => setE((x) => ({ ...x, stellen: { ...x.stellen, [lid]: { ...x.stellen[lid], [k]: w } } }));
+  const setBis = (lid, w) => setE((x) => {
+    const d = x.stellen[lid];
+    /* Abrechnungsjahr aus dem Ende des Zeitraums vorschlagen, solange keins gewählt ist */
+    return { ...x, stellen: { ...x.stellen, [lid]: { ...d, bis: w, jahr: d.jahr || schnellJahr(w) } } };
+  });
+  const uebernehmenVon = (lid, vorher) => setE((x) => {
+    const q = x.stellen[vorher];
+    return { ...x, stellen: { ...x.stellen, [lid]: { ...x.stellen[lid], versorger: q.versorger, lieferbeginn: q.lieferbeginn,
+      lieferende: q.lieferende, aufschlag: q.aufschlag, aufschlagEcht: q.aufschlagEcht } } };
+  });
+  const ls = a.lieferstellen;
+  const mitPreis = ls.filter((l) => hatWertK(e.stellen[l.id].arbeit));
+  /* Pflichtangaben je angebotener Lieferstelle */
+  const fehlt = (l) => {
+    const d = e.stellen[l.id], f = {};
+    if (!hatWertK(d.arbeit)) return f;
+    if (isNaN(zahlLesen(d.arbeit))) f.arbeit = "Keine Zahl";
+    if (!String(d.versorger || "").trim()) f.versorger = "Bitte eintragen";
+    if (!d.lieferbeginn) f.lieferbeginn = "Bitte eintragen";
+    if (!d.lieferende) f.lieferende = "Bitte eintragen";
+    else if (d.lieferbeginn && d.lieferende <= d.lieferbeginn) f.lieferende = "Muss nach dem Lieferbeginn liegen";
+    if (!hatWertK(d.aufschlag) || isNaN(zahlLesen(d.aufschlag))) f.aufschlag = "Bitte eintragen";
+    const angefangen = d.von || d.bis || hatWertK(d.verbrauch) || hatWertK(d.betrag);
+    if (angefangen) {
+      if (!d.von) f.von = "Bitte eintragen";
+      if (!d.bis) f.bis = "Bitte eintragen";
+      else if (d.von && d.bis <= d.von) f.bis = "Muss nach dem Beginn liegen";
+      if (!(zahlLesen(d.verbrauch) > 0)) f.verbrauch = "Bitte eintragen";
+      if (isNaN(zahlLesen(d.betrag))) f.betrag = "Bitte eintragen";
+    }
+    return f;
+  };
+  const fehler = Object.fromEntries(ls.map((l) => [l.id, geprueft ? fehlt(l) : {}]));
+  const allesDa = mitPreis.length > 0 && mitPreis.every((l) => !Object.keys(fehlt(l)).length);
+
+  const erzeugen = () => {
+    setGeprueft(true);
+    if (!allesDa) {
+      alert(mitPreis.length ? "Bitte die rot markierten Felder ausfüllen." : "Bitte bei mindestens einer Lieferstelle den neuen Arbeitspreis eintragen.");
+      return;
+    }
+    const erste = e.stellen[mitPreis[0].id];
+    const alt = vars.find((x) => x.schnell);
+    const medien = [...new Set(mitPreis.map((l) => l.medium))];
+    const moeglich = ls.filter((l) => medien.length > 1 || l.medium === medien[0]);
+    const gleich = (k, d) => String(d[k] ?? "").trim() === String(erste[k] ?? "").trim();
+    const preise = {};
+    mitPreis.forEach((l) => {
+      const d = e.stellen[l.id];
+      preise[l.id] = {
+        arbeit: d.arbeit, grundpreis: hatWertK(d.grund) ? d.grund : "", ohneGrundpreis: !hatWertK(d.grund),
+        ...(gleich("versorger", d) ? {} : { versorger: d.versorger.trim() }),
+        ...(gleich("lieferbeginn", d) ? {} : { lieferbeginn: d.lieferbeginn }),
+        ...(gleich("lieferende", d) ? {} : { laufzeitArt: "ende", lieferende: d.lieferende, laufzeit: "" }),
+        ...(gleich("aufschlag", d) ? {} : { aufschlag: d.aufschlag }),
+        ...(gleich("aufschlagEcht", d) ? {} : { aufschlagEcht: hatWertK(d.aufschlagEcht) ? d.aufschlagEcht : d.aufschlag }),
+      };
+    });
+    const v = {
+      ...leereVariante(a), ...(alt ? { id: alt.id } : {}), schnell: true,
+      sparte: medien.length > 1 ? "beide" : medien[0],
+      lieferstellenIds: mitPreis.length === moeglich.length ? null : mitPreis.map((l) => l.id),
+      produkt: e.produkt, gueltigBis: e.gueltigBis,
+      versorger: erste.versorger.trim(), lieferbeginn: erste.lieferbeginn,
+      laufzeitArt: "ende", lieferende: erste.lieferende, laufzeit: monateZwischen(erste.lieferbeginn, erste.lieferende) || "",
+      aufschlag: erste.aufschlag, aufschlagEcht: hatWertK(erste.aufschlagEcht) ? erste.aufschlagEcht : "",
+      preise,
+    };
+    const vorvNeu = { ...vorv };
+    const lieferstellen = ls.map((l) => {
+      const d = e.stellen[l.id], r = schnellRechnung(l, d);
+      if (d.von || d.bis || hatWertK(d.betrag)) vorvNeu[l.id] = { ...(vorv[l.id] || {}), ...r.vv };
+      else if (hatWertK(d.altVersorger)) vorvNeu[l.id] = { ...(vorv[l.id] || {}), versorger: d.altVersorger, jahr: d.jahr };
+      return d.uebernehmen && r.jahresverbrauch && String(r.jahresverbrauch) !== String(l.verbrauch)
+        ? { ...l, verbrauch: String(r.jahresverbrauch) } : l;
+    });
+    onErzeugen(v, vorvNeu, lieferstellen);
+  };
+
+  const summe = mitPreis.reduce((s, l) => {
+    const r = schnellRechnung(l, e.stellen[l.id]);
+    return r.ersparnis == null ? s : { alt: s.alt + r.kostenAlt, neu: s.neu + r.kostenNeu, n: s.n + 1 };
+  }, { alt: 0, neu: 0, n: 0 });
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm" style={{ color: C.muted, maxWidth: "60ch" }}>
+        Je Lieferstelle die letzte Abrechnung und den neuen Versorger eintragen. Gerechnet wird immer netto;
+        ein Bruttobetrag wird mit {UST_SATZ} % Umsatzsteuer herausgerechnet. Lieferstellen ohne neuen Arbeitspreis
+        kommen nicht ins Angebot.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <Select label="Produkt" value={e.produkt} onChange={(x) => setE({ ...e, produkt: x })} options={PRODUKTE} />
+        <Feld label="Angebot gültig bis" type="date" value={e.gueltigBis} onChange={(x) => setE({ ...e, gueltigBis: x })} />
+      </div>
+
+      {ls.map((l, i) => {
+        const d = e.stellen[l.id], r = schnellRechnung(l, d), f = fehler[l.id];
+        const farbe = l.medium === "strom" ? C.strom : C.gas;
+        return (
+          <div key={l.id} className="rounded p-3 space-y-3" style={{ background: "#fff", border: "1px solid " + C.line, borderLeft: "3px solid " + farbe }}>
+            <div className="flex items-center gap-2 text-sm">
+              <MediumIcon medium={l.medium} />
+              <span>{l.bezeichnung || (l.medium === "strom" ? "Strom" : "Erdgas")}</span>
+              <span className="text-xs" style={{ color: C.muted }}>{l.maloId ? "MaLo " + l.maloId : ""}</span>
+            </div>
+
+            <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>1 · Bisherige Abrechnung</div>
+            <div className="grid grid-cols-2 gap-3">
+              <Feld label="Bisheriger Versorger" value={d.altVersorger} onChange={(x) => setS(l.id, "altVersorger", x)} breit />
+              <Feld label="Abrechnung von" type="date" value={d.von} onChange={(x) => setS(l.id, "von", x)} fehler={f.von} />
+              <Feld label="Abrechnung bis" type="date" value={d.bis} onChange={(x) => setBis(l.id, x)} fehler={f.bis} />
+              <Feld label="Verbrauch laut Abrechnung (kWh)" value={d.verbrauch} onChange={(x) => setS(l.id, "verbrauch", x)} fehler={f.verbrauch} breit />
+              <Feld label="Rechnungsbetrag (€)" value={d.betrag} onChange={(x) => setS(l.id, "betrag", x)} fehler={f.betrag} />
+              <div>
+                <span className="block text-xs mb-1" style={{ color: C.muted }}>Betrag ist</span>
+                <div className="flex gap-2">
+                  {[[false, "netto"], [true, "brutto"]].map(([w, t]) => (
+                    <button key={t} type="button" onClick={() => setS(l.id, "brutto", w)} className="flex-1 px-3 py-2 rounded text-sm"
+                      style={d.brutto === w ? { background: C.ink, color: "#fff" } : { background: "#fff", color: C.text, border: "1px solid " + C.line }}>{t}</button>
+                  ))}
+                </div>
+              </div>
+              <Feld label="Grundpreis bisher (€/Jahr), freiwillig" value={d.altGrund} onChange={(x) => setS(l.id, "altGrund", x)} />
+              <Select label="Abrechnung aus dem Jahr" value={d.jahr} onChange={(x) => setS(l.id, "jahr", x)}
+                options={[{ value: "", label: "unbekannt, kein Ausgleich" }, { value: "2025", label: "2025" }, { value: "2026", label: "2026" },
+                          { value: umlagenJahr(UMLAGEN), label: umlagenJahr(UMLAGEN) + " (schon neue Umlagen)" }]} />
+            </div>
+            {r.tage > 0 && (
+              <div className="rounded p-2 text-xs space-y-0.5" style={{ background: "#F6F8FA" }}>
+                <div>Abrechnungszeitraum: {num(r.tage)} Tage</div>
+                {r.jahresverbrauch && <div>Verbrauch auf 365 Tage: <b>{num(r.jahresverbrauch)} kWh</b></div>}
+                {d.brutto && !isNaN(r.netto) && <div>Rechnungsbetrag netto: {num(r.netto, 2)} €</div>}
+                {r.alt && <div>Arbeitspreis bisher laut Abrechnung: <b>{num(r.alt.arbeit, 4)} ct/kWh</b>{r.alt.grundpreis ? " (ohne anteiligen Grundpreis)" : " (inklusive Grundpreis)"}</div>}
+                {r.aus && <div style={{ color: C.strom }}>Umlagen {r.aus.jahr}: {num(r.aus.alt, 3)}, {r.aus.ziel}: {num(r.aus.neu, 3)} ct/kWh →
+                  bisheriger Arbeitspreis mit Umlagen {r.aus.ziel}: <b>{num(r.altArbeit, 4)} ct/kWh</b></div>}
+              </div>
+            )}
+            {r.jahresverbrauch && (
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-0.5" checked={d.uebernehmen} onChange={(x) => setS(l.id, "uebernehmen", x.target.checked)} />
+                <span>{num(r.jahresverbrauch)} kWh als Jahresverbrauch der Lieferstelle übernehmen
+                  <span className="block text-xs" style={{ color: C.muted }}>bisher eingetragen: {l.verbrauch ? num(zahlLesen(l.verbrauch)) + " kWh" : "nichts"}</span></span>
+              </label>
+            )}
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>2 · Neuer Versorger</div>
+              {i > 0 && (
+                <button type="button" className="text-xs underline" style={{ color: C.strom }}
+                  onClick={() => uebernehmenVon(l.id, ls[i - 1].id)}>wie vorige Lieferstelle</button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Feld label="Neuer Versorger" value={d.versorger} onChange={(x) => setS(l.id, "versorger", x)} fehler={f.versorger} breit />
+              <Feld label="Lieferbeginn" type="date" value={d.lieferbeginn} onChange={(x) => setS(l.id, "lieferbeginn", x)} fehler={f.lieferbeginn} />
+              <Feld label="Lieferende" type="date" value={d.lieferende} onChange={(x) => setS(l.id, "lieferende", x)} fehler={f.lieferende} />
+              <Feld label="Arbeitspreis inkl. Aufschlag (ct/kWh)" value={d.arbeit} onChange={(x) => setS(l.id, "arbeit", x)} fehler={f.arbeit} />
+              <Feld label="Grundpreis neu (€/Jahr), freiwillig" value={d.grund} onChange={(x) => setS(l.id, "grund", x)} />
+              <Feld label="Aufschlag für den Vertriebspartner (ct/kWh)" value={d.aufschlag} onChange={(x) => setS(l.id, "aufschlag", x)} fehler={f.aufschlag} />
+              <Feld label="Tatsächlicher Aufschlag (ct/kWh), sieht der Vertrieb nicht" value={d.aufschlagEcht}
+                onChange={(x) => setS(l.id, "aufschlagEcht", x)} placeholder="leer = wie links" />
+            </div>
+            {d.lieferbeginn && d.lieferende && d.lieferende > d.lieferbeginn && (
+              <p className="text-xs" style={{ color: C.muted }}>Laufzeit {num(monateZwischen(d.lieferbeginn, d.lieferende) || 0)} Monate.</p>
+            )}
+            {r.kostenNeu != null && (
+              <div className="rounded p-2 text-xs space-y-0.5" style={{ background: r.ersparnis != null && r.ersparnis < 0 ? "#FDF1F0" : "#EEF6E8" }}>
+                <div>Bei {num(r.menge)} kWh im Jahr: bisher {r.kostenAlt != null ? eur(r.kostenAlt) : "–"}, neu {eur(r.kostenNeu)}</div>
+                {r.ersparnis != null && <div><b>{r.ersparnis >= 0 ? "Ersparnis " + eur(r.ersparnis) : "Mehrkosten " + eur(-r.ersparnis)} pro Jahr</b>
+                  {r.altArbeit ? " (" + num(r.altArbeit - zahlLesen(d.arbeit), 4) + " ct/kWh)" : ""}</div>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {summe.n > 1 && (
+        <p className="text-sm">Zusammen: bisher {eur(summe.alt)}, neu {eur(summe.neu)} →{" "}
+          <b>{summe.alt - summe.neu >= 0 ? "Ersparnis " + eur(summe.alt - summe.neu) : "Mehrkosten " + eur(summe.neu - summe.alt)} pro Jahr</b></p>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <Btn icon={FileText} onClick={erzeugen} disabled={!!erzeugt}>{erzeugt ? "Angebot wird erzeugt …" : "Angebot erzeugen"}</Btn>
+        <Btn icon={Send} onClick={onSenden} disabled={!bereit || !!erzeugt}>Angebot an Vertriebspartner senden</Btn>
+      </div>
+      <p className="text-xs" style={{ color: C.muted }}>
+        „Angebot erzeugen“ legt das Angebot mit Vergleich zum bisherigen Versorger an und zeigt es gleich an.
+        Vollmacht, Dienstleistungsvertrag oder weitere Varianten:{" "}
+        <button type="button" className="underline" onClick={onAusfuehrlich}>in der ausführlichen Maske</button> ergänzen, dort bleibt alles erhalten.
+      </p>
+    </div>
+  );
+}
+
 function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUpdate,
                  onBearbeiten, onVerlaengern, onNotieren, tippgeber, beschaffung, setBeschaffung, onBeschaffung, onLoeschen }) {
   /* Kalkulation: gesendetes Angebot wieder öffnen und neu senden */
@@ -1334,14 +1588,15 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
     catch (e) { alert("Die Individualanfrage konnte nicht erstellt werden: " + ((e && e.message) || e)); }
     setPaketLaeuft(false);
   };
-  const angebotErzeugen = async (v, mitVergleich = true) => {
+  const angebotErzeugen = async (v, mitVergleich = true, neu = {}) => {
+    const aA = neu.a || a, vorvA = neu.vorv || vorv;
     setErzeugt(v.id + (mitVergleich ? ":mit" : ":ohne"));
     try {
       const vu = v.umlagen || JSON.parse(JSON.stringify({ strom: UMLAGEN.strom, gas: UMLAGEN.gas, teile: UMLAGEN.teile || null,
         jahr: umlagenJahr(UMLAGEN), vorjahre: umlagenVorjahre(UMLAGEN) }));
       if (!v.umlagen) setVar(v.id, "umlagen", vu);
-      const pdf = await egcAngebotPdf(a, { ...v, umlagen: vu },
-        { mitarbeiter, vorversorger: mitVergleich ? vorv : {}, spotVorversorger: vorv, vollmachtBemerkung: vmBemerkung, smartmeter: sm });
+      const pdf = await egcAngebotPdf(aA, { ...v, umlagen: vu },
+        { mitarbeiter, vorversorger: mitVergleich ? vorvA : {}, spotVorversorger: vorvA, vollmachtBemerkung: vmBemerkung, smartmeter: sm });
       setVar(v.id, "angebot", pdf);
       setVar(v.id, "angebotMitVergleich", mitVergleich);
       /* gleich anzeigen, damit die Kalkulation es prüfen kann */
@@ -1356,6 +1611,26 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
     setVars(vars.map((x) => x.id === id
       ? { ...x, preise: { ...x.preise, [lid]: { ...(x.preise[lid] || {}), [art]: v } } } : x));
   const varLoeschen = (id) => setVars(vars.filter((x) => x.id !== id));
+
+  /* Schnell kalkulieren: Variante übernehmen, Vorversorger und Jahresverbrauch setzen, Angebot erzeugen */
+  const schnellErzeugen = (v, vorvNeu, lieferstellen) => {
+    const andere = vars.filter((x) => x.id !== v.id && !x.schnell);
+    const leer = (x) => !x.angebot && !x.individualangebot && !Object.values(x.preise || {}).some((p) => hatWertK(p && p.arbeit));
+    let behalten = andere.filter((x) => !leer(x));
+    if (behalten.length && !confirm(behalten.length === 1
+      ? "Es gibt schon eine ausführlich kalkulierte Variante. Soll sie neben der Schnellkalkulation erhalten bleiben? (Abbrechen = entfernen)"
+      : "Es gibt schon " + behalten.length + " ausführlich kalkulierte Varianten. Sollen sie neben der Schnellkalkulation erhalten bleiben? (Abbrechen = entfernen)")) behalten = [];
+    setVars([v, ...behalten]);
+    setVorv(vorvNeu);
+    let aNeu = a;
+    const geaendert = lieferstellen.filter((l, i) => l !== a.lieferstellen[i]);
+    if (geaendert.length) {
+      aNeu = { ...a, lieferstellen, verlauf: [...a.verlauf, { d: heute(), w: user.name,
+        t: "Jahresverbrauch aus der Abrechnung auf 365 Tage hochgerechnet: " + geaendert.map((l) => (l.bezeichnung || "Lieferstelle") + " " + num(zahlLesen(l.verbrauch)) + " kWh").join(", ") }] };
+      onUpdate(aNeu);
+    }
+    angebotErzeugen(v, true, { a: aNeu, vorv: vorvNeu });
+  };
 
   const bereit = vars.length > 0 && vars.every((v) => v.angebot || v.individualangebot);
 
@@ -2097,6 +2372,9 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
               )}
 
               <div className="flex flex-wrap gap-2 mb-5">
+                <Btn variante={modus === "schnell" ? "primär" : "hell"} onClick={() => setModus("schnell")} icon={Zap}>
+                  Schnell kalkulieren
+                </Btn>
                 <Btn variante={modus === "kalk" ? "primär" : "hell"} onClick={() => setModus("kalk")} icon={Calculator}>
                   Angebot kalkulieren
                 </Btn>
@@ -2107,6 +2385,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                   Rücksprache Geschäftsführung
                 </Btn>
               </div>
+
+              {modus === "schnell" && (
+                <SchnellKalkulation a={a} vars={vars} vorv={vorv} onErzeugen={schnellErzeugen} erzeugt={erzeugt}
+                  onSenden={angebotSenden} bereit={bereit} onAusfuehrlich={() => setModus("kalk")} />
+              )}
 
               {modus === "kalk" && (
                 <div className="space-y-5">
@@ -2178,8 +2461,11 @@ function Detail({ a, user, mitarbeiter, versorger, alleAnfragen, onZurueck, onUp
                                   onChange={(x) => setVorvFeld(l.id, "von", x)} />
                                 <Feld label="Abrechnung bis" type="date" value={vv.bis || ""}
                                   onChange={(x) => setVorvFeld(l.id, "bis", x)} />
-                                <Feld label="Rechnungsbetrag netto (€)" value={vv.betrag || ""}
+                                <Feld label="Rechnungsbetrag (€)" value={vv.betrag || ""}
                                   onChange={(x) => setVorvFeld(l.id, "betrag", x)} />
+                                <Select label="Betrag ist" value={vv.brutto ? "brutto" : "netto"}
+                                  onChange={(x) => setVorvFeld(l.id, "brutto", x === "brutto")}
+                                  options={[{ value: "netto", label: "netto" }, { value: "brutto", label: "brutto (" + UST_SATZ + " % USt. werden herausgerechnet)" }]} />
                                 <Feld label="Verbrauch laut Rechnung (kWh)" value={vv.verbrauch || ""}
                                   placeholder={l.verbrauch ? "z. B. " + num(zahlLesen(l.verbrauch) || 0) : ""}
                                   onChange={(x) => setVorvFeld(l.id, "verbrauch", x)} />
