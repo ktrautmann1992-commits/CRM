@@ -15,12 +15,13 @@ import {
   sb, laden, abgleichen, einstellungenLaden, einstellungSpeichern, liveAbgleich, sammlungVon,
   schonBekannt, anmelden, abmelden, meineId, einladungPruefen, einladungEinloesen, dateiInhalt, passwortAendern,
   passwortVergessen, zugangSetzen, kundenangebot, kundenlinksLaden,
+  interneUnterlageSchluessel,
 } from "./datenbank.js";
 
 import {
   ABLAGE_ARTEN, ABLAGE_BEREICHE, Avatar, Btn, C, Datei, DateiBild, EmailSignatur,
   Feld, Kunden, LEAD_STATUS, Leads, LinkKopieren, PartnerStatus, Select, StammdatenFormular,
-  StrukturStatus, UNTERLAGEN_FEST, Unterschrift, bildLaden, blankoAuftragPdf, dateiLaden, dateiOeffnen, datum,
+  StrukturStatus, UNTERLAGEN_FEST, UNTERLAGEN_INTERN, Unterschrift, bildLaden, blankoAuftragPdf, dateiLaden, dateiOeffnen, datum,
   eigenerSatzVon, heute, leadSpalte, leereStammdaten, leererEintrag, num, stammdatenLuecken, stammdatenNachreichen,
   statusVon, uid, visitenkartenDaten,
 } from "./App.jsx";
@@ -329,8 +330,25 @@ function Strukturanfragen({ anfragen, setAnfragen, user }) {
 }
 
 /* Schulungen, Dokumente und Marketingunterlagen */
+/* Interne Unterlage öffnen: verschlüsselte Datei laden, Schlüssel vom Server holen (nur Kalkulation, GF), entschlüsseln */
+async function interneUnterlage(s) {
+  const schluessel = await interneUnterlageSchluessel();
+  if (!schluessel) throw new Error("Kein Schlüssel erhalten.");
+  const antwort = await fetch(s.pfad + s.datei);
+  if (!antwort.ok) throw new Error("Datei nicht gefunden.");
+  const roh = new Uint8Array(await antwort.arrayBuffer());
+  const k = await crypto.subtle.importKey("raw", Uint8Array.from(atob(schluessel), (c) => c.charCodeAt(0)), "AES-GCM", false, ["decrypt"]);
+  const klar = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: roh.slice(0, 12) }, k, roh.slice(12)));
+  let bin = "";
+  for (let i = 0; i < klar.length; i += 0x8000) bin += String.fromCharCode.apply(null, klar.subarray(i, i + 0x8000));
+  return { name: s.name, typ: "application/pdf", groesse: klar.length, url: "data:application/pdf;base64," + btoa(bin) };
+}
+
 function Ablage({ ablage, setAblage, user, start }) {
-  const [bereich, setBereich] = useState(start || "dokumente");
+  /* Bereiche mit Rollenvorgabe (Intern) nur für diese Rollen */
+  const bereiche = ABLAGE_BEREICHE.filter((b) => !b.rollen || b.rollen.includes(user.rolle));
+  const [bereich, setBereich] = useState(start && bereiche.some((b) => b.id === start) ? start : "dokumente");
+  const [internLaeuft, setInternLaeuft] = useState("");
   const [entwurf, setEntwurf] = useState(null);
   const darfPflegen = ["Leitung Vertrieb", "Geschäftsführung"].includes(user.rolle);
   const aktuell = ABLAGE_BEREICHE.find((b) => b.id === bereich);
@@ -355,7 +373,7 @@ function Ablage({ ablage, setAblage, user, start }) {
           <div className="grid sm:grid-cols-2 gap-4">
             <Feld label="Titel" value={entwurf.titel} onChange={(v) => setF("titel", v)} breit />
             <Select label="Bereich" value={entwurf.bereich} onChange={(v) => setF("bereich", v)}
-              options={ABLAGE_BEREICHE.map((b) => ({ value: b.id, label: b.label }))} />
+              options={ABLAGE_BEREICHE.filter((b) => !b.rollen).map((b) => ({ value: b.id, label: b.label }))} />
             <Select label="Art" value={entwurf.art} onChange={(v) => setF("art", v)} options={ABLAGE_ARTEN} />
           </div>
           <label className="block">
@@ -382,7 +400,7 @@ function Ablage({ ablage, setAblage, user, start }) {
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex gap-1 flex-wrap">
-          {ABLAGE_BEREICHE.map((b) => (
+          {bereiche.map((b) => (
             <button key={b.id} onClick={() => setBereich(b.id)}
               className="px-3 py-1.5 text-sm rounded"
               style={{
@@ -390,7 +408,7 @@ function Ablage({ ablage, setAblage, user, start }) {
                 color: bereich === b.id ? "#fff" : C.muted,
                 border: "1px solid " + (bereich === b.id ? C.ink : C.line),
               }}>
-              {b.label} <span style={{ opacity: 0.6 }}>{ablage.filter((d) => d.bereich === b.id).length + (UNTERLAGEN_FEST[b.id] || []).length}</span>
+              {b.label} <span style={{ opacity: 0.6 }}>{b.id === "intern" ? UNTERLAGEN_INTERN.length : ablage.filter((d) => d.bereich === b.id).length + (UNTERLAGEN_FEST[b.id] || []).length}</span>
             </button>
           ))}
         </div>
@@ -452,6 +470,38 @@ function Ablage({ ablage, setAblage, user, start }) {
       )}
 
       {bereich === "marketing" && VISITENKARTE_ROLLEN.includes(user.rolle) && <EmailSignatur m={user} />}
+
+      {bereich === "intern" && bereiche.some((b) => b.id === "intern") && (
+        <div className="grid sm:grid-cols-2 gap-3 mb-4">
+          {UNTERLAGEN_INTERN.map((s) => (
+            <div key={s.datei} className="rounded p-4 flex flex-col" style={{ background: C.card, border: "1px solid " + C.line }}>
+              <div className="flex items-start gap-3">
+                <span className="rounded p-2" style={{ background: "#F6F8FA" }}><FileText size={18} style={{ color: C.gruen }} /></span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm">{s.titel}</div>
+                  <div className="text-xs" style={{ color: C.muted }}>PDF · {s.seiten} Seiten · nur Kalkulation und Geschäftsführung</div>
+                </div>
+              </div>
+              <p className="text-sm mt-3 flex-1" style={{ color: C.muted }}>{s.text}</p>
+              <div className="flex items-center gap-2 mt-4 pt-3" style={{ borderTop: "1px solid " + C.line }}>
+                {[["oeffnen", "Öffnen"], ["speichern", "Speichern"]].map(([art, text]) => (
+                  <button key={art} disabled={!!internLaeuft}
+                    onClick={async () => {
+                      setInternLaeuft(art);
+                      try { const d = await interneUnterlage(s); art === "oeffnen" ? dateiOeffnen(d) : dateiLaden(d); }
+                      catch (e) { alert("Die Unterlage konnte nicht geöffnet werden: " + ((e && e.message) || e)); }
+                      setInternLaeuft("");
+                    }}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded"
+                    style={art === "oeffnen" ? { background: C.ink, color: "#fff" } : { border: "1px solid " + C.line, color: C.text }}>
+                    <FileText size={14} /> {internLaeuft === art ? "wird geladen …" : text}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {UNTERLAGEN_FEST[bereich] && (
         <div className="grid sm:grid-cols-2 gap-3 mb-4">
@@ -521,7 +571,7 @@ function Ablage({ ablage, setAblage, user, start }) {
         );
       })()}
 
-      {drin.length === 0 && UNTERLAGEN_FEST[bereich] ? null : drin.length === 0 ? (
+      {drin.length === 0 && (UNTERLAGEN_FEST[bereich] || bereich === "intern") ? null : drin.length === 0 ? (
         <div className="rounded p-8 text-center text-sm"
              style={{ border: "1px dashed " + C.line, color: C.muted }}>
           {bereich === "schulung"

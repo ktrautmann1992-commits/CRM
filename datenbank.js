@@ -502,6 +502,13 @@ export async function kundenangebot(body) {
   return data;
 }
 
+/* Schlüssel für interne Unterlagen (Server-Funktion „interne-unterlage“): nur Kalkulation und Geschäftsführung */
+export async function interneUnterlageSchluessel() {
+  const { data, error } = await sb.functions.invoke("interne-unterlage", { body: {} });
+  if (error) throw new Error(await fehlertext(error));
+  return data && data.schluessel;
+}
+
 /* Versandte Links eines Vorgangs: geöffnet, angesehen, angenommen (nur lesen) */
 export async function kundenlinksLaden(anfrageId) {
   const { data, error } = await sb.from("kundenlinks").select("id, anfrage_id, daten, erstellt")

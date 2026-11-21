@@ -114,7 +114,7 @@ def inhalt(o):
     f += kopfzeile("SCHRITT 1", "Anfrage öffnen und prüfen")
     f.append(P("Unter <b>Neue Anfragen</b> den Vorgang öffnen. Oben stehen der nächste Schritt und die Knöpfe für die Bearbeitung, "
                "rechts Kunde und Angebotswunsch des Vertriebs.", "intro"))
-    f.append(bild(o, "02_vorgang.png", max_hoehe=250))
+    f.append(bild(o, "02_vorgang.jpg", max_hoehe=250))
     f.append(unterschrift("Vorgang aus Sicht der Kalkulation (Demodaten)."))
     f.append(P("Was Sie hier tun können", "h2"))
     f.append(tabelle(["Knopf oder Kasten", "Wofür"], [
@@ -134,7 +134,7 @@ def inhalt(o):
     f += kopfzeile("SCHRITT 1", "Unterlagen nachfordern")
     f.append(P("Fehlt etwas, tippen Sie auf <b>Unterlagen nachfordern</b>, haken an, was fehlt, und senden die Anfrage zurück. "
                "Der Vertriebspartner sieht die Liste als Klärfall oben auf seiner Startseite.", "intro"))
-    f.append(bild(o, "03_nachfordern.png", breite=BREITE * 0.75))
+    f.append(bild(o, "03_nachfordern.jpg", breite=BREITE * 0.75))
     f.append(unterschrift("Mit „Sonstiges“ fordern Sie alles an, was nicht in der Liste steht. Der Text erscheint als eigener Punkt."))
     f.append(P("Gut zu wissen", "h2"))
     f.append(liste(["Pflicht ist die <b>Marktlokation (MaLo)</b>. Die Zählernummer ist kein Pflichtfeld.",
@@ -146,7 +146,7 @@ def inhalt(o):
     f += kopfzeile("SCHRITT 2", "Bisheriger Versorger und Umlagen")
     f.append(P("Nach <b>Angebot kalkulieren</b> tragen Sie zuerst je Lieferstelle den bisherigen Tarif ein. Er ist die Grundlage für den "
                "Vergleich im Angebot und für den Spotmarkt-Vergleich.", "intro"))
-    f.append(bild(o, "04_bisheriger_versorger.png", breite=BREITE * 0.62, max_hoehe=420))
+    f.append(bild(o, "04_bisheriger_versorger.jpg", breite=BREITE * 0.62, max_hoehe=420))
     f.append(liste(["<b>Preis ermitteln:</b> Arbeitspreis und Grundpreis direkt eintragen oder aus Rechnungsbetrag, Verbrauch und Zeitraum berechnen lassen.",
                     "<b>Abrechnung aus dem Jahr:</b> Ist die Rechnung älter, gleicht das Portal den bisherigen Arbeitspreis um die gestiegenen Umlagen aus und weist das im Angebot aus.",
                     "<b>Umlagen:</b> Die staatlichen Umlagen und Abgaben pflegt die Kalkulation einmal im Kasten darüber. Sie gelten ab dann für jede neue Kalkulation."]))
@@ -156,7 +156,7 @@ def inhalt(o):
     f += kopfzeile("SCHRITT 3", "Variante anlegen")
     f.append(P("Jede Variante ist ein eigenes Angebot, zum Beispiel Festpreis 24 Monate und Spotmarkt 12 Monate. "
                "Mit <b>Weitere Variante hinzufügen</b> legen Sie mehrere an.", "intro"))
-    f.append(bild(o, "05_variante.png", breite=BREITE * 0.62, max_hoehe=380))
+    f.append(bild(o, "05_variante.jpg", breite=BREITE * 0.62, max_hoehe=380))
     f.append(tabelle(["Feld", "Bedeutung"], [
         ["Gilt für", "Strom, Erdgas oder beides. Darunter einzelne Lieferstellen an- oder abwählen: Die Variante gilt dann nur für diese."],
         ["Neuer Versorger", "Versorger der Variante (je Lieferstelle abweichend möglich)"],
@@ -171,7 +171,7 @@ def inhalt(o):
     f += kopfzeile("SCHRITT 4", "Preise je Lieferstelle")
     f.append(P("Je Lieferstelle tragen Sie die Preise des neuen Versorgers netto ein. Preise in ct/kWh mit bis zu vier Nachkommastellen, "
                "so stehen sie auch im Angebot.", "intro"))
-    f.append(bild(o, "06_preise.png", breite=BREITE * 0.62, max_hoehe=330))
+    f.append(bild(o, "06_preise.jpg", breite=BREITE * 0.62, max_hoehe=330))
     f.append(tabelle(["Feld", "Eintrag"], [
         ["Arbeitspreis (ct/kWh)", "Gesamter Arbeitspreis des Versorgers"],
         ["davon Energiepreis (ct/kWh)", "Reiner Energieanteil"],
@@ -190,12 +190,12 @@ def inhalt(o):
     f += kopfzeile("SCHRITT 4", "Abweichende Werte je Lieferstelle")
     f.append(P("Jede Lieferstelle kann, egal ob Strom oder Erdgas, einen eigenen Versorger, Lieferbeginn, eine eigene Laufzeit und eigene "
                "Aufschläge bekommen. Leer gilt der Wert der Variante.", "intro"))
-    f.append(bild(o, "07_je_lieferstelle.png", breite=BREITE * 0.6, max_hoehe=430))
+    f.append(bild(o, "07_je_lieferstelle.jpg", breite=BREITE * 0.6, max_hoehe=430))
     f.append(unterschrift("Beispiel: Erdgas ohne Grundpreis, mit Netzentgelten laut Versorger und eigenem Versorger, Beginn, 12 Monaten und eigenen Aufschlägen. "
                           "Darunter steht, was für diese Lieferstelle gilt."))
     f.append(PageBreak())
     f += kopfzeile("SCHRITT 4", "So rechnet die Provision")
-    f.append(bild(o, "08_provision.png", breite=BREITE * 0.75))
+    f.append(bild(o, "08_provision.jpg", breite=BREITE * 0.75))
     f.append(liste(["Provision je Lieferstelle = Verbrauch × Aufschlag. Die Variante zählt alle ihre Lieferstellen zusammen.",
                     "Läuft eine Lieferstelle länger, zählt sie in den späteren Lieferjahren allein. Der Kasten zeigt dann „über bis zu 3 Lieferjahre (je Lieferstelle)“.",
                     "Sie sehen den Anteil des Vertriebspartners und beide Aufschläge, nicht die Aufteilung in der Struktur."]))
@@ -205,7 +205,7 @@ def inhalt(o):
     f += kopfzeile("SCHRITT 4", "Spotmarkt-Vergleich 2025")
     f.append(P("Steht das Beschaffungsmodell auf <b>Spotmarkt</b>, erscheint der Kasten Spotmarkt-Vergleich 2025. Er zeigt, was der Kunde "
                "2025 am Spotmarkt bezahlt hätte, und kommt als eigene Seite ins Angebot.", "intro"))
-    f.append(bild(o, "11_spot.png", breite=BREITE * 0.6, max_hoehe=360))
+    f.append(bild(o, "11_spot.jpg", breite=BREITE * 0.6, max_hoehe=360))
     f.append(tabelle(["Bestandteil", "Woher"], [
         ["Ø Börsenpreis 2025", "fest im Portal: Strom 8,9322 ct/kWh, Erdgas 3,7178 ct/kWh (Mittel aller Stunden bzw. Tage 2025)"],
         ["+ Aufschlag auf den Börsenpreis", "tragen Sie ein, z. B. 1 ct"],
@@ -223,12 +223,12 @@ def inhalt(o):
                     "<b>Hinweis im Angebot:</b> je Variante, steht im PDF und sieht der Kunde.",
                     "<b>Dienstleistungsvertrag:</b> anhaken, wenn er benötigt wird; er geht mit dem Angebot an den Vertriebspartner."]))
     f.append(P("Angebot erzeugen", "h2"))
-    f.append(bild(o, "09_angebot_erzeugen.png", breite=BREITE * 0.75))
+    f.append(bild(o, "09_angebot_erzeugen.jpg", breite=BREITE * 0.75))
     f.append(liste(["<b>Mit Vorversorger-Vergleich:</b> Das Angebot stellt den bisherigen Tarif dem neuen gegenüber.",
                     "<b>Ohne Vorversorger-Vergleich:</b> nur unser Angebot.",
                     "Das PDF wird sofort angezeigt. Zum Nachbessern Preise ändern und neu erzeugen.",
                     "Im Service- & Beratungsauftrag stehen genau die Lieferstellen der Variante."]))
-    f.append(bild(o, "10_senden.png", breite=BREITE * 0.6))
+    f.append(bild(o, "10_senden.jpg", breite=BREITE * 0.6))
     f.append(P("Jede Variante braucht ein Angebot: erzeugt, als PDF angehängt oder als Individualangebot vom Versorger. "
                "Dann <b>Angebot an Vertriebspartner senden</b>. Er bekommt eine E-Mail.", "text"))
     f.append(PageBreak())
@@ -239,7 +239,7 @@ def inhalt(o):
     f.append(liste(["Unterlagen prüfen: unterschriebenes Angebot und Service- & Beratungsauftrag.",
                     "Beim Versorger einreichen und im Vorgang „Auftrag an den Versorger übermittelt“ tippen. Der Vorgang wandert in die Versorgerbestätigung.",
                     "Kommt die Antwort des Versorgers: <b>Auftrag bestätigt</b>, <b>Klärfall</b> oder <b>Abgelehnt</b> erfassen."]))
-    f.append(bild(o, "12_bestaetigung.png", breite=BREITE * 0.55, max_hoehe=420))
+    f.append(bild(o, "12_bestaetigung.jpg", breite=BREITE * 0.55, max_hoehe=420))
     f.append(unterschrift("Auftrag bestätigt: Versorger, je Lieferstelle bestätigte kWh, Lieferbeginn und -ende, auf Wunsch eigener Versorger und eigene Aufschläge; "
                           "darunter die Aufschläge für alle übrigen Lieferstellen und eine Bonuszahlung des Versorgers."))
     f.append(PageBreak())

@@ -252,6 +252,16 @@ const ABLAGE_BEREICHE = [
   { id: "schulung", label: "Schulungen", text: "Unterlagen und Trainings zur Einarbeitung und Weiterbildung." },
   { id: "dokumente", label: "Dokumente", text: "Vollmachten, Formulare und Vorlagen für den Kundentermin." },
   { id: "marketing", label: "Marketing", text: "Flyer und Verkaufsunterlagen zum Weitergeben an Kunden." },
+  /* nur Kalkulation und Geschäftsführung; die Dateien liegen verschlüsselt, den Schlüssel gibt der Server nur diesen Rollen */
+  { id: "intern", label: "Intern", text: "Anleitungen für Kalkulation und Geschäftsführung. Nur für diese Rollen sichtbar.",
+    rollen: ["Kalkulation", "Geschäftsführung"] },
+];
+/* Interne Unterlagen (verschlüsselt in unterlagen/intern). Bei neuer Fassung INTERN_STAND hier und in build.mjs erhöhen. */
+const INTERN_STAND = "1";
+const UNTERLAGEN_INTERN = [
+  { datei: "EGC_Anleitung_Kalkulation.bin", name: "EGC_Anleitung_Kalkulation.pdf", titel: "Anleitung Kalkulation", seiten: 15,
+    pfad: "/assets/intern-" + INTERN_STAND + "/",
+    text: "So arbeitet die Kalkulation im Portal: Anfrage prüfen, Varianten, Preise und Aufschläge je Lieferstelle, Spotmarkt-Vergleich, Versorgerbestätigung." },
 ];
 
 const ABLAGE_ARTEN = ["PDF", "PowerPoint", "Word", "Excel", "Video", "Online-Schulung", "Sonstiges"];
@@ -405,7 +415,7 @@ const stammdatenLuecken = (sd, angestellt = false) => {
   return f;
 };
 
-const VERSION = "v5.43 · 20.11.2026 · Tatsächlicher Aufschlag in eigener geschützter Tabelle (nur Kalkulation, Geschäftsführung, Finanzbuchhaltung), Netzentgelte laut Versorger als freiwilliges Feld im Angebot, Spotmarkt-Vergleich 2025 im Angebot, Firmenanteil 80 %";
+const VERSION = "v5.43 · 21.11.2026 · Tatsächlicher Aufschlag in eigener geschützter Tabelle (nur Kalkulation, Geschäftsführung, Finanzbuchhaltung), Netzentgelte laut Versorger als freiwilliges Feld im Angebot, Spotmarkt-Vergleich 2025 im Angebot, Firmenanteil 80 %, Anleitung Kalkulation unter Unterlagen → Intern (nur Kalkulation und GF)";
 /* angezeigt werden nur Versionsnummer und Datum, nicht die Beschreibung */
 const VERSION_ANZEIGE = VERSION.split(" · ").slice(0, 2).join(" · ");
 
@@ -8922,6 +8932,7 @@ export function PortalApp({ pruefung } = {}) {
 
 /* Gemeinsame Bausteine für die ausgelagerten Programmteile */
 export {
+  UNTERLAGEN_INTERN,
   SPOT_2025, spotVergleich,
   vertriebsprovision, mitVerdecktemAufschlag,
   VERTRIEB_BEARBEITBAR,

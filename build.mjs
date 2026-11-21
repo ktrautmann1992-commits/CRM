@@ -71,6 +71,10 @@ await cp("unterlagen/dokumente", "dist/assets/dokumente-" + DOKUMENTE_STAND, { r
 /* Feste Marketingunterlagen (Leitfaden Energieeinkauf). Bei neuer Fassung MARKETING_STAND hier und in App.jsx erhöhen. */
 const MARKETING_STAND = "2";
 await cp("unterlagen/marketing", "dist/assets/marketing-" + MARKETING_STAND, { recursive: true });
+/* Interne Unterlagen, verschlüsselt (Schlüssel nur für Kalkulation und GF über die Server-Funktion „interne-unterlage“).
+   Bei neuer Fassung INTERN_STAND hier und in App.jsx erhöhen. */
+const INTERN_STAND = "1";
+await cp("unterlagen/intern", "dist/assets/intern-" + INTERN_STAND, { recursive: true });
 
 /* Imagebroschüre zum Versenden: Baustein, verkleinerte Bilder und Schrift, nur bei Bedarf.
    Bei Änderungen an Bildern oder Aufbau BROSCHUERE_STAND hier und in App.jsx erhöhen (Dateien werden dauerhaft zwischengespeichert). */
